@@ -14,6 +14,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 
 const execFileAsync = promisify(execFile);
 
@@ -232,4 +233,56 @@ if (scaffold?.repo_url) {
 if (issues && issues.length > 0) {
   const issue = issues[0];
   console.log(`Issue: #${issue.number} — ${issue.html_url}`);
+}
+
+// --- Create Telegram forum topic (equivalent to Telegram DM bootstrap) ---
+if (result.success && !dryRunFlag) {
+  const envPath = join(homedir(), ".openclaw", ".env");
+  const envContent = readFileSync(envPath, "utf-8");
+  const botToken = envContent.match(/TELEGRAM_BOT_TOKEN=(.+)/)?.[1]?.trim();
+  const slug = projectName ?? (scaffold?.repo_name ?? "");
+
+  if (botToken && channelId && slug) {
+    console.log("\n--- Creating Telegram forum topic ---");
+    try {
+      const topicRes = await fetch(
+        `https://api.telegram.org/bot${botToken}/createForumTopic`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: parseInt(channelId, 10),
+            name: slug,
+            icon_color: 7322096,
+          }),
+        },
+      );
+      const topicData = await topicRes.json() as { ok: boolean; result?: { message_thread_id: number } };
+      if (topicData.ok && topicData.result) {
+        const messageThreadId = topicData.result.message_thread_id;
+        console.log(`Forum topic created: thread_id=${messageThreadId}`);
+
+        // Update projects.json with messageThreadId
+        const projectsPath = join(WORKSPACE_DIR, "fabrica", "projects.json");
+        const projectsData = JSON.parse(readFileSync(projectsPath, "utf-8")) as Record<string, unknown>;
+        const projects = projectsData.projects as Record<string, Record<string, unknown>>;
+        if (projects[slug]) {
+          const channels = projects[slug].channels as Array<Record<string, unknown>>;
+          if (channels) {
+            for (const ch of channels) {
+              if (ch.channel === "telegram" && ch.channelId === channelId) {
+                ch.messageThreadId = messageThreadId;
+              }
+            }
+          }
+          writeFileSync(projectsPath, JSON.stringify(projectsData, null, 2), "utf-8");
+          console.log(`projects.json updated with messageThreadId=${messageThreadId}`);
+        }
+      } else {
+        console.warn("Failed to create Telegram topic:", JSON.stringify(topicData));
+      }
+    } catch (err) {
+      console.warn("Telegram topic creation failed (non-fatal):", err);
+    }
+  }
 }
