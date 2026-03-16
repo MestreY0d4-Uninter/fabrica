@@ -62,11 +62,11 @@ export const registerStep: PipelineStep = {
         projectWorkflowConfig,
       });
       if (
-        payload.metadata.source === "telegram-dm-bootstrap" &&
+        programmaticSources.includes(payload.metadata.source ?? "") &&
         output.activeWorkflow.reviewPolicy !== "agent"
       ) {
         throw new Error(
-          `DM bootstrap registration resolved reviewPolicy="${output.activeWorkflow.reviewPolicy}" instead of "agent"`,
+          `Programmatic source "${payload.metadata.source}" registration resolved reviewPolicy="${output.activeWorkflow.reviewPolicy}" instead of "agent"`,
         );
       }
 

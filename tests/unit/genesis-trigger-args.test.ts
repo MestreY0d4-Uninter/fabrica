@@ -52,6 +52,11 @@ describe("parseGenesisArgs", () => {
     const result = parseGenesisArgs(["idea"]);
     expect(result.channelId).toBe("-1003709213169");
   });
+
+  it("extracts --answers path", () => {
+    const result = parseGenesisArgs(["idea", "--answers", "/tmp/answers.json"]);
+    expect(result.answersPath).toBe("/tmp/answers.json");
+  });
 });
 
 describe("loadAnswersFromFile", () => {
