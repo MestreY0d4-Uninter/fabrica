@@ -26,5 +26,9 @@ export function resolveTopicCreationParams(opts: {
     return { botToken, slug: opts.slug, channelId: opts.channelId, error: "Cannot create topic: project slug is empty" };
   }
 
+  if (!opts.channelId) {
+    return { botToken, slug: opts.slug, channelId: opts.channelId, error: "Cannot create topic: channel ID is empty" };
+  }
+
   return { botToken, slug: opts.slug, channelId: opts.channelId };
 }

@@ -42,6 +42,16 @@ describe("resolveTopicCreationParams", () => {
     expect(result.error).toContain("slug");
   });
 
+  it("returns error when channel ID is empty", () => {
+    const result = resolveTopicCreationParams({
+      envPath: "/tmp/test.env",
+      envContent: "TELEGRAM_BOT_TOKEN=123:abc\n",
+      slug: "my-project",
+      channelId: "",
+    });
+    expect(result.error).toContain("channel");
+  });
+
   it("trims whitespace and carriage returns from token", () => {
     const result = resolveTopicCreationParams({
       envPath: "/tmp/test.env",

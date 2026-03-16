@@ -242,7 +242,7 @@ if (result.success && !dryRunFlag) {
 
   if (topicParams.error) {
     console.warn(`Telegram topic creation skipped: ${topicParams.error}`);
-  } else if (topicParams.botToken) {
+  } else {
     console.log("\n--- Creating Telegram forum topic ---");
     try {
       const topicRes = await fetch(
@@ -253,6 +253,7 @@ if (result.success && !dryRunFlag) {
           body: JSON.stringify({
             chat_id: parseInt(topicParams.channelId, 10),
             name: `📦 ${topicParams.slug}`,
+            icon_color: 7322096,
           }),
         },
       );
