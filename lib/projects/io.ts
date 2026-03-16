@@ -86,6 +86,9 @@ export async function acquireLock(workspaceDir: string): Promise<void> {
       process.kill(lastResortPid, 0);
       lastResortPidAlive = true;
     } catch (killErr: unknown) {
+      // ESRCH: process does not exist — truly dead
+      // EPERM: process exists but different UID — treat as alive (conservative)
+      // Same logic as in the retry loop above to ensure consistent PID liveness detection
       lastResortPidAlive = (killErr as NodeJS.ErrnoException).code !== "ESRCH";
     }
   }

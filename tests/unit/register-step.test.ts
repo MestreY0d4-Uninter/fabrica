@@ -277,6 +277,78 @@ describe("registerStep", () => {
     );
   });
 
+  it("applies agent reviewPolicy for genesis-trigger-script source without topic creation", async () => {
+    const payload: GenesisPayload = {
+      session_id: "sid-5",
+      timestamp: new Date().toISOString(),
+      step: "scaffold",
+      raw_idea: "Example",
+      answers: {},
+      metadata: {
+        source: "genesis-trigger-script",
+        factory_change: false,
+        channel_id: "6951571380",
+      },
+      scaffold: {
+        created: true,
+        project_slug: "demo",
+        repo_url: "https://github.com/acme/demo",
+      },
+    };
+    const ctx: StepContext = {
+      workspaceDir: "/tmp/workspace",
+      homeDir: "/tmp/home",
+      log: () => {},
+      runCommand: async () => ({
+        stdout: "",
+        stderr: "",
+        exitCode: 0,
+      }),
+      runtime: {} as any,
+      config: {} as any,
+      pluginConfig: {} as any,
+    };
+
+    mockRegisterProject.mockResolvedValue({
+      success: true,
+      project: "demo",
+      projectSlug: "demo",
+      channelId: "-1003709213169",
+      messageThreadId: 502,
+      repo: "https://github.com/acme/demo",
+      repoRemote: "https://github.com/acme/demo.git",
+      baseBranch: "main",
+      deployBranch: "main",
+      labelsCreated: 10,
+      promptsScaffolded: true,
+      isNewProject: true,
+      activeWorkflow: {
+        reviewPolicy: "agent",
+        testPhase: true,
+        hint: "hint",
+      },
+      announcement: "ok",
+    });
+
+    const result = await registerStep.execute(payload, ctx);
+
+    expect(mockRegisterProject).toHaveBeenCalledWith(expect.objectContaining({
+      createProjectTopic: false,
+      projectWorkflowConfig: {
+        workflow: {
+          reviewPolicy: "agent",
+        },
+      },
+      route: {
+        channel: "telegram",
+        channelId: "6951571380",
+        messageThreadId: undefined,
+      },
+    }));
+    expect(result.metadata.channel_id).toBe("-1003709213169");
+    expect(result.metadata.message_thread_id).toBe(502);
+  });
+
   it("fails closed when project_register rejects", async () => {
     const payload: GenesisPayload = {
       session_id: "sid-4",
