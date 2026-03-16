@@ -8,7 +8,6 @@ import { migrateProject } from "./migrations.js";
 import { ensureWorkspaceMigrated, DATA_DIR } from "../setup/migrate-layout.js";
 import { isLegacySchema, migrateLegacySchema } from "./schema-migration.js";
 import type { ProjectsData, Project } from "./types.js";
-import { emptySlot } from "./slots.js";
 import { findProjectByChannelId, findProjectByRoute, findProjectsByChannelId, isForumProject, type RouteRef } from "./routes.js";
 
 
@@ -56,8 +55,10 @@ export async function acquireLock(workspaceDir: string): Promise<void> {
           try {
             process.kill(lockPid, 0); // Signal 0 = existence check only
             pidAlive = true;
-          } catch {
-            pidAlive = false;
+          } catch (killErr: unknown) {
+            // ESRCH: process does not exist — truly dead
+            // EPERM: process exists but different UID — treat as alive (conservative)
+            pidAlive = (killErr as NodeJS.ErrnoException).code !== "ESRCH";
           }
         }
 
@@ -81,12 +82,21 @@ export async function acquireLock(workspaceDir: string): Promise<void> {
 
   let lastResortPidAlive = false;
   if (lastResortPid) {
-    try { process.kill(lastResortPid, 0); lastResortPidAlive = true; } catch { /* dead */ }
+    try {
+      process.kill(lastResortPid, 0);
+      lastResortPidAlive = true;
+    } catch (killErr: unknown) {
+      lastResortPidAlive = (killErr as NodeJS.ErrnoException).code !== "ESRCH";
+    }
   }
 
   if (!lastResortPidAlive) {
     try { await fs.unlink(lock); } catch { /* ignore */ }
-    await fs.writeFile(lock, JSON.stringify({ pid: process.pid, timestamp: Date.now() }), { flag: "wx" });
+    try {
+      await fs.writeFile(lock, JSON.stringify({ pid: process.pid, timestamp: Date.now() }), { flag: "wx" });
+    } catch (writeErr: unknown) {
+      throw new Error(`Failed to acquire lock at ${lock} after timeout: ${String(writeErr)}`);
+    }
   } else {
     throw new Error(`Lock held by live PID ${lastResortPid} for >${LOCK_TIMEOUT_MS}ms — refusing to force-unlock`);
   }
