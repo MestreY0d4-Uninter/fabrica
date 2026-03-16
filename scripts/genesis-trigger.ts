@@ -15,30 +15,20 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
+import { parseGenesisArgs } from "./genesis-trigger-args.js";
 
 const execFileAsync = promisify(execFile);
 
 const WORKSPACE_DIR = join(homedir(), ".openclaw", "workspace");
 
 // --- Parse CLI args ---
-const args = process.argv.slice(2);
-const dryRunFlag = args.includes("--dry-run");
-const stackIdx = args.indexOf("--stack");
-const stackHint = stackIdx !== -1 ? args[stackIdx + 1] : undefined;
-const nameIdx = args.indexOf("--name");
-const projectName = nameIdx !== -1 ? args[nameIdx + 1] : undefined;
-const channelIdx = args.indexOf("--channel-id");
-const channelId = channelIdx !== -1 ? args[channelIdx + 1] : "-1003709213169"; // Fabrica Projects forum
-const skipIdxs = new Set<number>();
-if (stackIdx !== -1) { skipIdxs.add(stackIdx); skipIdxs.add(stackIdx + 1); }
-if (nameIdx !== -1) { skipIdxs.add(nameIdx); skipIdxs.add(nameIdx + 1); }
-if (channelIdx !== -1) { skipIdxs.add(channelIdx); skipIdxs.add(channelIdx + 1); }
-const rawIdea = args.filter((a, i) => !a.startsWith("--") && !skipIdxs.has(i)).join(" ").trim();
-
-if (!rawIdea) {
-  console.error("Usage: tsx scripts/genesis-trigger.ts \"idea text\" [--stack python-cli] [--dry-run]");
+const parsed = parseGenesisArgs(process.argv.slice(2));
+if (parsed.error) {
+  console.error(`Error: ${parsed.error}`);
+  console.error('Usage: tsx scripts/genesis-trigger.ts "idea text" [--stack python-cli] [--name slug] [--channel-id -100xxx] [--dry-run]');
   process.exit(1);
 }
+const { rawIdea, stackHint, projectName, channelId, dryRun: dryRunFlag } = parsed;
 
 // --- Build StepContext ---
 type RunCommandFn = (
