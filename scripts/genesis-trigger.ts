@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { parseGenesisArgs } from "./genesis-trigger-args.js";
+import { parseGenesisArgs, loadAnswersFromFile } from "./genesis-trigger-args.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -96,13 +96,8 @@ const stepCtx = {
   workspaceDir: WORKSPACE_DIR,
 };
 
-// --- Interview answers for the conversor de unidades project ---
-const answers = {
-  f1: "Permite ao usuario converter unidades rapidamente no terminal sem depender de sites ou calculadoras externas. Util em scripts de automacao e trabalho diario no shell.",
-  f2: "Desenvolvedor ou usuario tecnico que trabalha no terminal e precisa de conversoes rapidas de comprimento, peso e temperatura.",
-  f3: "O usuario executa: converter 100 m ft — recebe o resultado na saida padrao. Com --interactive entra em modo conversacional para varias conversoes. Saida simples e direta.",
-  f4: "Python 3.10+, sem dependencias externas (apenas stdlib). Deve funcionar via pip install. Testes com pytest.",
-};
+// --- Interview answers (configurable via --answers JSON file) ---
+const answers = loadAnswersFromFile(parsed.answersPath);
 
 const sessionId = randomUUID();
 

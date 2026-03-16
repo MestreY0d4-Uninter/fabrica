@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
+
 export type GenesisArgs = {
   rawIdea: string;
   stackHint?: string;
   projectName?: string;
   channelId: string;
+  answersPath?: string;
   dryRun: boolean;
   error?: string;
 };
@@ -12,7 +15,7 @@ const DEFAULT_CHANNEL_ID = "-1003709213169";
 export function parseGenesisArgs(args: string[]): GenesisArgs {
   const dryRun = args.includes("--dry-run");
 
-  const flagPairs = ["--stack", "--name", "--channel-id"] as const;
+  const flagPairs = ["--stack", "--name", "--channel-id", "--answers"] as const;
   const skipIdxs = new Set<number>();
 
   for (const flag of flagPairs) {
@@ -54,5 +57,19 @@ export function parseGenesisArgs(args: string[]): GenesisArgs {
     return { rawIdea, channelId: "", dryRun, error: channelError };
   }
 
-  return { rawIdea, stackHint, projectName, channelId: rawChannelId, dryRun };
+  const answersIdx = args.indexOf("--answers");
+  const answersPath = answersIdx !== -1 ? args[answersIdx + 1] : undefined;
+
+  return { rawIdea, stackHint, projectName, channelId: rawChannelId, answersPath, dryRun };
+}
+
+export function loadAnswersFromFile(path: string | undefined): Record<string, string> {
+  if (!path) return {};
+  try {
+    const content = readFileSync(path, "utf-8");
+    return JSON.parse(content) as Record<string, string>;
+  } catch {
+    console.warn(`Warning: Could not load answers from ${path}, using empty answers`);
+    return {};
+  }
 }

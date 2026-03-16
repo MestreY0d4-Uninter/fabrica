@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { parseGenesisArgs } from "../../scripts/genesis-trigger-args.js";
+import { parseGenesisArgs, loadAnswersFromFile } from "../../scripts/genesis-trigger-args.js";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 describe("parseGenesisArgs", () => {
   it("extracts raw idea from positional args", () => {
@@ -48,5 +51,29 @@ describe("parseGenesisArgs", () => {
     delete process.env.FABRICA_PROJECTS_CHANNEL_ID;
     const result = parseGenesisArgs(["idea"]);
     expect(result.channelId).toBe("-1003709213169");
+  });
+});
+
+describe("loadAnswersFromFile", () => {
+  it("returns empty object when no path provided", () => {
+    const result = loadAnswersFromFile(undefined);
+    expect(result).toEqual({});
+  });
+
+  it("loads answers from JSON file path", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "gt-answers-"));
+    const tmpPath = join(tmpDir, "answers.json");
+    writeFileSync(tmpPath, JSON.stringify({ f1: "answer1", f2: "answer2" }));
+    try {
+      const result = loadAnswersFromFile(tmpPath);
+      expect(result).toEqual({ f1: "answer1", f2: "answer2" });
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty object with warning when file does not exist", () => {
+    const result = loadAnswersFromFile("/nonexistent/answers.json");
+    expect(result).toEqual({});
   });
 });
