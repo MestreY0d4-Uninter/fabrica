@@ -5,6 +5,8 @@
  * Each step enriches the payload; the orchestrator passes it through.
  */
 import type { GenesisPayload, PipelineArtifact, PipelineStep, StepContext } from "./types.js";
+import { cleanupArtifacts } from "./lib/artifact-cleanup.js";
+import { log as auditLog } from "../audit.js";
 import { receiveStep } from "./steps/receive.js";
 import { classifyStep } from "./steps/classify.js";
 import { researchStep } from "./steps/research.js";
@@ -83,11 +85,10 @@ export async function runPipeline(
       const stepDuration = Date.now() - stepStart;
       stepsExecuted.push(step.name);
       ctx.log(`Step ${step.name} completed in ${stepDuration}ms`);
-    } catch (err: any) {
-      ctx.log(`Step ${step.name} FAILED: ${err.message}`);
+    } catch (err: unknown) {
+      ctx.log(`Step ${step.name} FAILED: ${String(err)}`);
       const failureArtifacts = deriveArtifacts(payload);
       if (failureArtifacts.length > 0) {
-        const { cleanupArtifacts } = await import("./lib/artifact-cleanup.js");
         const cleanupResults = await cleanupArtifacts(failureArtifacts, {
           log: ctx.log,
           dryRun: initialPayload.dry_run ?? false,
@@ -95,8 +96,7 @@ export async function runPipeline(
         const needsManual = cleanupResults.filter((r) => r.action === "needs_manual_cleanup");
         if (needsManual.length > 0) {
           ctx.log(`[pipeline] ${needsManual.length} artifact(s) need manual cleanup after failure`);
-          const audit = await import("../audit.js");
-          await audit.log(ctx.workspaceDir, "pipeline_orphaned_artifacts", {
+          await auditLog(ctx.workspaceDir, "pipeline_orphaned_artifacts", {
             session_id: initialPayload.session_id,
             artifacts: needsManual.map((r) => ({ type: r.artifact.type, id: r.artifact.id })),
             error: String(err),
@@ -108,7 +108,7 @@ export async function runPipeline(
         payload,
         steps_executed: stepsExecuted,
         steps_skipped: stepsSkipped,
-        error: `Step ${step.name} failed: ${err.message}`,
+        error: `Step ${step.name} failed: ${String(err)}`,
         duration_ms: Date.now() - start,
         artifacts: failureArtifacts,
       };

@@ -1,12 +1,12 @@
 import type { PipelineArtifact } from "../types.js";
 
-type CleanupResult = {
+export type CleanupResult = {
   artifact: PipelineArtifact;
   action: "cleaned" | "dry_run" | "needs_manual_cleanup" | "failed";
   detail?: string;
 };
 
-type CleanupOpts = {
+export type CleanupOpts = {
   log: (msg: string) => void;
   dryRun: boolean;
 };
