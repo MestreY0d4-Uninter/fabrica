@@ -36,6 +36,11 @@ describe("updateProjectTopic", () => {
       messageThreadId: 42,
     });
     expect(result.success).toBe(true);
+    // Verify the value was actually written to disk
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const written = JSON.parse(await readFile(join(workspaceDir, "fabrica", "projects.json"), "utf-8"));
+    expect(written.projects["my-project"].channels[0].messageThreadId).toBe(42);
   });
 
   it("returns error when project does not exist", async () => {
@@ -58,5 +63,23 @@ describe("updateProjectTopic", () => {
     });
     expect(result.success).toBe(false);
     expect(result.error).toContain("channel");
+  });
+
+  it("returns error when project has no channels field", async () => {
+    // Override fixture to a project without channels
+    const { writeFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    await writeFile(
+      join(workspaceDir, "fabrica", "projects.json"),
+      JSON.stringify({ projects: { "my-project": { slug: "my-project" } } }),
+    );
+    const result = await updateProjectTopic({
+      workspaceDir,
+      slug: "my-project",
+      channelId: "-100123",
+      messageThreadId: 42,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("channels");
   });
 });

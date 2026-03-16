@@ -1,6 +1,6 @@
 import { acquireLock, releaseLock } from "../lib/projects/io.js";
 import { DATA_DIR } from "../lib/setup/migrate-layout.js";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 
 type UpdateResult = { success: boolean; error?: string };
@@ -37,7 +37,9 @@ export async function updateProjectTopic(opts: {
     }
 
     match.messageThreadId = opts.messageThreadId;
-    await writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
+    const tmpPath = filePath + ".tmp";
+    await writeFile(tmpPath, JSON.stringify(data, null, 2) + "\n", "utf-8");
+    await rename(tmpPath, filePath);
     return { success: true };
   } finally {
     await releaseLock(opts.workspaceDir);
