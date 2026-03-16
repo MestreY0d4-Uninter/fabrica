@@ -122,8 +122,10 @@ export async function fetchGatewaySessions(gatewayTimeoutMs = 15_000, runCommand
  * Direct fallback: read session files from well-known OpenClaw agent directories.
  * Used when the gateway WebSocket call is unavailable.
  *
- * Only includes sessions updated AFTER the current process started.
- * This filters out sessions from a previous gateway run (which are dead after restart).
+ * Filters sessions using a grace-period-aware strategy via `shouldFilterSession()`:
+ * - Normal operation: exclude sessions updated before the current gateway process started.
+ * - Restart grace period (first 5 minutes): only exclude sessions older than 5 minutes,
+ *   preventing false-positive health fixes while the gateway recreates active sessions.
  * Since this plugin runs inside the gateway, `process.uptime()` reflects the gateway's age.
  */
 async function readSessionsFromDisk(): Promise<SessionLookup | null> {
