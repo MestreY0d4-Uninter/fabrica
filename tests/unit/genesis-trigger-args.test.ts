@@ -32,6 +32,11 @@ describe("parseGenesisArgs", () => {
     expect(result.error).toBe("--channel-id must be a numeric value");
   });
 
+  it("returns error when --channel-id is last arg (no value)", () => {
+    const result = parseGenesisArgs(["idea", "--channel-id"]);
+    expect(result.error).toBe("--channel-id requires a value");
+  });
+
   it("uses FABRICA_PROJECTS_CHANNEL_ID env var as default channel", () => {
     process.env.FABRICA_PROJECTS_CHANNEL_ID = "-100999";
     const result = parseGenesisArgs(["idea"]);
