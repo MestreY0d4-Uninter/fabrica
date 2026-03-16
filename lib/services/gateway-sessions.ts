@@ -10,6 +10,27 @@
 import fs from "node:fs/promises";
 import type { RunCommand } from "../context.js";
 
+const RESTART_GRACE_PERIOD_MS = 5 * 60 * 1000; // 5 minutes
+
+export function shouldFilterSession(
+  updatedAt: number | null,
+  gatewayUptimeMs: number,
+): boolean {
+  if (updatedAt === null) return false;
+
+  const isRecentRestart = gatewayUptimeMs < RESTART_GRACE_PERIOD_MS;
+
+  if (isRecentRestart) {
+    // During restart grace period, use a softer filter:
+    // only exclude sessions older than the grace period itself.
+    return updatedAt < (Date.now() - RESTART_GRACE_PERIOD_MS);
+  }
+
+  // Normal operation: filter sessions from before this gateway process started.
+  const gatewayStartMs = Date.now() - gatewayUptimeMs;
+  return updatedAt < gatewayStartMs;
+}
+
 export type GatewaySession = {
   key: string;
   updatedAt: number | null;
@@ -110,9 +131,6 @@ async function readSessionsFromDisk(): Promise<SessionLookup | null> {
   const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? "";
   if (!homeDir) return null;
 
-  // Sessions updated before this gateway process started are dead (prior run).
-  const gatewayStartMs = Date.now() - process.uptime() * 1000;
-
   // OpenClaw stores agent sessions at ~/.openclaw/agents/{agentId}/sessions/sessions.json
   const agentsDir = `${homeDir}/.openclaw/agents`;
   let agentDirs: string[];
@@ -131,9 +149,8 @@ async function readSessionsFromDisk(): Promise<SessionLookup | null> {
       for (const [key, entry] of Object.entries(fileData)) {
         if (!key || lookup.has(key)) continue;
         const updatedAt = normalizeUpdatedAt(entry.updatedAt);
-        // Skip sessions last updated before the current gateway process started —
-        // they belong to a previous run and are no longer alive in memory.
-        if (updatedAt !== null && updatedAt < gatewayStartMs) continue;
+        // Skip sessions that predate the gateway restart window — they are dead.
+        if (shouldFilterSession(updatedAt, process.uptime() * 1000)) continue;
         lookup.set(key, {
           key,
           updatedAt,
