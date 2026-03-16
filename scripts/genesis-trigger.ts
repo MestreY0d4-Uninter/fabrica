@@ -266,8 +266,19 @@ if (result.success && !dryRunFlag) {
       if (topicData.ok && topicData.result) {
         const messageThreadId = topicData.result.message_thread_id;
         console.log(`Topic created: messageThreadId=${messageThreadId}`);
-        // TODO(Task 3): update projects.json using updateProjectTopic with proper locking
-        console.warn("projects.json update deferred to Task 3 implementation");
+        const { updateProjectTopic } = await import("./genesis-trigger-projects.js");
+        const updateResult = await updateProjectTopic({
+          workspaceDir: WORKSPACE_DIR,
+          slug: topicParams.slug,
+          channelId: topicParams.channelId,
+          messageThreadId,
+        });
+
+        if (updateResult.success) {
+          console.log(`projects.json updated for "${topicParams.slug}"`);
+        } else {
+          console.warn(`projects.json update failed: ${updateResult.error}`);
+        }
       } else {
         console.warn(`Telegram API error: ${topicData.description ?? "unknown"}`);
       }
