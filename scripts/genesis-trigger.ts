@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { parseGenesisArgs } from "./genesis-trigger-args.js";
 
 const execFileAsync = promisify(execFile);
@@ -227,49 +227,48 @@ if (issues && issues.length > 0) {
 
 // --- Create Telegram forum topic (equivalent to Telegram DM bootstrap) ---
 if (result.success && !dryRunFlag) {
+  const { resolveTopicCreationParams } = await import("./genesis-trigger-telegram.js");
   const envPath = join(homedir(), ".openclaw", ".env");
-  const envContent = readFileSync(envPath, "utf-8");
-  const botToken = envContent.match(/TELEGRAM_BOT_TOKEN=(.+)/)?.[1]?.trim();
-  const slug = projectName ?? (scaffold?.repo_name ?? "");
 
-  if (botToken && channelId && slug) {
+  let envContent: string | null = null;
+  try {
+    envContent = readFileSync(envPath, "utf-8");
+  } catch {
+    // File missing — resolveTopicCreationParams will handle the error
+  }
+
+  const slug = projectName ?? (scaffold?.repo_name ?? "");
+  const topicParams = resolveTopicCreationParams({ envPath, envContent, slug, channelId });
+
+  if (topicParams.error) {
+    console.warn(`Telegram topic creation skipped: ${topicParams.error}`);
+  } else if (topicParams.botToken) {
     console.log("\n--- Creating Telegram forum topic ---");
     try {
       const topicRes = await fetch(
-        `https://api.telegram.org/bot${botToken}/createForumTopic`,
+        `https://api.telegram.org/bot${topicParams.botToken}/createForumTopic`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            chat_id: parseInt(channelId, 10),
-            name: slug,
-            icon_color: 7322096,
+            chat_id: parseInt(topicParams.channelId, 10),
+            name: `📦 ${topicParams.slug}`,
           }),
         },
       );
-      const topicData = await topicRes.json() as { ok: boolean; result?: { message_thread_id: number } };
+      const topicData = (await topicRes.json()) as {
+        ok: boolean;
+        result?: { message_thread_id: number };
+        description?: string;
+      };
+
       if (topicData.ok && topicData.result) {
         const messageThreadId = topicData.result.message_thread_id;
-        console.log(`Forum topic created: thread_id=${messageThreadId}`);
-
-        // Update projects.json with messageThreadId
-        const projectsPath = join(WORKSPACE_DIR, "fabrica", "projects.json");
-        const projectsData = JSON.parse(readFileSync(projectsPath, "utf-8")) as Record<string, unknown>;
-        const projects = projectsData.projects as Record<string, Record<string, unknown>>;
-        if (projects[slug]) {
-          const channels = projects[slug].channels as Array<Record<string, unknown>>;
-          if (channels) {
-            for (const ch of channels) {
-              if (ch.channel === "telegram" && ch.channelId === channelId) {
-                ch.messageThreadId = messageThreadId;
-              }
-            }
-          }
-          writeFileSync(projectsPath, JSON.stringify(projectsData, null, 2), "utf-8");
-          console.log(`projects.json updated with messageThreadId=${messageThreadId}`);
-        }
+        console.log(`Topic created: messageThreadId=${messageThreadId}`);
+        // TODO(Task 3): update projects.json using updateProjectTopic with proper locking
+        console.warn("projects.json update deferred to Task 3 implementation");
       } else {
-        console.warn("Failed to create Telegram topic:", JSON.stringify(topicData));
+        console.warn(`Telegram API error: ${topicData.description ?? "unknown"}`);
       }
     } catch (err) {
       console.warn("Telegram topic creation failed (non-fatal):", err);
