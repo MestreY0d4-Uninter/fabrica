@@ -23,6 +23,7 @@ import {
   performTestSkipPass,
   performHoldEscapePass,
 } from "./passes.js";
+import { computeHealthScore } from "../../observability/health-score.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,6 +42,7 @@ export type TickResult = {
 export type TickMode = "full" | "repair" | "triage";
 
 const discoveredProjects = new Set<string>();
+let _tickCount = 0;
 
 // ---------------------------------------------------------------------------
 // Workflow integrity validation (cached per tick)
@@ -234,6 +236,25 @@ export async function tick(opts: {
     pickups: result.totalPickups,
     skipped: result.totalSkipped,
   });
+
+  // Every 10 ticks, compute composite health score and record in audit log
+  _tickCount++;
+  if (_tickCount % 10 === 0) {
+    const healthScore = computeHealthScore({
+      completionRate: slugs.length > 0 ? result.totalPickups / Math.max(1, slugs.length) : null,
+      avgDispatchToCompletionMinutes: null,
+      baselineMinutes: 30,
+      errorRate: slugs.length > 0 ? result.totalHealthFixes / Math.max(1, slugs.length) : null,
+      queueDepth: result.totalSkipped,
+      maxQueueDepth: Math.max(20, slugs.length * 3),
+      heartbeatRegularity: null,
+    });
+    await auditLog(workspaceDir, "health_score", {
+      score: healthScore.score,
+      status: healthScore.status,
+      tickCount: _tickCount,
+    }).catch(() => {});
+  }
 
   return result;
 }
