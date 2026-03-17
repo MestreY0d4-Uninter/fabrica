@@ -9,6 +9,7 @@ import { ensureWorkspaceMigrated, DATA_DIR } from "../setup/migrate-layout.js";
 import { isLegacySchema, migrateLegacySchema } from "./schema-migration.js";
 import type { ProjectsData, Project } from "./types.js";
 import { findProjectByChannelId, findProjectByRoute, findProjectsByChannelId, isForumProject, type RouteRef } from "./routes.js";
+import { backupFile, writeSafe, readJsonWithFallback } from "./io-helpers.js";
 
 
 // ---------------------------------------------------------------------------
@@ -119,7 +120,7 @@ function projectsPath(workspaceDir: string): string {
 
 export async function readProjects(workspaceDir: string): Promise<ProjectsData> {
   await ensureWorkspaceMigrated(workspaceDir);
-  const raw = await fs.readFile(projectsPath(workspaceDir), "utf-8");
+  const raw = await readJsonWithFallback(projectsPath(workspaceDir));
   let data = JSON.parse(raw) as any;
 
   // Auto-migrate legacy schema to new schema
@@ -148,10 +149,9 @@ export async function writeProjects(
   data: ProjectsData,
 ): Promise<void> {
   const filePath = projectsPath(workspaceDir);
-  const tmpPath = filePath + ".tmp";
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(tmpPath, JSON.stringify(data, null, 2) + "\n", "utf-8");
-  await fs.rename(tmpPath, filePath);
+  await backupFile(filePath);
+  await writeSafe(filePath, JSON.stringify(data, null, 2) + "\n");
 }
 
 /**
