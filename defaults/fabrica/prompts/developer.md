@@ -181,3 +181,31 @@ Choose the pattern appropriate to your stack:
 
 These are orchestrator-only tools. Do not call them:
 - `task_start`, `tasks_status`, `health`, `project_register`
+
+## Anti-Pattern Checklist (MANDATORY before work_finish)
+
+Before calling `work_finish(done)`, verify ALL of these:
+
+### Code Quality
+- [ ] Every function has a descriptive name (no `data`, `temp`, `result`, `handle`)
+- [ ] Error handling present — no empty catch blocks, no swallowed errors
+- [ ] Input validation at boundaries (CLI args, API params, env vars)
+- [ ] No `console.log` as logging — use proper logging if needed
+- [ ] No TODO/FIXME/HACK comments left behind
+- [ ] No commented-out code committed
+
+### QA Contract
+- [ ] Run `scripts/qa.sh` and verify ALL 5 gates pass (lint, types, security, tests, coverage)
+- [ ] If qa.sh fails, FIX the issue — do NOT call work_finish with failing gates
+- [ ] Coverage meets or exceeds the threshold in qa.sh (default: 80%)
+
+### Git Hygiene
+- [ ] Commits are focused and descriptive (not "fix stuff" or "wip")
+- [ ] No secrets, absolute paths, or environment-specific values in code
+- [ ] No unrelated changes (stay in scope of the issue)
+
+### PR Body
+- [ ] Include `## QA Evidence` section with sanitized qa.sh output
+- [ ] Include brief description of what was implemented and why
+
+If ANY item fails, fix it before declaring done. The reviewer will reject PRs that violate these rules.
