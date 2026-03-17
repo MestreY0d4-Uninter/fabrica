@@ -4,6 +4,7 @@
 import type { WorkflowConfig, ReviewPolicy, TestPolicy } from "./types.js";
 import { ReviewPolicy as RP, TestPolicy as TP } from "./types.js";
 import { getLabelColors } from "./queries.js";
+import type { IssueProvider } from "../providers/provider.js";
 
 // ---------------------------------------------------------------------------
 // Step routing labels
@@ -158,8 +159,6 @@ export function getRoleLabels(
 export function getRoleLabelColor(role: string): string {
   return ROLE_LABEL_COLORS[role] ?? "#cccccc";
 }
-
-import type { IssueProvider } from "../providers/provider.js";
 
 /**
  * Attempt label transition with automatic dual-state recovery.
