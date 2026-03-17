@@ -779,6 +779,28 @@ export async function checkWorkerHealth(opts: {
   return fixes;
 }
 // ---------------------------------------------------------------------------
+// Dispatch progress tracking
+// ---------------------------------------------------------------------------
+
+export type ProgressCheck = {
+  lastCommitAgeMs: number;
+  sessionActive: boolean;
+};
+
+const SLOW_PROGRESS_MS = 30 * 60_000;
+const STALLED_MS = 60 * 60_000;
+
+/**
+ * Classify dispatch progress based on commit activity.
+ */
+export function checkProgress(check: ProgressCheck): "healthy" | "slow_progress" | "stalled" {
+  if (!check.sessionActive) return "healthy";
+  if (check.lastCommitAgeMs > STALLED_MS) return "stalled";
+  if (check.lastCommitAgeMs > SLOW_PROGRESS_MS) return "slow_progress";
+  return "healthy";
+}
+
+// ---------------------------------------------------------------------------
 // Orphaned label scan
 // ---------------------------------------------------------------------------
 

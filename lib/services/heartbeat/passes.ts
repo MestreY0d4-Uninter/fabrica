@@ -8,6 +8,7 @@ import {
   checkWorkerHealth,
   scanOrphanedLabels,
   scanStatelessIssues,
+  checkProgress,
   type SessionLookup,
 } from "./health.js";
 import { reviewPass } from "./review.js";
@@ -154,6 +155,21 @@ export async function performHealthPass(
       instanceName,
     });
     fixedCount += orphanFixes.filter((f) => f.fixed).length;
+  }
+
+  // Emit audit events for stalled/slow workers (best-effort)
+  for (const [role, workerData] of Object.entries(project.workers ?? {})) {
+    for (const slots of Object.values((workerData as any).levels ?? {})) {
+      for (const slot of (slots as any[]).filter((s: any) => s.active && s.startedAt)) {
+        const ageMs = Date.now() - new Date(slot.startedAt).getTime();
+        const status = checkProgress({ lastCommitAgeMs: ageMs, sessionActive: true });
+        if (status !== "healthy") {
+          await auditLog(workspaceDir, "worker_progress", {
+            project: projectSlug, role, status, ageMs,
+          }).catch(() => {});
+        }
+      }
+    }
   }
 
   // Scan for stateless issues (managed issues that lost their state label — #473)
