@@ -1,0 +1,73 @@
+{
+  "version": "1.0",
+  "max_rounds": 2,
+  "types": {
+    "feature": {
+      "round1": [
+        { "id": "f1", "question": "Qual problema específico essa feature resolve para o usuário?", "required": true, "follow_up_if_vague": "Pode dar um exemplo concreto de quando o usuário sentiria falta dessa funcionalidade?" },
+        { "id": "f2", "question": "Quem vai usar isso? Descreva o perfil do usuário principal.", "required": true, "follow_up_if_vague": "É um usuário final, admin, desenvolvedor, ou outro perfil?" },
+        { "id": "f3", "question": "Qual é o fluxo principal? O que o usuário faz passo a passo?", "required": true, "follow_up_if_vague": "Tente descrever: 'O usuário clica em X, preenche Y, vê Z'." },
+        { "id": "f4", "question": "Existe alguma restrição de tecnologia, prazo ou compatibilidade?", "required": false, "follow_up_if_vague": null },
+        { "id": "f5", "question": "Esse fluxo exige login? Se sim, quais perfis existem e quais permissões cada perfil deve ter?", "required": false, "follow_up_if_vague": "Descreva pelo menos um exemplo de ação permitida e uma ação bloqueada por perfil." }
+      ],
+      "technical_additions": [
+        { "id": "ft1", "question": "Quais APIs ou serviços externos essa feature precisa consumir?", "required": false },
+        { "id": "ft2", "question": "Há requisitos de performance (latência, throughput)?", "required": false },
+        { "id": "ft3", "question": "Qual o modelo de dados? Precisa de novas tabelas/coleções?", "required": false }
+      ],
+      "non_technical_additions": [
+        { "id": "fn1", "question": "Como você saberia que essa feature está funcionando bem? O que muda na sua rotina?", "required": false }
+      ]
+    },
+    "bugfix": {
+      "round1": [
+        { "id": "b1", "question": "O que está acontecendo de errado? Descreva o comportamento atual.", "required": true, "follow_up_if_vague": "Você vê alguma mensagem de erro? O que aparece na tela?" },
+        { "id": "b2", "question": "O que deveria acontecer? Qual o comportamento esperado?", "required": true, "follow_up_if_vague": "Antes funcionava corretamente? Quando parou?" },
+        { "id": "b3", "question": "Como reproduzir o bug? Passos exatos.", "required": true, "follow_up_if_vague": "Em qual página/tela? Com qual tipo de dado?" },
+        { "id": "b4", "question": "Com que frequência acontece? Sempre, às vezes, em condições específicas?", "required": false, "follow_up_if_vague": null }
+      ],
+      "technical_additions": [
+        { "id": "bt1", "question": "Em qual ambiente ocorre? (produção, staging, local)", "required": false },
+        { "id": "bt2", "question": "Tem logs ou stack trace disponível?", "required": false }
+      ],
+      "non_technical_additions": [
+        { "id": "bn1", "question": "Quantas pessoas são afetadas por esse problema?", "required": false }
+      ]
+    },
+    "refactor": {
+      "round1": [
+        { "id": "r1", "question": "Qual parte do código precisa ser refatorada? Qual módulo/arquivo?", "required": true, "follow_up_if_vague": "Qual funcionalidade está nesse código?" },
+        { "id": "r2", "question": "Qual o problema atual? (duplicação, complexidade, acoplamento, performance)", "required": true, "follow_up_if_vague": "O que dificulta trabalhar nesse código hoje?" },
+        { "id": "r3", "question": "Qual o resultado esperado da refatoração?", "required": true, "follow_up_if_vague": "Quer que fique mais legível, mais rápido, ou mais testável?" }
+      ],
+      "technical_additions": [
+        { "id": "rt1", "question": "A refatoração pode mudar interfaces públicas/APIs?", "required": false },
+        { "id": "rt2", "question": "Há testes existentes cobrindo esse código?", "required": false }
+      ],
+      "non_technical_additions": []
+    },
+    "research": {
+      "round1": [
+        { "id": "s1", "question": "O que precisa ser investigado ou avaliado?", "required": true, "follow_up_if_vague": "É uma tecnologia, abordagem, ou viabilidade de algo?" },
+        { "id": "s2", "question": "Qual decisão essa pesquisa vai informar?", "required": true, "follow_up_if_vague": "O que muda se a conclusão for positiva vs negativa?" },
+        { "id": "s3", "question": "Quais critérios definem sucesso da pesquisa?", "required": true, "follow_up_if_vague": "Qual entregável esperado? Documento, PoC, comparativo?" }
+      ],
+      "technical_additions": [
+        { "id": "st1", "question": "Há restrições de stack ou compatibilidade a considerar?", "required": false }
+      ],
+      "non_technical_additions": []
+    },
+    "infra": {
+      "round1": [
+        { "id": "i1", "question": "O que precisa ser configurado/implantado/migrado?", "required": true, "follow_up_if_vague": "É CI/CD, deploy, banco de dados, monitoramento?" },
+        { "id": "i2", "question": "Qual o ambiente alvo? (produção, staging, dev, local)", "required": true, "follow_up_if_vague": null },
+        { "id": "i3", "question": "Há requisitos de downtime, rollback ou compatibilidade?", "required": false, "follow_up_if_vague": null }
+      ],
+      "technical_additions": [
+        { "id": "it1", "question": "Quais serviços/ferramentas estão envolvidos?", "required": false },
+        { "id": "it2", "question": "Há secrets ou credenciais que precisam ser provisionadas?", "required": false }
+      ],
+      "non_technical_additions": []
+    }
+  }
+}

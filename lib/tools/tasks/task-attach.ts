@@ -1,0 +1,168 @@
+/**
+ * task_attach — Attach files to issues or list existing attachments.
+ *
+ * Use cases:
+ * - List attachments on an issue (for architects/developers)
+ * - Manually attach a local file to an issue
+ * - View attachment metadata and local paths
+ */
+import { jsonResult } from "openclaw/plugin-sdk";
+import type { PluginContext } from "../../context.js";
+import type { ToolContext } from "../../types.js";
+import { log as auditLog } from "../../audit.js";
+import { requireWorkspaceDir, resolveProjectFromContext, resolveProvider, autoAssignOwnerLabel, applyNotifyLabel } from "../helpers.js";
+import {
+  listAttachments,
+  saveAttachment,
+  getAttachmentPath,
+  formatAttachmentComment,
+} from "../../dispatch/attachments.js";
+import fs from "node:fs/promises";
+import path from "node:path";
+
+export function createTaskAttachTool(ctx: PluginContext) {
+  return (toolCtx: ToolContext) => ({
+    name: "task_attach",
+    label: "Task Attach",
+    description: `Manage file attachments on issues. List existing attachments or add new ones from local files.
+
+Use cases:
+- List attachments: { issueId: 42, action: "list" }
+- Attach file: { issueId: 42, action: "add", filePath: "/path/to/file.png" }
+- Get attachment path: { issueId: 42, action: "get", attachmentId: "abc-123" }`,
+    parameters: {
+      type: "object",
+      required: ["channelId", "issueId"],
+      properties: {
+        channelId: {
+          type: "string",
+          description: "YOUR chat/group ID — the numeric ID of the chat you are in right now (e.g. '-1003844794417'). Do NOT guess; use the ID of the conversation this message came from.",
+        },
+        issueId: {
+          type: "number",
+          description: "Issue ID",
+        },
+        action: {
+          type: "string",
+          enum: ["list", "add", "get"],
+          description: "Action to perform. Defaults to 'list'.",
+        },
+        filePath: {
+          type: "string",
+          description: "Local file path to attach (required for 'add' action).",
+        },
+        attachmentId: {
+          type: "string",
+          description: "Attachment ID to retrieve (required for 'get' action).",
+        },
+      },
+    },
+
+    async execute(_id: string, params: Record<string, unknown>) {
+      const issueId = params.issueId as number;
+      const action = (params.action as string) ?? "list";
+      const workspaceDir = requireWorkspaceDir(toolCtx);
+
+      const { project, route } = await resolveProjectFromContext(workspaceDir, toolCtx, params.channelId as string | undefined);
+
+      if (action === "list") {
+        const attachments = await listAttachments(workspaceDir, project.slug, issueId);
+        return jsonResult({
+          success: true,
+          issueId,
+          project: project.name,
+          attachments: attachments.map((a) => ({
+            id: a.id,
+            filename: a.filename,
+            mimeType: a.mimeType,
+            size: a.size,
+            uploader: a.uploader,
+            uploadedAt: a.uploadedAt,
+            publicUrl: a.publicUrl ?? null,
+            localPath: getAttachmentPath(workspaceDir, project.slug, issueId, a.localPath),
+          })),
+          count: attachments.length,
+        });
+      }
+
+      if (action === "get") {
+        const attachmentId = params.attachmentId as string;
+        if (!attachmentId) throw new Error("attachmentId is required for 'get' action");
+
+        const attachments = await listAttachments(workspaceDir, project.slug, issueId);
+        const attachment = attachments.find((a) => a.id === attachmentId);
+        if (!attachment) throw new Error(`Attachment ${attachmentId} not found on issue #${issueId}`);
+
+        return jsonResult({
+          success: true,
+          issueId,
+          project: project.name,
+          attachment: {
+            ...attachment,
+            fullPath: getAttachmentPath(workspaceDir, project.slug, issueId, attachment.localPath),
+          },
+        });
+      }
+
+      if (action === "add") {
+        const filePath = params.filePath as string;
+        if (!filePath) throw new Error("filePath is required for 'add' action");
+
+        const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(filePath);
+        const buffer = await fs.readFile(resolvedPath);
+        const filename = path.basename(resolvedPath);
+
+        // Detect mime type
+        const { detectMime } = await import("openclaw/plugin-sdk");
+        const mimeType = await detectMime({ filePath: resolvedPath, buffer }) ?? "application/octet-stream";
+
+        const { provider } = await resolveProvider(project, ctx.runCommand);
+
+        const meta = await saveAttachment(workspaceDir, project.slug, issueId, {
+          buffer,
+          filename,
+          mimeType,
+          uploader: "manual",
+        });
+
+        // Upload via provider and update metadata
+        const publicUrl = await provider.uploadAttachment(issueId, { filename, buffer, mimeType });
+        if (publicUrl) meta.publicUrl = publicUrl;
+
+        // Add comment on issue
+        const comment = formatAttachmentComment([meta]);
+        await provider.addComment(issueId, comment);
+
+        // Apply notify label for channel routing (best-effort).
+        applyNotifyLabel(provider, issueId, project, route.channelId, undefined, route.messageThreadId ?? undefined);
+
+        // Auto-assign owner label to this instance (best-effort).
+        autoAssignOwnerLabel(workspaceDir, provider, issueId, project).catch(() => {});
+
+        await auditLog(workspaceDir, "task_attach", {
+          project: project.name,
+          issueId,
+          filename,
+          size: buffer.length,
+          mimeType,
+        });
+
+        return jsonResult({
+          success: true,
+          issueId,
+          project: project.name,
+          attachment: {
+            id: meta.id,
+            filename: meta.filename,
+            mimeType: meta.mimeType,
+            size: meta.size,
+            localPath: getAttachmentPath(workspaceDir, project.slug, issueId, meta.localPath),
+          },
+          announcement: `📎 File "${filename}" attached to #${issueId}`,
+        });
+      }
+
+      throw new Error(`Unknown action: ${action}. Use 'list', 'add', or 'get'.`);
+    },
+  });
+}

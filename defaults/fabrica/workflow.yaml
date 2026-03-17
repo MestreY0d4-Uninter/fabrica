@@ -1,0 +1,184 @@
+# Fabrica workflow configuration
+#
+# This file is YOUR configuration — Fabrica will never overwrite it on restart.
+# Edit freely: roles, models, timeouts, reviewPolicy, testPolicy, states, etc.
+# Copy to fabrica/projects/<project>/workflow.yaml for project-specific overrides.
+#
+# To see what changed in a new version: config({ action: "diff" })
+# To reset to package defaults:         config({ action: "reset", scope: "workflow" })
+
+roles:
+  developer:
+    models:
+      junior: anthropic/claude-haiku-4-5
+      medior: anthropic/claude-sonnet-4-5
+      senior: anthropic/claude-opus-4-6
+  tester:
+    models:
+      junior: anthropic/claude-haiku-4-5
+      medior: anthropic/claude-sonnet-4-5
+      senior: anthropic/claude-opus-4-6
+  architect:
+    models:
+      junior: anthropic/claude-sonnet-4-5
+      senior: anthropic/claude-opus-4-6
+  reviewer:
+    models:
+      junior: anthropic/claude-haiku-4-5
+      senior: anthropic/claude-sonnet-4-5
+
+workflow:
+  initial: planning
+  maxWorkersPerLevel: 2
+  # maxWorkersPerLevel: 2 — each level (junior/medior/senior) gets up to this many parallel slots.
+  # With 3 levels × 2 slots = 6 workers per role in parallel per project at full capacity.
+  # Override per-model with object syntax: senior: { model: anthropic/claude-opus-4-6, maxWorkers: 3 }
+  reviewPolicy: human # Options: human (default), agent, skip
+  # human — All PRs need human approval on GitHub/GitLab. Heartbeat auto-merges when approved.
+  # agent — Agent reviewer checks every PR before merge.
+  # skip  — Review phase is skipped. PRs are auto-merged after development.
+  #          If both review and test are skipped, PRs auto-merge to the base branch.
+  testPolicy: skip # Options: skip (default), agent
+  # skip  — Testing phase is skipped. Issues go straight from review to done.
+  #          To enable testing for a specific issue, remove the test:skip label.
+  # agent — Agent tester runs automated QA on every issue after review.
+  #          Requires tester prompts: fabrica/prompts/tester.md
+  #          (or per-project: fabrica/projects/<name>/prompts/tester.md)
+  roleExecution: parallel # Options: parallel (default), sequential
+  # parallel   — Different roles can work simultaneously (e.g. developer + tester).
+  # sequential — Only one role active at a time.
+  states:
+    planning:
+      type: hold
+      label: Planning
+      color: "#95a5a6"
+      on:
+        APPROVE: todo
+    toResearch:
+      type: queue
+      role: architect
+      label: To Research
+      color: "#0075ca"
+      priority: 1
+      on:
+        PICKUP: researching
+    researching:
+      type: active
+      role: architect
+      label: Researching
+      color: "#4a90e2"
+      on:
+        COMPLETE:
+          target: done
+          actions:
+            - closeIssue
+        BLOCKED: refining
+    todo:
+      type: queue
+      role: developer
+      label: To Do
+      color: "#428bca"
+      priority: 1
+      on:
+        PICKUP: doing
+    doing:
+      type: active
+      role: developer
+      label: Doing
+      color: "#f0ad4e"
+      on:
+        COMPLETE:
+          target: toReview
+          actions:
+            - detectPr
+        BLOCKED: refining
+    toReview:
+      type: queue
+      role: reviewer
+      label: To Review
+      color: "#7057ff"
+      priority: 2
+      check: prApproved
+      on:
+        PICKUP: reviewing
+        SKIP:
+          target: toTest
+        APPROVED:
+          target: toTest
+        MERGE_FAILED: toImprove
+        CHANGES_REQUESTED: toImprove
+        MERGE_CONFLICT: toImprove
+        PR_CLOSED:
+          target: rejected
+          actions:
+            - closeIssue
+    reviewing:
+      type: active
+      role: reviewer
+      label: Reviewing
+      color: "#c5def5"
+      on:
+        APPROVE: toTest
+        REJECT: toImprove
+        BLOCKED: refining
+    # --- Test phase (skipped by default via testPolicy: skip) -----------------
+    # Issues arrive here after review. With testPolicy: skip (default), the
+    # heartbeat auto-transitions them to done. To enable testing per-issue,
+    # remove the test:skip label before it reaches this state.
+    # To enable testing globally, set testPolicy: agent above.
+    toTest:
+      type: queue
+      role: tester
+      label: To Test
+      color: "#5bc0de"
+      priority: 2
+      on:
+        PICKUP: testing
+        SKIP:
+          target: done
+          actions:
+            - mergePr
+            - gitPull
+            - closeIssue
+        MERGE_FAILED: toImprove
+    testing:
+      type: active
+      role: tester
+      label: Testing
+      color: "#9b59b6"
+      on:
+        PASS:
+          target: done
+          actions:
+            - mergePr
+            - gitPull
+            - closeIssue
+        FAIL:
+          target: toImprove
+          actions:
+            - reopenIssue
+        MERGE_FAILED: toImprove
+        REFINE: refining
+        BLOCKED: refining
+    done:
+      type: terminal
+      label: Done
+      color: "#5cb85c"
+    rejected:
+      type: terminal
+      label: Rejected
+      color: "#e11d48"
+    toImprove:
+      type: queue
+      role: developer
+      label: To Improve
+      color: "#d9534f"
+      priority: 3
+      on:
+        PICKUP: doing
+    refining:
+      type: hold
+      label: Refining
+      color: "#f39c12"
+      on:
+        APPROVE: todo

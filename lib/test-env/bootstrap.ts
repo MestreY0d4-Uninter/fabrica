@@ -1,0 +1,901 @@
+import { createHash } from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
+import type { CanonicalStack } from "../intake/types.js";
+
+export type QaGateCommands = {
+  lint: string;
+  types: string;
+  security: string;
+  tests: string;
+  coverage: string;
+};
+
+export type BootstrapMode = "scaffold" | "qa" | "developer" | "tester" | "e2e";
+
+export type TestEnvironmentFamily = "node" | "python" | "go" | "java";
+
+export type BootstrapCommand = {
+  cmd: string;
+  args: string[];
+  reason: string;
+  env?: Record<string, string | undefined>;
+};
+
+export type BootstrapResult = {
+  ready: boolean;
+  skipped: boolean;
+  stack: CanonicalStack;
+  family: TestEnvironmentFamily;
+  toolchain: string;
+  packageManager: string;
+  lockfile: string | null;
+  environmentPath: string | null;
+  commandsRun: BootstrapCommand[];
+  fingerprint: string | null;
+  reason?: string;
+};
+
+type RunCommand = (
+  cmd: string,
+  args: string[],
+  opts?: { timeout?: number; cwd?: string; env?: Record<string, string | undefined> },
+) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
+
+type NodeManager = "npm" | "pnpm" | "bun" | "yarn";
+type PythonManager = "uv" | "pip";
+
+const NODE_STACKS = new Set<CanonicalStack>(["nextjs", "node-cli", "express"]);
+const PYTHON_STACKS = new Set<CanonicalStack>(["fastapi", "flask", "django", "python-cli"]);
+const GREENFIELD_SCAFFOLD_STACKS = new Set<CanonicalStack>([
+  "nextjs",
+  "node-cli",
+  "express",
+  "fastapi",
+  "flask",
+  "django",
+  "python-cli",
+]);
+
+const NEXTJS_GATES: QaGateCommands = {
+  lint: "next lint",
+  types: "tsc --noEmit",
+  security: "npm audit --audit-level=moderate",
+  tests: "npm test",
+  coverage: "vitest run --coverage --coverage.thresholds.lines=80",
+};
+
+const EXPRESS_GATES: QaGateCommands = {
+  lint: "eslint .",
+  types: "tsc --noEmit",
+  security: "npm audit --audit-level=moderate",
+  tests: "npm test",
+  coverage: "vitest run --coverage --coverage.thresholds.lines=80",
+};
+
+const NODE_CLI_GATES: QaGateCommands = {
+  lint: "npm run lint",
+  types: "npm run build -- --noEmit",
+  security: "npm audit --audit-level=moderate",
+  tests: "npm test",
+  coverage: "npm run coverage",
+};
+
+const PYTHON_APP_GATES: QaGateCommands = {
+  lint: "ruff check app/ tests/",
+  types: "mypy app/ --ignore-missing-imports",
+  security: "pip-audit",
+  tests: "python -m pytest tests/ -v --tb=short",
+  coverage: "python -m pytest tests/ --cov=app --cov-fail-under=80",
+};
+
+const PYTHON_CLI_GATES: QaGateCommands = {
+  lint: "ruff check src/ tests/",
+  types: "mypy src/ --ignore-missing-imports",
+  security: "pip-audit",
+  tests: "python -m pytest tests/ -v --tb=short",
+  coverage: "python -m pytest tests/ --cov=src --cov-fail-under=80",
+};
+
+const GO_GATES: QaGateCommands = {
+  lint: "go vet ./...",
+  types: "go build ./...",
+  security: "govulncheck ./...",
+  tests: "go test -v ./...",
+  coverage: "go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out",
+};
+
+const JAVA_GATES: QaGateCommands = {
+  lint: "mvn checkstyle:check",
+  types: "mvn compile",
+  security: "mvn org.owasp:dependency-check-maven:check",
+  tests: "mvn test",
+  coverage: "mvn test jacoco:report",
+};
+
+const BOOTSTRAP_STATE_DIR = ".fabrica";
+const BOOTSTRAP_STATE_FILE = "test-env.sha256";
+const DEFAULT_TIMEOUT = 180_000;
+
+function fileName(refPath: string): string {
+  return path.basename(refPath);
+}
+
+async function pathExists(candidate: string): Promise<boolean> {
+  try {
+    await fs.access(candidate);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function familyForStack(stack: CanonicalStack): TestEnvironmentFamily {
+  if (NODE_STACKS.has(stack)) return "node";
+  if (PYTHON_STACKS.has(stack)) return "python";
+  if (stack === "go") return "go";
+  return "java";
+}
+
+export function supportsGreenfieldScaffold(stack: CanonicalStack): boolean {
+  return GREENFIELD_SCAFFOLD_STACKS.has(stack);
+}
+
+export function getSupportedGreenfieldStacks(): CanonicalStack[] {
+  return [...GREENFIELD_SCAFFOLD_STACKS];
+}
+
+export function getQaGateCommands(stack: CanonicalStack): QaGateCommands {
+  if (stack === "nextjs") return NEXTJS_GATES;
+  if (stack === "node-cli") return NODE_CLI_GATES;
+  if (stack === "express") return EXPRESS_GATES;
+  if (stack === "python-cli") return PYTHON_CLI_GATES;
+  if (PYTHON_STACKS.has(stack)) return PYTHON_APP_GATES;
+  if (stack === "go") return GO_GATES;
+  return JAVA_GATES;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function buildCommonScriptPrelude(): string {
+  return [
+    'ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"',
+    'cd "$ROOT_DIR"',
+    "",
+    `mkdir -p "${BOOTSTRAP_STATE_DIR}"`,
+    `STATE_FILE="$ROOT_DIR/${BOOTSTRAP_STATE_DIR}/${BOOTSTRAP_STATE_FILE}"`,
+    "",
+    "hash_files() {",
+    "  if command -v sha256sum >/dev/null 2>&1; then",
+    "    sha256sum \"$@\" | awk '{print $1}' | tr '\\n' ' ' | sha256sum | awk '{print $1}'",
+    "  elif command -v shasum >/dev/null 2>&1; then",
+    "    shasum -a 256 \"$@\" | awk '{print $1}' | tr '\\n' ' ' | shasum -a 256 | awk '{print $1}'",
+    "  else",
+    '    echo "Missing sha256sum/shasum for deterministic QA bootstrap" >&2',
+    "    exit 2",
+    "  fi",
+    "}",
+    "",
+    "require_cmd() {",
+    '  local cmd="$1"',
+    '  local hint="$2"',
+    '  if ! command -v "$cmd" >/dev/null 2>&1; then',
+    '    echo "$hint" >&2',
+    "    exit 2",
+    "  fi",
+    "}",
+  ].join("\n");
+}
+
+function buildNodeBootstrapPrelude(): string {
+  return `${buildCommonScriptPrelude()}
+NODE_FILES=()
+for candidate in package.json bun.lock pnpm-lock.yaml yarn.lock package-lock.json; do
+  if [[ -f "$candidate" ]]; then
+    NODE_FILES+=("$candidate")
+  fi
+done
+
+if [[ ! -f package.json ]]; then
+  echo "Missing package.json for Node QA bootstrap" >&2
+  exit 2
+fi
+
+if [[ \${#NODE_FILES[@]} -eq 0 ]]; then
+  echo "Missing lockfile for deterministic Node QA bootstrap" >&2
+  exit 2
+fi
+
+BOOTSTRAP_FINGERPRINT="$(hash_files "\${NODE_FILES[@]}")"
+if [[ -d node_modules && -f "$STATE_FILE" ]] && [[ "$(cat "$STATE_FILE")" == "$BOOTSTRAP_FINGERPRINT" ]]; then
+  echo "Node test environment already prepared"
+else
+  if [[ -f bun.lock ]]; then
+    require_cmd bun "bun.lock detected but bun is not installed"
+    bun install --frozen-lockfile
+  elif [[ -f pnpm-lock.yaml ]]; then
+    if command -v pnpm >/dev/null 2>&1; then
+      pnpm install --frozen-lockfile
+    elif command -v corepack >/dev/null 2>&1; then
+      corepack pnpm install --frozen-lockfile
+    else
+      echo "pnpm-lock.yaml detected but neither pnpm nor corepack is available" >&2
+      exit 2
+    fi
+  elif [[ -f yarn.lock ]]; then
+    if command -v yarn >/dev/null 2>&1; then
+      yarn install --immutable
+    elif command -v corepack >/dev/null 2>&1; then
+      corepack yarn install --immutable
+    else
+      echo "yarn.lock detected but neither yarn nor corepack is available" >&2
+      exit 2
+    fi
+  elif [[ -f package-lock.json ]]; then
+    require_cmd npm "package-lock.json detected but npm is not installed"
+    npm ci
+  else
+    echo "Missing lockfile for deterministic Node QA bootstrap" >&2
+    exit 2
+  fi
+  printf '%s' "$BOOTSTRAP_FINGERPRINT" > "$STATE_FILE"
+fi
+
+export PATH="$ROOT_DIR/node_modules/.bin:$PATH"
+`;
+}
+
+function buildPythonBootstrapPrelude(): string {
+  return `${buildCommonScriptPrelude()}
+PYTHON_FILES=()
+for candidate in pyproject.toml requirements.txt uv.lock; do
+  if [[ -f "$candidate" ]]; then
+    PYTHON_FILES+=("$candidate")
+  fi
+done
+
+if [[ \${#PYTHON_FILES[@]} -eq 0 ]]; then
+  echo "Missing pyproject.toml/requirements.txt for Python QA bootstrap" >&2
+  exit 2
+fi
+
+BOOTSTRAP_FINGERPRINT="$(hash_files "\${PYTHON_FILES[@]}")"
+VENV_DIR="$ROOT_DIR/.venv"
+
+create_python_venv() {
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+  else
+    echo "Python interpreter not found for QA bootstrap" >&2
+    exit 2
+  fi
+
+  if "$PYTHON_BIN" -m venv "$VENV_DIR"; then
+    return 0
+  fi
+
+  if ! "$PYTHON_BIN" -m pip --version >/dev/null 2>&1; then
+    echo "Python venv bootstrap failed and pip is unavailable for virtualenv fallback" >&2
+    exit 2
+  fi
+
+  PY_BOOT_DIR="$ROOT_DIR/${BOOTSTRAP_STATE_DIR}/python-bootstrap"
+  mkdir -p "$PY_BOOT_DIR"
+  "$PYTHON_BIN" -m pip install --disable-pip-version-check --target "$PY_BOOT_DIR" "virtualenv>=20.26.0"
+  PYTHONPATH="$PY_BOOT_DIR\${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m virtualenv "$VENV_DIR"
+}
+
+if [[ -x "$VENV_DIR/bin/python" && -f "$STATE_FILE" ]] && [[ "$(cat "$STATE_FILE")" == "$BOOTSTRAP_FINGERPRINT" ]]; then
+  echo "Python test environment already prepared"
+else
+  if [[ -f uv.lock ]]; then
+    require_cmd uv "uv.lock detected but uv is not installed"
+    uv sync --locked
+  elif command -v uv >/dev/null 2>&1; then
+    uv venv .venv
+
+    if [[ -f requirements.txt ]]; then
+      uv pip install --python .venv/bin/python -r requirements.txt
+    fi
+
+    if [[ -f pyproject.toml ]]; then
+      if grep -Eq '^[[:space:]]*dev[[:space:]]*=' pyproject.toml; then
+        uv pip install --python .venv/bin/python -e '.[dev]'
+      else
+        uv pip install --python .venv/bin/python -e .
+      fi
+    fi
+  else
+    create_python_venv
+    "$VENV_DIR/bin/python" -m pip install --upgrade pip
+
+    if [[ -f requirements.txt ]]; then
+      "$VENV_DIR/bin/python" -m pip install -r requirements.txt
+    fi
+
+    if [[ -f pyproject.toml ]]; then
+      if grep -Eq '^[[:space:]]*dev[[:space:]]*=' pyproject.toml; then
+        "$VENV_DIR/bin/python" -m pip install -e '.[dev]'
+      else
+        "$VENV_DIR/bin/python" -m pip install -e .
+      fi
+    fi
+  fi
+
+  printf '%s' "$BOOTSTRAP_FINGERPRINT" > "$STATE_FILE"
+fi
+
+if [[ -d "$VENV_DIR/bin" ]]; then
+  export PATH="$VENV_DIR/bin:$PATH"
+fi
+`;
+}
+
+export function buildQaBootstrapPrelude(stack: CanonicalStack): string {
+  const family = familyForStack(stack);
+  if (family === "node") return buildNodeBootstrapPrelude();
+  if (family === "python") return buildPythonBootstrapPrelude();
+  return `${buildCommonScriptPrelude()}
+echo "No automated dependency bootstrap for ${shellQuote(stack)} stack"
+`;
+}
+
+async function computeFingerprint(repoPath: string, files: string[]): Promise<string | null> {
+  const existing = [];
+  for (const file of files) {
+    const fullPath = path.join(repoPath, file);
+    if (await pathExists(fullPath)) {
+      existing.push(file);
+    }
+  }
+  if (existing.length === 0) return null;
+
+  const hash = createHash("sha256");
+  for (const file of existing.sort()) {
+    hash.update(`${file}\n`);
+    hash.update(await fs.readFile(path.join(repoPath, file)));
+    hash.update("\n");
+  }
+  return hash.digest("hex");
+}
+
+async function readBootstrapFingerprint(repoPath: string): Promise<string | null> {
+  const stateFile = path.join(repoPath, BOOTSTRAP_STATE_DIR, BOOTSTRAP_STATE_FILE);
+  try {
+    return (await fs.readFile(stateFile, "utf-8")).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeBootstrapFingerprint(repoPath: string, fingerprint: string): Promise<void> {
+  const stateDir = path.join(repoPath, BOOTSTRAP_STATE_DIR);
+  await fs.mkdir(stateDir, { recursive: true });
+  await fs.writeFile(path.join(stateDir, BOOTSTRAP_STATE_FILE), fingerprint, "utf-8");
+}
+
+async function toolExists(runCommand: RunCommand, cmd: string, args: string[] = ["--version"]): Promise<boolean> {
+  try {
+    const result = await runCommand(cmd, args, { timeout: 30_000 });
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
+async function runAndAssert(
+  runCommand: RunCommand,
+  repoPath: string,
+  commands: BootstrapCommand[],
+  command: BootstrapCommand,
+): Promise<void> {
+  const result = await runCommand(command.cmd, command.args, {
+    timeout: DEFAULT_TIMEOUT,
+    cwd: repoPath,
+    env: command.env,
+  });
+  commands.push(command);
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `Dependency bootstrap failed (${command.reason}): ${(result.stderr || result.stdout || "unknown error").trim()}`,
+    );
+  }
+}
+
+async function hasPyprojectDevExtra(repoPath: string): Promise<boolean> {
+  const pyprojectPath = path.join(repoPath, "pyproject.toml");
+  if (!await pathExists(pyprojectPath)) return false;
+  const content = await fs.readFile(pyprojectPath, "utf-8");
+  const match = content.match(/\[project\.optional-dependencies\]([\s\S]*?)(?:\n\[|$)/);
+  if (!match) return false;
+  return /^\s*dev\s*=\s*\[/m.test(match[1] ?? "");
+}
+
+async function ensureNodeEnvironment(
+  repoPath: string,
+  stack: CanonicalStack,
+  mode: BootstrapMode,
+  runCommand: RunCommand,
+): Promise<BootstrapResult> {
+  const commandsRun: BootstrapCommand[] = [];
+  const lockfiles = ["bun.lock", "pnpm-lock.yaml", "yarn.lock", "package-lock.json"];
+  const fingerprint = await computeFingerprint(repoPath, ["package.json", ...lockfiles]);
+  const current = await readBootstrapFingerprint(repoPath);
+  const nodeModulesPath = path.join(repoPath, "node_modules");
+  const bunLock = await pathExists(path.join(repoPath, "bun.lock"));
+  const pnpmLock = await pathExists(path.join(repoPath, "pnpm-lock.yaml"));
+  const yarnLock = await pathExists(path.join(repoPath, "yarn.lock"));
+  const packageLock = await pathExists(path.join(repoPath, "package-lock.json"));
+  const detectedLockfile = bunLock
+    ? "bun.lock"
+    : pnpmLock
+      ? "pnpm-lock.yaml"
+      : yarnLock
+        ? "yarn.lock"
+        : packageLock
+          ? "package-lock.json"
+          : null;
+
+  if (fingerprint && current === fingerprint && await pathExists(nodeModulesPath)) {
+    return {
+      ready: true,
+      skipped: true,
+      stack,
+      family: "node",
+      toolchain: "node",
+      packageManager: "cached",
+      lockfile: detectedLockfile,
+      environmentPath: nodeModulesPath,
+      commandsRun,
+      fingerprint,
+    };
+  }
+  const packageJson = await pathExists(path.join(repoPath, "package.json"));
+
+  if (!packageJson) {
+    return {
+      ready: false,
+      skipped: false,
+      stack,
+      family: "node",
+      toolchain: "node",
+      packageManager: "unknown",
+      lockfile: null,
+      environmentPath: null,
+      commandsRun,
+      fingerprint,
+      reason: "missing_package_json",
+    };
+  }
+
+  if (bunLock) {
+    if (!await toolExists(runCommand, "bun")) {
+      return {
+        ready: false,
+        skipped: false,
+        stack,
+        family: "node",
+        toolchain: "node",
+        packageManager: "bun",
+        lockfile: "bun.lock",
+        environmentPath: null,
+        commandsRun,
+        fingerprint,
+        reason: "bun_lock_without_bun",
+      };
+    }
+    await runAndAssert(runCommand, repoPath, commandsRun, {
+      cmd: "bun",
+      args: ["install", "--frozen-lockfile"],
+      reason: "bun install",
+    });
+    if (fingerprint) await writeBootstrapFingerprint(repoPath, fingerprint);
+    return {
+      ready: true,
+      skipped: false,
+      stack,
+      family: "node",
+      toolchain: "node",
+      packageManager: "bun",
+      lockfile: "bun.lock",
+      environmentPath: nodeModulesPath,
+      commandsRun,
+      fingerprint,
+    };
+  }
+
+  if (pnpmLock) {
+    const hasPnpm = await toolExists(runCommand, "pnpm");
+    const hasCorepack = await toolExists(runCommand, "corepack");
+    if (!hasPnpm && !hasCorepack) {
+      return {
+        ready: false,
+        skipped: false,
+        stack,
+        family: "node",
+        toolchain: "node",
+        packageManager: "pnpm",
+        lockfile: "pnpm-lock.yaml",
+        environmentPath: null,
+        commandsRun,
+        fingerprint,
+        reason: "pnpm_lock_without_pnpm_or_corepack",
+      };
+    }
+    await runAndAssert(runCommand, repoPath, commandsRun, hasPnpm
+      ? { cmd: "pnpm", args: ["install", "--frozen-lockfile"], reason: "pnpm install" }
+      : { cmd: "corepack", args: ["pnpm", "install", "--frozen-lockfile"], reason: "corepack pnpm install" });
+    if (fingerprint) await writeBootstrapFingerprint(repoPath, fingerprint);
+    return {
+      ready: true,
+      skipped: false,
+      stack,
+      family: "node",
+      toolchain: "node",
+      packageManager: "pnpm",
+      lockfile: "pnpm-lock.yaml",
+      environmentPath: nodeModulesPath,
+      commandsRun,
+      fingerprint,
+    };
+  }
+
+  if (yarnLock) {
+    const hasYarn = await toolExists(runCommand, "yarn");
+    const hasCorepack = await toolExists(runCommand, "corepack");
+    if (!hasYarn && !hasCorepack) {
+      return {
+        ready: false,
+        skipped: false,
+        stack,
+        family: "node",
+        toolchain: "node",
+        packageManager: "yarn",
+        lockfile: "yarn.lock",
+        environmentPath: null,
+        commandsRun,
+        fingerprint,
+        reason: "yarn_lock_without_yarn_or_corepack",
+      };
+    }
+    await runAndAssert(runCommand, repoPath, commandsRun, hasYarn
+      ? { cmd: "yarn", args: ["install", "--immutable"], reason: "yarn install" }
+      : { cmd: "corepack", args: ["yarn", "install", "--immutable"], reason: "corepack yarn install" });
+    if (fingerprint) await writeBootstrapFingerprint(repoPath, fingerprint);
+    return {
+      ready: true,
+      skipped: false,
+      stack,
+      family: "node",
+      toolchain: "node",
+      packageManager: "yarn",
+      lockfile: "yarn.lock",
+      environmentPath: nodeModulesPath,
+      commandsRun,
+      fingerprint,
+    };
+  }
+
+  if (packageLock) {
+    if (!await toolExists(runCommand, "npm")) {
+      return {
+        ready: false,
+        skipped: false,
+        stack,
+        family: "node",
+        toolchain: "node",
+        packageManager: "npm",
+        lockfile: "package-lock.json",
+        environmentPath: null,
+        commandsRun,
+        fingerprint,
+        reason: "package_lock_without_npm",
+      };
+    }
+    await runAndAssert(runCommand, repoPath, commandsRun, {
+      cmd: "npm",
+      args: ["ci"],
+      reason: "npm ci",
+    });
+    if (fingerprint) await writeBootstrapFingerprint(repoPath, fingerprint);
+    return {
+      ready: true,
+      skipped: false,
+      stack,
+      family: "node",
+      toolchain: "node",
+      packageManager: "npm",
+      lockfile: "package-lock.json",
+      environmentPath: nodeModulesPath,
+      commandsRun,
+      fingerprint,
+    };
+  }
+
+  if (mode !== "scaffold") {
+    return {
+      ready: false,
+      skipped: false,
+      stack,
+      family: "node",
+      toolchain: "node",
+      packageManager: "npm",
+      lockfile: null,
+      environmentPath: null,
+      commandsRun,
+      fingerprint,
+      reason: "missing_lockfile_for_reproducible_test_bootstrap",
+    };
+  }
+
+  if (!await toolExists(runCommand, "npm")) {
+    return {
+      ready: false,
+      skipped: false,
+      stack,
+      family: "node",
+      toolchain: "node",
+      packageManager: "npm",
+      lockfile: null,
+      environmentPath: null,
+      commandsRun,
+      fingerprint,
+      reason: "npm_not_available_for_greenfield_bootstrap",
+    };
+  }
+
+  await runAndAssert(runCommand, repoPath, commandsRun, {
+    cmd: "npm",
+    args: ["install"],
+    reason: "npm install to create deterministic lockfile",
+  });
+  const newFingerprint = await computeFingerprint(repoPath, ["package.json", ...lockfiles]);
+  if (newFingerprint) await writeBootstrapFingerprint(repoPath, newFingerprint);
+  return {
+    ready: true,
+    skipped: false,
+    stack,
+    family: "node",
+    toolchain: "node",
+    packageManager: "npm",
+    lockfile: "package-lock.json",
+    environmentPath: nodeModulesPath,
+    commandsRun,
+    fingerprint: newFingerprint,
+  };
+}
+
+async function resolvePythonInterpreter(runCommand: RunCommand): Promise<string | null> {
+  if (await toolExists(runCommand, "python3")) return "python3";
+  if (await toolExists(runCommand, "python")) return "python";
+  return null;
+}
+
+async function ensurePythonEnvironment(
+  repoPath: string,
+  stack: CanonicalStack,
+  runCommand: RunCommand,
+): Promise<BootstrapResult> {
+  const commandsRun: BootstrapCommand[] = [];
+  const fingerprint = await computeFingerprint(repoPath, ["pyproject.toml", "requirements.txt", "uv.lock"]);
+  const current = await readBootstrapFingerprint(repoPath);
+  const venvPath = path.join(repoPath, ".venv");
+  const venvPython = path.join(venvPath, "bin", "python");
+
+  if (fingerprint && current === fingerprint && await pathExists(venvPython)) {
+    return {
+      ready: true,
+      skipped: true,
+      stack,
+      family: "python",
+      toolchain: "python",
+      packageManager: "pip",
+      lockfile: await pathExists(path.join(repoPath, "uv.lock")) ? "uv.lock" : null,
+      environmentPath: venvPath,
+      commandsRun,
+      fingerprint,
+    };
+  }
+
+  const uvLock = await pathExists(path.join(repoPath, "uv.lock"));
+  const pyproject = await pathExists(path.join(repoPath, "pyproject.toml"));
+  const requirements = await pathExists(path.join(repoPath, "requirements.txt"));
+  const hasUv = await toolExists(runCommand, "uv");
+
+  if (!uvLock && !pyproject && !requirements) {
+    return {
+      ready: false,
+      skipped: false,
+      stack,
+      family: "python",
+      toolchain: "python",
+      packageManager: "pip",
+      lockfile: null,
+      environmentPath: null,
+      commandsRun,
+      fingerprint,
+      reason: "missing_pyproject_or_requirements",
+    };
+  }
+
+  if (uvLock) {
+    if (!hasUv) {
+      return {
+        ready: false,
+        skipped: false,
+        stack,
+        family: "python",
+        toolchain: "python",
+        packageManager: "uv",
+        lockfile: "uv.lock",
+        environmentPath: null,
+        commandsRun,
+        fingerprint,
+        reason: "uv_lock_without_uv",
+      };
+    }
+    await runAndAssert(runCommand, repoPath, commandsRun, {
+      cmd: "uv",
+      args: ["sync", "--locked"],
+      reason: "uv sync",
+    });
+    if (fingerprint) await writeBootstrapFingerprint(repoPath, fingerprint);
+    return {
+      ready: true,
+      skipped: false,
+      stack,
+      family: "python",
+      toolchain: "python",
+      packageManager: "uv",
+      lockfile: "uv.lock",
+      environmentPath: venvPath,
+      commandsRun,
+      fingerprint,
+    };
+  }
+
+  if (hasUv) {
+    await runAndAssert(runCommand, repoPath, commandsRun, {
+      cmd: "uv",
+      args: ["venv", ".venv"],
+      reason: "create project-local virtualenv with uv",
+    });
+    if (requirements) {
+      await runAndAssert(runCommand, repoPath, commandsRun, {
+        cmd: "uv",
+        args: ["pip", "install", "--python", ".venv/bin/python", "-r", "requirements.txt"],
+        reason: "install requirements.txt dependencies with uv",
+      });
+    }
+    if (pyproject) {
+      const hasDevExtra = await hasPyprojectDevExtra(repoPath);
+      await runAndAssert(runCommand, repoPath, commandsRun, {
+        cmd: "uv",
+        args: ["pip", "install", "--python", ".venv/bin/python", "-e", hasDevExtra ? ".[dev]" : "."],
+        reason: hasDevExtra ? "install editable project with dev extras via uv" : "install editable project via uv",
+      });
+    }
+    if (fingerprint) await writeBootstrapFingerprint(repoPath, fingerprint);
+    return {
+      ready: true,
+      skipped: false,
+      stack,
+      family: "python",
+      toolchain: "python",
+      packageManager: "uv",
+      lockfile: null,
+      environmentPath: venvPath,
+      commandsRun,
+      fingerprint,
+    };
+  }
+
+  const pythonInterpreter = await resolvePythonInterpreter(runCommand);
+  if (!pythonInterpreter) {
+    return {
+      ready: false,
+      skipped: false,
+      stack,
+      family: "python",
+      toolchain: "python",
+      packageManager: "pip",
+      lockfile: null,
+      environmentPath: null,
+      commandsRun,
+      fingerprint,
+      reason: "python_not_available",
+    };
+  }
+
+  await runAndAssert(runCommand, repoPath, commandsRun, {
+    cmd: pythonInterpreter,
+    args: ["-m", "venv", ".venv"],
+    reason: "create project-local virtualenv",
+  }).catch(async () => {
+    const bootstrapDir = path.join(repoPath, BOOTSTRAP_STATE_DIR, "python-bootstrap");
+    await runAndAssert(runCommand, repoPath, commandsRun, {
+      cmd: pythonInterpreter,
+      args: ["-m", "pip", "install", "--disable-pip-version-check", "--target", bootstrapDir, "virtualenv>=20.26.0"],
+      reason: "install local virtualenv fallback",
+    });
+    await runAndAssert(runCommand, repoPath, commandsRun, {
+      cmd: pythonInterpreter,
+      args: ["-m", "virtualenv", ".venv"],
+      env: {
+        PYTHONPATH: `${bootstrapDir}${process.env.PYTHONPATH ? `:${process.env.PYTHONPATH}` : ""}`,
+      },
+      reason: "create project-local virtualenv with fallback",
+    });
+  });
+  await runAndAssert(runCommand, repoPath, commandsRun, {
+    cmd: venvPython,
+    args: ["-m", "pip", "install", "--upgrade", "pip"],
+    reason: "upgrade pip in project-local virtualenv",
+  });
+
+  if (requirements) {
+    await runAndAssert(runCommand, repoPath, commandsRun, {
+      cmd: venvPython,
+      args: ["-m", "pip", "install", "-r", "requirements.txt"],
+      reason: "install requirements.txt dependencies",
+    });
+  }
+
+  if (pyproject) {
+    const hasDevExtra = await hasPyprojectDevExtra(repoPath);
+    await runAndAssert(runCommand, repoPath, commandsRun, {
+      cmd: venvPython,
+      args: ["-m", "pip", "install", "-e", hasDevExtra ? ".[dev]" : "."],
+      reason: hasDevExtra ? "install editable project with dev extras" : "install editable project",
+    });
+  }
+
+  if (fingerprint) await writeBootstrapFingerprint(repoPath, fingerprint);
+  return {
+    ready: true,
+    skipped: false,
+    stack,
+    family: "python",
+    toolchain: "python",
+    packageManager: "pip",
+    lockfile: null,
+    environmentPath: venvPath,
+    commandsRun,
+    fingerprint,
+  };
+}
+
+export async function ensureProjectTestEnvironment(opts: {
+  repoPath: string;
+  stack: CanonicalStack;
+  mode?: BootstrapMode;
+  runCommand: RunCommand;
+}): Promise<BootstrapResult> {
+  const mode = opts.mode ?? "qa";
+  const family = familyForStack(opts.stack);
+
+  if (family === "node") {
+    return ensureNodeEnvironment(opts.repoPath, opts.stack, mode, opts.runCommand);
+  }
+  if (family === "python") {
+    return ensurePythonEnvironment(opts.repoPath, opts.stack, opts.runCommand);
+  }
+
+  return {
+    ready: false,
+    skipped: false,
+    stack: opts.stack,
+    family,
+    toolchain: family,
+    packageManager: family,
+    lockfile: null,
+    environmentPath: null,
+    commandsRun: [],
+    fingerprint: null,
+    reason: `${opts.stack}_bootstrap_not_implemented`,
+  };
+}

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "owner": "MestreY0d4-Uninter",
+  "repo_name": "password-cli",
+  "repo_url": "https://github.com/MestreY0d4-Uninter/password-cli",
+  "repo_local": "/tmp/fabrica-home/git/MestreY0d4-Uninter/password-cli",
+  "project_slug": "password-cli",
+  "stack": "python-cli",
+  "objective": "Ship a portable password CLI",
+  "delivery_target": "cli",
+  "repo_target_source": "spec.title"
+}

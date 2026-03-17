@@ -1,0 +1,713 @@
+/**
+ * GitLabProvider — IssueProvider implementation using glab CLI.
+ */
+import {
+  type IssueProvider,
+  type Issue,
+  type StateLabel,
+  type IssueComment,
+  type PrSelector,
+  type PrStatus,
+  type PrReviewComment,
+  type ReviewSubmission,
+  type ReviewSubmissionResult,
+  type ReviewCapabilities,
+  type ProviderIdentity,
+  type RepositoryEnsureRequest,
+  type RepositoryEnsureResult,
+  PrState,
+} from "./provider.js";
+import type { RunCommand } from "../context.js";
+import { getRootLogger } from "../observability/logger.js";
+import { withResilience } from "./resilience.js";
+import {
+  DEFAULT_WORKFLOW,
+  getStateLabels,
+  LEGACY_OPERATIONAL_LABELS,
+  getLabelColors,
+  type WorkflowConfig,
+} from "../workflow/index.js";
+
+type GitLabMR = {
+  iid: number;
+  title: string;
+  description: string;
+  web_url: string;
+  state: string;
+  source_branch?: string;
+  merged_at: string | null;
+  approved_by?: Array<unknown>;
+  author?: { username: string };
+};
+
+const logger = getRootLogger().child({ provider: "gitlab" });
+
+export class GitLabProvider implements IssueProvider {
+  private repoPath: string;
+  private workflow: WorkflowConfig;
+  private runCommand: RunCommand;
+
+  constructor(opts: { repoPath: string; runCommand: RunCommand; workflow?: WorkflowConfig }) {
+    this.repoPath = opts.repoPath;
+    this.runCommand = opts.runCommand;
+    this.workflow = opts.workflow ?? DEFAULT_WORKFLOW;
+  }
+
+  private async glab(args: string[]): Promise<string> {
+    return withResilience(async () => {
+      const result = await this.runCommand(["glab", ...args], { timeoutMs: 30_000, cwd: this.repoPath });
+      return result.stdout.trim();
+    });
+  }
+
+  /** Get MRs linked to an issue via GitLab's native related_merge_requests API. */
+  private async getRelatedMRs(issueId: number): Promise<GitLabMR[]> {
+    try {
+      const raw = await this.glab(["api", `projects/:id/issues/${issueId}/related_merge_requests`, "--paginate"]);
+      if (!raw) return [];
+      return JSON.parse(raw) as GitLabMR[];
+    } catch { return []; }
+  }
+
+  private async getMrByIid(mrIid: number): Promise<GitLabMR | null> {
+    try {
+      const raw = await this.glab(["api", `projects/:id/merge_requests/${mrIid}`]);
+      return JSON.parse(raw) as GitLabMR;
+    } catch { return null; }
+  }
+
+  async findOpenPrForBranch(branchName: string): Promise<PrStatus | null> {
+    try {
+      const raw = await this.glab([
+        "mr", "list",
+        "--source-branch", branchName,
+        "--state", "opened",
+        "--output", "json",
+      ]);
+      const mrs = JSON.parse(raw) as GitLabMR[];
+      const mr = mrs.find((candidate) => candidate.source_branch === branchName) ?? mrs[0];
+      if (!mr) return null;
+      return this.getPrStatus(0, { prNumber: mr.iid });
+    } catch {
+      return null;
+    }
+  }
+
+  async ensureRepository(_request: RepositoryEnsureRequest): Promise<RepositoryEnsureResult> {
+    throw new Error("Autonomous repository provisioning is only implemented for GitHub projects right now");
+  }
+
+  async resolveRepositoryRemote(): Promise<string | null> {
+    try {
+      const result = await this.runCommand(["git", "remote", "get-url", "origin"], {
+        timeoutMs: 5_000,
+        cwd: this.repoPath,
+      });
+      return result.stdout.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async ensureLabel(name: string, color: string): Promise<void> {
+    try {
+      // Update-first: always set the color on existing labels
+      await this.glab([
+        "api", `projects/:id/labels/${encodeURIComponent(name)}`,
+        "--method", "PUT",
+        "--field", `color=${color}`,
+      ]);
+    } catch {
+      // Label doesn't exist yet — create it
+      await this.glab([
+        "api", "projects/:id/labels",
+        "--method", "POST",
+        "--field", `name=${name}`,
+        "--field", `color=${color}`,
+      ]);
+    }
+  }
+
+  async ensureAllStateLabels(): Promise<void> {
+    const labels = getStateLabels(this.workflow);
+    const colors = getLabelColors(this.workflow);
+    for (const label of labels) {
+      await this.ensureLabel(label, colors[label]);
+    }
+  }
+
+  async createIssue(title: string, description: string, label: StateLabel, assignees?: string[]): Promise<Issue> {
+    // Pass description directly as argv — runCommand uses spawn (no shell),
+    // so no escaping issues with special characters.
+    const args = ["issue", "create", "--title", title, "--description", description, "--label", label];
+    if (assignees?.length) args.push("--assignee", assignees.join(","));
+    const stdout = await this.glab(args);
+    // glab issue create returns the issue URL
+    const match = stdout.match(/\/issues\/(\d+)/);
+    if (!match) throw new Error(`Failed to parse issue URL: ${stdout}`);
+    return this.getIssue(parseInt(match[1], 10));
+  }
+
+  async listIssuesByLabel(label: StateLabel): Promise<Issue[]> {
+    try {
+      const raw = await this.glab(["issue", "list", "--label", label, "--output", "json"]);
+      return JSON.parse(raw) as Issue[];
+    } catch { return []; }
+  }
+
+  async listIssues(opts?: { label?: string; state?: "open" | "closed" | "all" }): Promise<Issue[]> {
+    try {
+      const args = ["issue", "list", "--output", "json"];
+      if (opts?.label) args.push("--label", opts.label);
+      if (opts?.state === "closed") args.push("--closed");
+      else if (opts?.state === "all") args.push("--all");
+      else args.push("--opened");
+      const raw = await this.glab(args);
+      return JSON.parse(raw) as Issue[];
+    } catch { return []; }
+  }
+
+  async getIssue(issueId: number): Promise<Issue> {
+    const raw = await this.glab(["issue", "view", String(issueId), "--output", "json"]);
+    return JSON.parse(raw) as Issue;
+  }
+
+  async listComments(issueId: number): Promise<IssueComment[]> {
+    try {
+      const raw = await this.glab(["api", `projects/:id/issues/${issueId}/notes`, "--paginate"]);
+      const notes = JSON.parse(raw) as Array<{ id: number; author: { username: string }; body: string; created_at: string; system: boolean }>;
+      // Filter out system notes (e.g. "changed label", "closed issue")
+      return notes
+        .filter((note) => !note.system)
+        .map((note) => ({
+          id: note.id,
+          author: note.author.username,
+          body: note.body,
+          created_at: note.created_at,
+        }));
+    } catch { return []; }
+  }
+
+  async transitionLabel(issueId: number, from: StateLabel, to: StateLabel): Promise<void> {
+    // Two-phase transition to prevent label loss on failure:
+    // Phase 1: Add new label first — issue is correctly labelled even if phase 2 fails
+    // Phase 2: Remove old state labels (best-effort)
+    await this.glab(["issue", "update", String(issueId), "--label", to]);
+
+    const issue = await this.getIssue(issueId);
+    const stateLabels = getStateLabels(this.workflow);
+    const currentStateLabels = issue.labels.filter((l) => stateLabels.includes(l) && l !== to);
+    const staleOperationalLabels = issue.labels.filter((l) =>
+      LEGACY_OPERATIONAL_LABELS.includes(l as (typeof LEGACY_OPERATIONAL_LABELS)[number]),
+    );
+
+    if (currentStateLabels.length > 0 || staleOperationalLabels.length > 0) {
+      const args = ["issue", "update", String(issueId)];
+      for (const l of currentStateLabels) args.push("--unlabel", l);
+      for (const l of staleOperationalLabels) args.push("--unlabel", l);
+      await this.glab(args);
+    }
+
+    // Post-transition validation: verify exactly one state label remains (#473)
+    try {
+      const postIssue = await this.getIssue(issueId);
+      const postStateLabels = postIssue.labels.filter((l) => stateLabels.includes(l));
+      if (postStateLabels.length !== 1 || !postStateLabels.includes(to)) {
+        logger.error({
+          issueId,
+          from,
+          to,
+          postStateLabels,
+        }, "State transition anomaly detected after GitLab issue label transition");
+      }
+    } catch {
+      // Validation is best-effort
+    }
+  }
+
+  async addLabel(issueId: number, label: string): Promise<void> {
+    await this.glab(["issue", "update", String(issueId), "--label", label]);
+  }
+
+  async removeLabels(issueId: number, labels: string[]): Promise<void> {
+    if (labels.length === 0) return;
+    const args = ["issue", "update", String(issueId)];
+    for (const l of labels) args.push("--unlabel", l);
+    await this.glab(args);
+  }
+
+  async closeIssue(issueId: number): Promise<void> { await this.glab(["issue", "close", String(issueId)]); }
+  async reopenIssue(issueId: number): Promise<void> { await this.glab(["issue", "reopen", String(issueId)]); }
+
+  async getMergedMRUrl(issueId: number): Promise<string | null> {
+    const mrs = await this.getRelatedMRs(issueId);
+    const merged = mrs
+      .filter((mr) => mr.state === "merged" && mr.merged_at)
+      .sort((a, b) => new Date(b.merged_at!).getTime() - new Date(a.merged_at!).getTime());
+    return merged[0]?.web_url ?? null;
+  }
+
+  async getPrStatus(issueId: number, selector?: PrSelector): Promise<PrStatus> {
+    if (selector?.prNumber) {
+      const mr = await this.getMrByIid(selector.prNumber);
+      if (!mr) return { state: PrState.CLOSED, url: null };
+      if (mr.state === "opened") {
+        const approved = await this.isMrApproved(mr.iid);
+        let state: PrState;
+        if (approved) {
+          state = PrState.APPROVED;
+        } else {
+          const hasUnresolved = await this.hasUnresolvedDiscussions(mr.iid);
+          if (hasUnresolved) state = PrState.CHANGES_REQUESTED;
+          else {
+            const hasComments = await this.hasConversationComments(mr.iid);
+            state = hasComments ? PrState.HAS_COMMENTS : PrState.OPEN;
+          }
+        }
+        const mergeable = await this.isMrMergeable(mr.iid);
+        return {
+          number: mr.iid,
+          state,
+          url: mr.web_url,
+          title: mr.title,
+          body: mr.description,
+          sourceBranch: mr.source_branch,
+          mergeable,
+        };
+      }
+      if (mr.state === "merged") {
+        return {
+          number: mr.iid,
+          state: PrState.MERGED,
+          url: mr.web_url,
+          title: mr.title,
+          body: mr.description,
+          sourceBranch: mr.source_branch,
+        };
+      }
+      return {
+        number: mr.iid,
+        state: PrState.CLOSED,
+        url: mr.web_url,
+        title: mr.title,
+        body: mr.description,
+        sourceBranch: mr.source_branch,
+      };
+    }
+
+    const mrs = await this.getRelatedMRs(issueId);
+    // Check open MRs first
+    const open = mrs.find((mr) => mr.state === "opened");
+    if (open) {
+      const approved = await this.isMrApproved(open.iid);
+
+      // Detect changes requested via unresolved discussion threads
+      let state: PrState;
+      if (approved) {
+        state = PrState.APPROVED;
+      } else {
+        const hasUnresolved = await this.hasUnresolvedDiscussions(open.iid);
+        if (hasUnresolved) {
+          state = PrState.CHANGES_REQUESTED;
+        } else {
+          // Check for top-level conversation comments from non-author users
+          const hasComments = await this.hasConversationComments(open.iid);
+          state = hasComments ? PrState.HAS_COMMENTS : PrState.OPEN;
+        }
+      }
+
+      // Detect merge conflicts
+      const mergeable = await this.isMrMergeable(open.iid);
+
+      return { number: open.iid, state, url: open.web_url, title: open.title, body: open.description, sourceBranch: open.source_branch, mergeable };
+    }
+    // Check merged MRs
+    const merged = mrs.find((mr) => mr.state === "merged");
+    if (merged) return { number: merged.iid, state: PrState.MERGED, url: merged.web_url, title: merged.title, body: merged.description, sourceBranch: merged.source_branch };
+    // Check for closed-without-merge MRs. url: non-null = MR was explicitly closed;
+    // url: null = no MR has ever been created for this issue.
+    const closed = mrs.find((mr) => mr.state === "closed");
+    if (closed) return { number: closed.iid, state: PrState.CLOSED, url: closed.web_url, title: closed.title, body: closed.description, sourceBranch: closed.source_branch };
+    return { state: PrState.CLOSED, url: null };
+  }
+
+  /** Check if an MR has unresolved discussion threads (proxy for changes requested). */
+  private async hasUnresolvedDiscussions(mrIid: number): Promise<boolean> {
+    try {
+      const raw = await this.glab(["api", `projects/:id/merge_requests/${mrIid}/discussions`]);
+      const discussions = JSON.parse(raw) as Array<{ notes: Array<{ resolvable: boolean; resolved: boolean; system: boolean }> }>;
+      return discussions.some((d) =>
+        d.notes.some((n) => n.resolvable && !n.resolved && !n.system),
+      );
+    } catch { return false; }
+  }
+
+  /**
+   * Check if an MR has any top-level conversation notes from human users.
+   * Excludes only system notes and empty bodies (author comments are included).
+   * Uses the MR notes endpoint (regular comments, not threaded discussions).
+   */
+  private async hasConversationComments(mrIid: number): Promise<boolean> {
+    try {
+      const raw = await this.glab(["api", `projects/:id/merge_requests/${mrIid}/notes`]);
+      const notes = JSON.parse(raw) as Array<{ id: number; system: boolean; body: string }>;
+      const candidates = notes.filter((n) => !n.system && n.body.trim().length > 0);
+      for (const note of candidates) {
+        if (!(await this.noteHasEyesEmoji(mrIid, note.id))) return true;
+      }
+      return false;
+    } catch { return false; }
+  }
+
+  /** Check if a note already has an 👀 award emoji (marks it as processed). */
+  private async noteHasEyesEmoji(mrIid: number, noteId: number): Promise<boolean> {
+    try {
+      const raw = await this.glab(["api", `projects/:id/merge_requests/${mrIid}/notes/${noteId}/award_emoji`]);
+      const emojis = JSON.parse(raw) as Array<{ name: string }>;
+      return emojis.some((e) => e.name === "eyes");
+    } catch { return false; }
+  }
+
+  /**
+   * Fetch top-level conversation notes on an MR from human users.
+   * Excludes only system notes and empty bodies.
+   */
+  private async fetchConversationComments(
+    mrIid: number,
+  ): Promise<Array<{ id: number; author: { username: string }; body: string; created_at: string }>> {
+    try {
+      const raw = await this.glab(["api", `projects/:id/merge_requests/${mrIid}/notes`]);
+      const all = JSON.parse(raw) as Array<{ id: number; author: { username: string }; system: boolean; body: string; created_at: string }>;
+      return all.filter(
+        (n) => !n.system && n.body.trim().length > 0,
+      );
+    } catch { return []; }
+  }
+
+  /** Check MR merge status for conflicts. */
+  private async isMrMergeable(mrIid: number): Promise<boolean | undefined> {
+    try {
+      const raw = await this.glab(["api", `projects/:id/merge_requests/${mrIid}?include_rebase_in_progress=true`]);
+      const mr = JSON.parse(raw) as { has_conflicts?: boolean; detailed_merge_status?: string };
+      if (mr.has_conflicts === true) return false;
+      if (mr.detailed_merge_status === "conflict") return false;
+      if (mr.detailed_merge_status === "mergeable" || mr.detailed_merge_status === "ci_must_pass") return true;
+      return undefined; // Unknown
+    } catch { return undefined; }
+  }
+
+  /** Check if an MR is approved via the dedicated approvals endpoint. */
+  private async isMrApproved(mrIid: number): Promise<boolean> {
+    try {
+      const raw = await this.glab(["api", `projects/:id/merge_requests/${mrIid}/approvals`]);
+      const data = JSON.parse(raw) as {
+        approved?: boolean;
+        approvals_left?: number;
+        approved_by?: Array<unknown>;
+      };
+      // Only trust explicit approvals — ignore bare 'approved' flag.
+      // When a project has zero approval rules, GitLab returns approved:true
+      // even though nobody has actually reviewed, causing false positives.
+      const hasExplicitApproval = Array.isArray(data.approved_by) && data.approved_by.length > 0;
+      if (!hasExplicitApproval) return false;
+      // All required approvals satisfied
+      return (data.approvals_left ?? 1) <= 0;
+    } catch { return false; }
+  }
+
+  async mergePr(issueId: number, selector?: PrSelector): Promise<void> {
+    const mrIid = selector?.prNumber ?? (await this.getRelatedMRs(issueId)).find((mr) => mr.state === "opened")?.iid;
+    if (!mrIid) throw new Error(`No open MR found for issue #${issueId}`);
+    await this.glab(["mr", "merge", String(mrIid)]);
+  }
+
+  async getPrDiff(issueId: number, selector?: PrSelector): Promise<string | null> {
+    const mrIid = selector?.prNumber ?? (await this.getRelatedMRs(issueId)).find((mr) => mr.state === "opened")?.iid;
+    if (!mrIid) return null;
+    try {
+      return await this.glab(["mr", "diff", String(mrIid)]);
+    } catch { return null; }
+  }
+
+  async getPrReviewComments(issueId: number, selector?: PrSelector): Promise<PrReviewComment[]> {
+    const openIid = selector?.prNumber ?? (await this.getRelatedMRs(issueId)).find((mr) => mr.state === "opened")?.iid;
+    if (!openIid) return [];
+    const comments: PrReviewComment[] = [];
+
+    try {
+      const raw = await this.glab(["api", `projects/:id/merge_requests/${openIid}/discussions`]);
+      const discussions = JSON.parse(raw) as Array<{
+        notes: Array<{
+          id: number; author: { username: string }; body: string;
+          resolvable: boolean; resolved: boolean; system: boolean;
+          created_at: string; position?: { new_path?: string; new_line?: number };
+        }>;
+      }>;
+
+      for (const disc of discussions) {
+        for (const note of disc.notes) {
+          if (note.system) continue;
+          comments.push({
+            id: note.id,
+            author: note.author.username,
+            body: note.body,
+            state: note.resolvable ? (note.resolved ? "RESOLVED" : "UNRESOLVED") : "COMMENTED",
+            created_at: note.created_at,
+            path: note.position?.new_path,
+            line: note.position?.new_line ?? undefined,
+          });
+        }
+      }
+    } catch { /* best-effort */ }
+
+    // Also include top-level conversation notes (regular MR comments, not threaded)
+    const conversationNotes = await this.fetchConversationComments(openIid);
+    for (const n of conversationNotes) {
+      // Avoid duplicates: discussions endpoint may already include these
+      if (!comments.some((c) => c.id === n.id)) {
+        comments.push({
+          id: n.id,
+          author: n.author.username,
+          body: n.body,
+          state: "COMMENTED",
+          created_at: n.created_at,
+        });
+      }
+    }
+
+    comments.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    return comments;
+  }
+
+  async submitPrReview(issueId: number, review: ReviewSubmission, selector?: PrSelector): Promise<ReviewSubmissionResult> {
+    const result = await this.addPrConversationComment(issueId, review.body, selector);
+    return {
+      ...result,
+      fallbackReason: "gitlab_cli_review_comment",
+    };
+  }
+
+  async addPrConversationComment(issueId: number, body: string, selector?: PrSelector): Promise<ReviewSubmissionResult> {
+    const open = selector?.prNumber ? await this.getMrByIid(selector.prNumber) : (await this.getRelatedMRs(issueId)).find((mr) => mr.state === "opened");
+    if (!open) throw new Error(`No open MR found for issue #${issueId}`);
+    const raw = await this.glab([
+      "api", `projects/:id/merge_requests/${open.iid}/notes`,
+      "--method", "POST",
+      "--field", `body=${body}`,
+    ]);
+    const parsed = JSON.parse(raw) as { id: number };
+    return {
+      artifactId: parsed.id,
+      artifactType: "pr_conversation_comment",
+      prUrl: open.web_url,
+      usedFallback: true,
+      fallbackReason: "gitlab_cli_review_comment",
+    };
+  }
+
+  async getReviewCapabilities(_issueId: number): Promise<ReviewCapabilities> {
+    return {
+      formalReview: false,
+      conversationComment: true,
+      fallbackReason: "gitlab_cli_review_comment",
+    };
+  }
+
+  async getProviderIdentity(): Promise<ProviderIdentity> {
+    return { mode: "gitlab_cli" };
+  }
+
+  async addComment(issueId: number, body: string): Promise<number> {
+    const raw = await this.glab([
+      "api", `projects/:id/issues/${issueId}/notes`,
+      "--method", "POST",
+      "--field", `body=${body}`,
+    ]);
+    const parsed = JSON.parse(raw) as { id: number };
+    return parsed.id;
+  }
+
+  /**
+   * Add an emoji award (reaction) to an MR note/comment.
+   * Uses the GitLab Award Emoji API on MR notes.
+   * Best-effort — swallows all errors.
+   * @param issueId  Used to locate the associated open MR via getRelatedMRs
+   * @param commentId  The note ID on the MR
+   * @param emoji  Emoji name without colons (e.g. "robot", "thumbsup")
+   */
+  async reactToIssue(issueId: number, emoji: string): Promise<void> {
+    try {
+      await this.glab([
+        "api", `projects/:id/issues/${issueId}/award_emoji`,
+        "--method", "POST",
+        "--field", `name=${emoji}`,
+      ]);
+    } catch { /* best-effort */ }
+  }
+
+  async issueHasReaction(issueId: number, emoji: string): Promise<boolean> {
+    try {
+      const raw = await this.glab(["api", `projects/:id/issues/${issueId}/award_emoji`]);
+      const emojis = JSON.parse(raw) as Array<{ name: string }>;
+      return emojis.some((e) => e.name === emoji);
+    } catch { return false; }
+  }
+
+  async reactToPr(issueId: number, emoji: string): Promise<void> {
+    try {
+      const mrs = await this.getRelatedMRs(issueId);
+      const open = mrs.find((mr) => mr.state === "opened");
+      if (!open) return;
+      await this.glab([
+        "api", `projects/:id/merge_requests/${open.iid}/award_emoji`,
+        "--method", "POST",
+        "--field", `name=${emoji}`,
+      ]);
+    } catch { /* best-effort */ }
+  }
+
+  async prHasReaction(issueId: number, emoji: string): Promise<boolean> {
+    try {
+      const mrs = await this.getRelatedMRs(issueId);
+      const open = mrs.find((mr) => mr.state === "opened");
+      if (!open) return false;
+      const raw = await this.glab(["api", `projects/:id/merge_requests/${open.iid}/award_emoji`]);
+      const emojis = JSON.parse(raw) as Array<{ name: string }>;
+      return emojis.some((e) => e.name === emoji);
+    } catch { return false; }
+  }
+
+  async reactToIssueComment(issueId: number, commentId: number, emoji: string): Promise<void> {
+    try {
+      await this.glab([
+        "api", `projects/:id/issues/${issueId}/notes/${commentId}/award_emoji`,
+        "--method", "POST",
+        "--field", `name=${emoji}`,
+      ]);
+    } catch { /* best-effort */ }
+  }
+
+  async reactToPrComment(issueId: number, commentId: number, emoji: string): Promise<void> {
+    try {
+      const mrs = await this.getRelatedMRs(issueId);
+      const open = mrs.find((mr) => mr.state === "opened");
+      if (!open) return;
+      await this.glab([
+        "api", `projects/:id/merge_requests/${open.iid}/notes/${commentId}/award_emoji`,
+        "--method", "POST",
+        "--field", `name=${emoji}`,
+      ]);
+    } catch { /* best-effort */ }
+  }
+
+  async reactToPrReview(issueId: number, reviewId: number, emoji: string): Promise<void> {
+    // GitLab doesn't distinguish reviews from comments — use the same note reaction API
+    await this.reactToPrComment(issueId, reviewId, emoji);
+  }
+
+  async issueCommentHasReaction(issueId: number, commentId: number, emoji: string): Promise<boolean> {
+    try {
+      const raw = await this.glab(["api", `projects/:id/issues/${issueId}/notes/${commentId}/award_emoji`]);
+      const emojis = JSON.parse(raw) as Array<{ name: string }>;
+      return emojis.some((e) => e.name === emoji);
+    } catch { return false; }
+  }
+
+  async prCommentHasReaction(issueId: number, commentId: number, emoji: string): Promise<boolean> {
+    try {
+      const mrs = await this.getRelatedMRs(issueId);
+      const open = mrs.find((mr) => mr.state === "opened");
+      if (!open) return false;
+      const raw = await this.glab([
+        "api", `projects/:id/merge_requests/${open.iid}/notes/${commentId}/award_emoji`,
+      ]);
+      const emojis = JSON.parse(raw) as Array<{ name: string }>;
+      return emojis.some((e) => e.name === emoji);
+    } catch { return false; }
+  }
+
+  async prReviewHasReaction(issueId: number, reviewId: number, emoji: string): Promise<boolean> {
+    // GitLab doesn't distinguish reviews from comments, so use the same logic as prCommentHasReaction
+    return this.prCommentHasReaction(issueId, reviewId, emoji);
+  }
+
+  async editIssue(issueId: number, updates: { title?: string; body?: string }): Promise<Issue> {
+    const args = ["issue", "update", String(issueId)];
+    if (updates.title !== undefined) args.push("--title", updates.title);
+    if (updates.body !== undefined) args.push("--description", updates.body);
+    await this.glab(args);
+    return this.getIssue(issueId);
+  }
+
+  /**
+   * Check if work for an issue is already present on the base branch via git log.
+   * Searches the last 200 commits on baseBranch for commit messages mentioning #issueId or !issueId.
+   * Used as a fallback when no MR exists (e.g., direct commit to main).
+   */
+  async isCommitOnBaseBranch(issueId: number, baseBranch: string): Promise<boolean> {
+    try {
+      // Search for issue references: #N (issue) or !N (MR) in commit messages
+      const patterns = [`#${issueId}`, `!${issueId}`];
+      for (const pattern of patterns) {
+        const result = await this.runCommand(
+          ["git", "log", `origin/${baseBranch}`, "--oneline", "-200", "--grep", pattern],
+          { timeoutMs: 15_000, cwd: this.repoPath },
+        );
+        if (result.stdout.trim().length > 0) return true;
+      }
+      return false;
+    } catch { return false; }
+  }
+
+  async uploadAttachment(
+    issueId: number,
+    file: { filename: string; buffer: Buffer; mimeType: string },
+  ): Promise<string | null> {
+    try {
+      // Get project info and auth token
+      const projectRaw = await this.glab(["api", "projects/:id", "--method", "GET"]);
+      const project = JSON.parse(projectRaw);
+      const projectId: number = project.id;
+      const webUrl: string = project.web_url;
+
+      const tokenRaw = await this.runCommand(
+        ["glab", "config", "get", "token"],
+        { timeoutMs: 10_000, cwd: this.repoPath },
+      );
+      const token = tokenRaw.stdout.trim();
+      if (!token) return null;
+
+      // Write to temp file for curl multipart upload
+      const os = await import("node:os");
+      const fs = await import("node:fs/promises");
+      const path = await import("node:path");
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-upload-"));
+      const tmpFile = path.join(tmpDir, file.filename);
+      await fs.writeFile(tmpFile, file.buffer);
+
+      try {
+        const apiBase = webUrl.replace(/\/[^/]+\/[^/]+\/?$/, "");
+        const result = await this.runCommand(
+          ["curl", "--silent", "--fail", "--show-error",
+            "--header", `PRIVATE-TOKEN: ${token}`,
+            "--form", `file=@${tmpFile}`,
+            `${apiBase}/api/v4/projects/${projectId}/uploads`],
+          { timeoutMs: 30_000, cwd: this.repoPath },
+        );
+        const parsed = JSON.parse(result.stdout);
+        if (parsed.full_path) return `${webUrl}${parsed.full_path}`;
+        if (parsed.url) return `${webUrl}${parsed.url}`;
+        return null;
+      } finally {
+        await fs.unlink(tmpFile).catch(() => {});
+        await fs.rmdir(tmpDir).catch(() => {});
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  async healthCheck(): Promise<boolean> {
+    try { await this.glab(["auth", "status"]); return true; } catch { return false; }
+  }
+}

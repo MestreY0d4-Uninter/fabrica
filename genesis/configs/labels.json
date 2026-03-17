@@ -1,0 +1,202 @@
+[
+  {
+    "name": "Planning",
+    "color": "95a5a6",
+    "description": "Issue in planning phase"
+  },
+  {
+    "name": "To Do",
+    "color": "428bca",
+    "description": "Ready for development"
+  },
+  {
+    "name": "Doing",
+    "color": "f0ad4e",
+    "description": "In progress"
+  },
+  {
+    "name": "To Review",
+    "color": "7057ff",
+    "description": "Awaiting code review"
+  },
+  {
+    "name": "Reviewing",
+    "color": "c5def5",
+    "description": "Review in progress"
+  },
+  {
+    "name": "To Test",
+    "color": "5bc0de",
+    "description": "Awaiting QA testing"
+  },
+  {
+    "name": "Testing",
+    "color": "9b59b6",
+    "description": "Testing in progress"
+  },
+  {
+    "name": "Done",
+    "color": "5cb85c",
+    "description": "Completed"
+  },
+  {
+    "name": "Rejected",
+    "color": "e11d48",
+    "description": "Rejected"
+  },
+  {
+    "name": "To Improve",
+    "color": "d9534f",
+    "description": "Changes requested"
+  },
+  {
+    "name": "Refining",
+    "color": "f39c12",
+    "description": "Needs refinement"
+  },
+  {
+    "name": "To Research",
+    "color": "0075ca",
+    "description": "Needs investigation"
+  },
+  {
+    "name": "Researching",
+    "color": "4a90e2",
+    "description": "Research in progress"
+  },
+  {
+    "name": "approved",
+    "color": "0e8a16",
+    "description": "Approved for dispatch"
+  },
+  {
+    "name": "review:agent",
+    "color": "d93f0b",
+    "description": "Review by agent"
+  },
+  {
+    "name": "review:human",
+    "color": "d93f0b",
+    "description": "Review by human"
+  },
+  {
+    "name": "review:skip",
+    "color": "d93f0b",
+    "description": "Skip review"
+  },
+  {
+    "name": "test:skip",
+    "color": "d93f0b",
+    "description": "Skip testing"
+  },
+  {
+    "name": "type:feature",
+    "color": "0E8A16",
+    "description": "Feature request"
+  },
+  {
+    "name": "type:bugfix",
+    "color": "D93F0B",
+    "description": "Bug fix"
+  },
+  {
+    "name": "type:refactor",
+    "color": "FBCA04",
+    "description": "Code refactoring"
+  },
+  {
+    "name": "type:research",
+    "color": "0075CA",
+    "description": "Research/investigation"
+  },
+  {
+    "name": "type:infra",
+    "color": "5319E7",
+    "description": "Infrastructure/DevOps"
+  },
+  {
+    "name": "priority:critical",
+    "color": "B60205",
+    "description": "P0 - Critical"
+  },
+  {
+    "name": "priority:high",
+    "color": "D93F0B",
+    "description": "P1 - High"
+  },
+  {
+    "name": "priority:medium",
+    "color": "FBCA04",
+    "description": "P2 - Medium"
+  },
+  {
+    "name": "priority:normal",
+    "color": "0E8A16",
+    "description": "P3 - Normal"
+  },
+  {
+    "name": "effort:small",
+    "color": "C2E0C6",
+    "description": "≤3 files, ≤3 ACs"
+  },
+  {
+    "name": "effort:medium",
+    "color": "FEF2C0",
+    "description": "≤10 files, ≤7 ACs"
+  },
+  {
+    "name": "effort:large",
+    "color": "F9D0C4",
+    "description": "≤25 files, ≤15 ACs"
+  },
+  {
+    "name": "developer:junior",
+    "color": "0e8a16",
+    "description": ""
+  },
+  {
+    "name": "developer:medior",
+    "color": "0e8a16",
+    "description": ""
+  },
+  {
+    "name": "developer:senior",
+    "color": "0e8a16",
+    "description": ""
+  },
+  {
+    "name": "reviewer:junior",
+    "color": "d93f0b",
+    "description": ""
+  },
+  {
+    "name": "reviewer:senior",
+    "color": "d93f0b",
+    "description": ""
+  },
+  {
+    "name": "tester:junior",
+    "color": "5319e7",
+    "description": ""
+  },
+  {
+    "name": "tester:medior",
+    "color": "5319e7",
+    "description": ""
+  },
+  {
+    "name": "tester:senior",
+    "color": "5319e7",
+    "description": ""
+  },
+  {
+    "name": "needs-human",
+    "color": "d73a4a",
+    "description": "Requires human intervention"
+  },
+  {
+    "name": "effort:xlarge",
+    "color": "BFD4F2",
+    "description": ">25 files or >15 ACs"
+  }
+]

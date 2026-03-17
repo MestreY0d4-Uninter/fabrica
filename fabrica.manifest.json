@@ -1,0 +1,24 @@
+{
+  "layoutVersion": "fabrica-v1",
+  "assets": {
+    "defaultsDir": "defaults",
+    "promptsDir": "defaults/fabrica/prompts",
+    "securityChecklistPath": "defaults/fabrica/prompts/security-checklist.md",
+    "workflowPath": "defaults/fabrica/workflow.yaml",
+    "templatesDir": "defaults",
+    "genesis": {
+      "root": "genesis",
+      "scriptsDir": "genesis/scripts",
+      "configsDir": "genesis/configs"
+    },
+    "migrations": [
+      "layout",
+      "workflow"
+    ]
+  },
+  "layout": {
+    "primaryDataDir": "fabrica",
+    "legacyDataDir": "devclaw",
+    "versionFile": ".layout-version"
+  }
+}

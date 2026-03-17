@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "priority_rules": [
+    { "condition": "type == 'bugfix' && risk_count > 2", "priority": "P0", "label": "priority:critical" },
+    { "condition": "type == 'bugfix'", "priority": "P1", "label": "priority:high" },
+    { "condition": "type == 'feature' && effort == 'small'", "priority": "P2", "label": "priority:medium" },
+    { "condition": "type == 'feature'", "priority": "P3", "label": "priority:normal" },
+    { "condition": "type == 'refactor'", "priority": "P3", "label": "priority:normal" },
+    { "condition": "type == 'infra'", "priority": "P2", "label": "priority:medium" },
+    { "condition": "type == 'research'", "priority": "P3", "label": "priority:normal" }
+  ],
+  "priority_rules_v2": [
+    { "when": { "type": "bugfix", "min_risk_count": 3 }, "priority": "P0", "label": "priority:critical" },
+    { "when": { "type": "bugfix" }, "priority": "P1", "label": "priority:high" },
+    { "when": { "type": "feature", "effort": "small" }, "priority": "P2", "label": "priority:medium" },
+    { "when": { "type": "feature" }, "priority": "P3", "label": "priority:normal" },
+    { "when": { "type": "refactor" }, "priority": "P3", "label": "priority:normal" },
+    { "when": { "type": "infra" }, "priority": "P2", "label": "priority:medium" },
+    { "when": { "type": "research" }, "priority": "P3", "label": "priority:normal" }
+  ],
+  "effort_rules": {
+    "small":  { "max_files": 3,  "max_acs": 3,  "label": "effort:small" },
+    "medium": { "max_files": 10, "max_acs": 7,  "label": "effort:medium" },
+    "large":  { "max_files": 25, "max_acs": 15, "label": "effort:large" },
+    "xlarge": { "max_files": 999, "max_acs": 999, "label": "effort:xlarge" }
+  },
+  "auto_labels": {
+    "feature":  "type:feature",
+    "bugfix":   "type:bugfix",
+    "refactor":  "type:refactor",
+    "research": "type:research",
+    "infra":    "type:infra"
+  },
+  "target_state_by_type": {
+    "default": "To Do",
+    "research": "To Research"
+  },
+  "dispatch_label": ""
+}
