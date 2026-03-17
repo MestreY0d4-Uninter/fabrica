@@ -2,7 +2,7 @@
  * projects/mutations.ts — State mutations for project worker slots.
  */
 import type { SlotState, RoleWorkerState, Project, ProjectsData, IssueRuntimeState } from "./types.js";
-import { acquireLock, releaseLock, readProjects, writeProjects, resolveProjectSlug } from "./io.js";
+import { acquireLock, releaseLock, readProjects, writeProjects, resolveProjectSlug, withProjectsMutation } from "./io.js";
 import { emptySlot, findFreeSlot, findSlotByIssue } from "./slots.js";
 
 /**
@@ -25,7 +25,7 @@ export function getIssueRuntime(
 
 /**
  * Update a specific slot in a role's worker state.
- * Uses file locking to prevent concurrent read-modify-write races.
+ * Uses withProjectsMutation for transactional locking with optimistic seq check.
  */
 export async function updateSlot(
   workspaceDir: string,
@@ -35,9 +35,7 @@ export async function updateSlot(
   slotIndex: number,
   updates: Partial<SlotState>,
 ): Promise<ProjectsData> {
-  await acquireLock(workspaceDir);
-  try {
-    const data = await readProjects(workspaceDir);
+  const { data } = await withProjectsMutation(workspaceDir, (data) => {
     const slug = resolveProjectSlug(data, slugOrChannelId);
     if (!slug) {
       throw new Error(`Project not found for slug or channelId: ${slugOrChannelId}`);
@@ -55,12 +53,8 @@ export async function updateSlot(
 
     slots[slotIndex] = { ...slots[slotIndex]!, ...updates };
     project.workers[role] = rw;
-
-    await writeProjects(workspaceDir, data);
-    return data;
-  } finally {
-    await releaseLock(workspaceDir);
-  }
+  });
+  return data;
 }
 
 /**

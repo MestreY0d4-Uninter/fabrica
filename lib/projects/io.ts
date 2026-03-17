@@ -218,6 +218,53 @@ export async function loadProjectBySlug(
 }
 
 /**
+ * Transactional mutation wrapper.
+ * acquire lock → read → apply fn → verify seq → write → release
+ * Retries on seq mismatch (optimistic locking) up to 3 times.
+ */
+export async function withProjectsMutation<T>(
+  workspaceDir: string,
+  fn: (data: ProjectsData) => T,
+): Promise<{ data: ProjectsData; result: T }> {
+  const MAX_RETRIES = 3;
+  const RETRY_DELAYS = [100, 200, 400];
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    await acquireLock(workspaceDir);
+    try {
+      const data = await readProjects(workspaceDir);
+      const seqBefore = (data as any)._seq ?? 0;
+
+      const result = fn(data);
+
+      // Re-read to check for concurrent write (optimistic locking)
+      let currentSeq: number;
+      try {
+        const currentRaw = await fs.readFile(projectsPath(workspaceDir), "utf-8");
+        currentSeq = (JSON.parse(currentRaw) as any)._seq ?? 0;
+      } catch {
+        currentSeq = seqBefore; // file gone — treat as match
+      }
+
+      if (currentSeq !== seqBefore && attempt < MAX_RETRIES) {
+        // Seq mismatch — releaseLock is in finally, then retry with backoff
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt] ?? 400));
+        continue;
+      }
+
+      // Increment seq and write
+      (data as any)._seq = seqBefore + 1;
+      await writeProjects(workspaceDir, data);
+      return { data, result };
+    } finally {
+      await releaseLock(workspaceDir);
+    }
+  }
+
+  throw new Error(`withProjectsMutation: seq mismatch after ${MAX_RETRIES} retries`);
+}
+
+/**
  * Resolve repo path from projects.json repo field (handles ~/ expansion).
  */
 export function resolveRepoPath(repoField: string): string {
