@@ -57,7 +57,7 @@ export class GitLabProvider implements IssueProvider {
     return withResilience(async () => {
       const result = await this.runCommand(["glab", ...args], { timeoutMs: 30_000, cwd: this.repoPath });
       return result.stdout.trim();
-    });
+    }, this.repoPath);
   }
 
   /** Get MRs linked to an issue via GitLab's native related_merge_requests API. */

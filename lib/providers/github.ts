@@ -152,7 +152,7 @@ export class GitHubProvider implements IssueProvider {
         throw new Error(result.stderr?.trim() || `gh command failed with exit code ${result.code}`);
       }
       return result.stdout.trim();
-    });
+    }, this.repoPath);
   }
 
   private async gh(args: string[]): Promise<string> {
