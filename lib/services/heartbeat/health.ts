@@ -527,6 +527,32 @@ export async function checkWorkerHealth(opts: {
         }
       }
 
+      // Case 1d: session exhausted (high context usage without abort or completion)
+      if (slot.active && sessionKey && sessions && isSessionAlive(sessionKey, sessions)) {
+        const session = sessions.get(sessionKey);
+        const normalizedSession = session
+          ? { ...session, percentUsed: (session.percentUsed ?? 0) / 100 }
+          : {};
+        if (isSessionExhausted(normalizedSession)) {
+          const fix: HealthFix = {
+            issue: {
+              type: "session_exhausted",
+              severity: "warning",
+              project: project.name,
+              projectSlug,
+              role,
+              sessionKey,
+              level,
+              issueId: slot.issueId,
+              slotIndex,
+              message: `${role.toUpperCase()} ${level}[${slotIndex}] session "${sessionKey}" at ${Math.round(session?.percentUsed ?? 0)}% context without work_finish`,
+            },
+            fixed: false,
+          };
+          fixes.push(fix);
+        }
+      }
+
       // Case: dispatch was requested but the worker never reached bootstrap/activity.
       if (
         slot.active &&
