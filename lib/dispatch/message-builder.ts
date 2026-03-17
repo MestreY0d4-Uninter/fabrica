@@ -31,6 +31,8 @@ export function buildTaskMessage(opts: {
   attachmentContext?: string;
   /** True when the next developer cycle must create a fresh branch/PR for this issue. */
   followUpPrRequired?: boolean;
+  /** True when metadata.needs_human_security is set — injects a security review warning. */
+  needsHumanSecurity?: boolean;
 }): string {
   const sanitizeRepoContext = (value: string) =>
     value.startsWith("/") || value.startsWith("~/") ? "[repository workspace hidden]" : value;
@@ -70,6 +72,13 @@ export function buildTaskMessage(opts: {
       `> The previous PR is no longer a valid artifact for this issue.`,
       `> Continue the work on a new branch and open a new PR that explicitly targets this issue.`,
       `> Do not reuse a PR/branch that was retargeted to another issue.`,
+    );
+  }
+
+  if (opts.needsHumanSecurity) {
+    parts.push(
+      ``,
+      `> ⚠️ **SECURITY REVIEW REQUIRED** — This issue involves authentication or authorization patterns that require human security review before merging. See \`defaults/fabrica/prompts/security-checklist.md\`.`,
     );
   }
 
