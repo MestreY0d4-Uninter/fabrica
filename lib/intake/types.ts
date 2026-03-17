@@ -287,6 +287,8 @@ export type PipelineMetadata = {
   channel_id?: string | null;
   scaffold_plan?: ScaffoldPlan | null;
   repo_provisioned?: boolean;
+  needs_spec_refinement?: boolean;
+  needs_human_security?: boolean;
 };
 
 // ---------------------------------------------------------------------------
