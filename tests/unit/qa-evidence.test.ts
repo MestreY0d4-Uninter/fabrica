@@ -14,9 +14,20 @@ Something changed.
 
 ## QA Evidence
 
-\`\`\`
-all tests passed
-\`\`\`
+### lint
+ruff check . — 0 errors
+
+### types
+mypy src/ — Success: no issues found
+
+### security
+pip-audit — No known vulnerabilities found
+
+### tests
+pytest — 12 passed
+
+### coverage
+coverage: 85.0%
 
 Exit code: 0
 `;
@@ -26,6 +37,7 @@ Exit code: 0
       sectionCount: 1,
       exitCode: 0,
       problems: [],
+      errors: [],
     });
   });
 
@@ -36,9 +48,20 @@ Something changed.
 
 ## QA Evidence
 
-\`\`\`
-all tests passed
-\`\`\`
+### lint
+ruff check . — 0 errors
+
+### types
+mypy src/ — Success: no issues found
+
+### security
+pip-audit — No known vulnerabilities found
+
+### tests
+pytest — 12 passed
+
+### coverage
+coverage: 85.0%
 
 Exit code: 0
 `;

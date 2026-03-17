@@ -5,6 +5,8 @@ export type QaEvidenceValidation = {
   sectionCount: number;
   exitCode: number | null;
   problems: string[];
+  /** Structured error codes for programmatic checks (mirrors problems for enhanced checks) */
+  errors: string[];
 };
 
 export type QaEvidenceActor = "developer" | "reviewer";
@@ -17,14 +19,16 @@ export function validateQaEvidence(body?: string | null): QaEvidenceValidation {
   const text = body ?? "";
   const headings = [...text.matchAll(/^## QA Evidence\b[\t ]*$/gim)];
   const problems: string[] = [];
+  const errors: string[] = [];
   const sectionCount = headings.length;
 
   if (sectionCount !== 1) {
-    problems.push(
-      sectionCount === 0
-        ? "PR body is missing a `## QA Evidence` section."
-        : "PR body must contain exactly one `## QA Evidence` section.",
-    );
+    if (sectionCount === 0) {
+      problems.push("PR body is missing a `## QA Evidence` section.");
+      errors.push("qa_evidence_missing");
+    } else {
+      problems.push("PR body must contain exactly one `## QA Evidence` section.");
+    }
   }
 
   let qaBody = "";
@@ -56,11 +60,41 @@ export function validateQaEvidence(body?: string | null): QaEvidenceValidation {
     problems.push("QA Evidence still contains environment dump output.");
   }
 
+  // Enhanced checks — structured error codes
+  const section = qaBody;
+
+  // 1. Required gate presence check
+  const GATE_NAMES = ["lint", "types", "security", "tests", "coverage"] as const;
+  for (const gate of GATE_NAMES) {
+    const gateRegex = new RegExp(`###?\\s*${gate}`, "i");
+    if (!gateRegex.test(section)) {
+      errors.push(`qa_gate_missing_${gate}`);
+    }
+  }
+
+  // 2. Exit-code-only detection — reject evidence with ≥80% exit-code lines
+  const contentLines = section.split("\n").filter((l) => l.trim());
+  const exitCodeLines = contentLines.filter((l) => /Exit code:\s*\d+/i.test(l));
+  if (exitCodeLines.length > 0 && exitCodeLines.length >= contentLines.length * 0.8) {
+    errors.push("qa_evidence_only_exit_codes");
+  }
+
+  // 3. Coverage threshold check (default: 80%)
+  const coverageThreshold = 80;
+  const coverageMatch = section.match(/(\d+(?:\.\d+)?)%/);
+  if (coverageMatch) {
+    const cov = parseFloat(coverageMatch[1]!);
+    if (cov < coverageThreshold) {
+      errors.push(`qa_coverage_below_threshold_${Math.floor(cov)}`);
+    }
+  }
+
   return {
-    valid: problems.length === 0,
+    valid: problems.length === 0 && errors.length === 0,
     sectionCount,
     exitCode,
     problems,
+    errors,
   };
 }
 
