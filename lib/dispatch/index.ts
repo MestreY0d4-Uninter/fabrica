@@ -22,7 +22,7 @@ import { resolveModel } from "../roles/index.js";
 import { notify, getNotificationConfig } from "./notify.js";
 import { loadConfig, type ResolvedRoleConfig } from "../config/index.js";
 import type { WorkflowResolutionMeta } from "../config/workflow-policy.js";
-import { ReviewPolicy, TestPolicy, resolveReviewRouting, resolveTestRouting, resolveNotifyChannel, isFeedbackState, hasReviewCheck, producesReviewableWork, hasTestPhase, detectOwner, getOwnerLabel, OWNER_LABEL_COLOR, getRoleLabelColor, STEP_ROUTING_COLOR, getStateLabels } from "../workflow/index.js";
+import { ReviewPolicy, TestPolicy, resolveReviewRouting, resolveTestRouting, resolveNotifyChannel, isFeedbackState, hasReviewCheck, producesReviewableWork, hasTestPhase, detectOwner, getOwnerLabel, OWNER_LABEL_COLOR, getRoleLabelColor, STEP_ROUTING_COLOR, getStateLabels, resilientLabelTransition } from "../workflow/index.js";
 import { fetchPrFeedback, fetchPrContext, type PrFeedback, type PrContext } from "./pr-context.js";
 import { formatAttachmentsForTask } from "./attachments.js";
 import { loadRoleInstructions } from "./bootstrap-hook.js";
@@ -242,7 +242,15 @@ export async function dispatchTask(
   );
 
   // ── Commitment point — transition label (issue leaves queue) ────────
-  await provider.transitionLabel(issueId, fromLabel, toLabel);
+  const labelResult = await resilientLabelTransition(provider, issueId, fromLabel, toLabel,
+    (msg) => auditLog(workspaceDir, "dispatch_warning", { step: "label_transition", issue: issueId, msg }).catch(() => {}),
+  );
+  if (!labelResult.success) {
+    throw new Error(`Label transition failed: ${fromLabel} → ${toLabel} for issue #${issueId}`);
+  }
+  if (labelResult.dualStateResolved) {
+    auditLog(workspaceDir, "dispatch_warning", { step: "label_transition", issue: issueId, msg: "dual_state_resolved" }).catch(() => {});
+  }
 
   // Mark issue + PR as managed and all consumed comments as seen (fire-and-forget)
   provider.reactToIssue(issueId, EYES_EMOJI).catch((err: Error) => console.error("[fabrica] silent-catch:", err.message));
