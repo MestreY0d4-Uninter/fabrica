@@ -76,6 +76,9 @@ export async function runPipeline(
     try {
       if (!step.shouldRun(payload)) {
         stepsSkipped.push(step.name);
+        if (payload.dry_run) {
+          ctx.log(`[pipeline] step_skipped: ${step.name} (reason: dry_run)`);
+        }
         continue;
       }
 
