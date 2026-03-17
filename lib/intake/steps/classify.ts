@@ -6,6 +6,7 @@ import type { PipelineStep, GenesisPayload, Classification } from "../types.js";
 import { classifyByKeywords, resolveDeliveryTarget, type ClassificationRules } from "../lib/classification.js";
 import { extractJsonFromStdout } from "../lib/extract-json.js";
 import { resolveOpenClawCli } from "../lib/runtime-paths.js";
+import { withLlmRetry } from "../lib/llm-retry.js";
 
 import { createRequire } from "node:module";
 const _require = createRequire(import.meta.url);
@@ -42,7 +43,7 @@ Idea: ${payload.raw_idea}
 Return ONLY valid JSON (no markdown fences, no explanation):
 {"type": "<one of: ${validTypes}>", "confidence": <0.0-1.0>, "reasoning": "<1 sentence>"}`;
 
-      const result = await ctx.runCommand(resolveOpenClawCli({
+      const result = await withLlmRetry(() => ctx.runCommand(resolveOpenClawCli({
         homeDir: ctx.homeDir,
         workspaceDir: ctx.workspaceDir,
       }), [
@@ -50,7 +51,7 @@ Return ONLY valid JSON (no markdown fences, no explanation):
         "-m", prompt,
         "--session-id", `genesis-classify-${payload.session_id}`,
         "--json",
-      ], { timeout: 60000 });
+      ], { timeout: 60000 }));
 
       if (result.exitCode === 0 && result.stdout) {
         const parsed = extractJsonFromStdout(result.stdout);

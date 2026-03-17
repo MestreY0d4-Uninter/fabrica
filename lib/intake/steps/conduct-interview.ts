@@ -4,6 +4,7 @@
 import type { PipelineStep, GenesisPayload, SpecData } from "../types.js";
 import { extractJsonFromStdout } from "../lib/extract-json.js";
 import { resolveOpenClawCli } from "../lib/runtime-paths.js";
+import { withLlmRetry } from "../lib/llm-retry.js";
 
 /** Type-aware deterministic defaults when LLM fails. */
 function fallbackSpecData(type: string, rawIdea: string): SpecData {
@@ -83,7 +84,7 @@ Return ONLY valid JSON (no markdown fences):
 
 IMPORTANT: Acceptance criteria must be domain-specific, not generic.`;
 
-      const result = await ctx.runCommand(resolveOpenClawCli({
+      const result = await withLlmRetry(() => ctx.runCommand(resolveOpenClawCli({
         homeDir: ctx.homeDir,
         workspaceDir: ctx.workspaceDir,
       }), [
@@ -91,7 +92,7 @@ IMPORTANT: Acceptance criteria must be domain-specific, not generic.`;
         "-m", prompt,
         "--session-id", `genesis-interview-${payload.session_id}`,
         "--json",
-      ], { timeout: 90000 });
+      ], { timeout: 90000 }));
 
       if (result.exitCode === 0 && result.stdout) {
         const parsed = extractJsonFromStdout(result.stdout);
