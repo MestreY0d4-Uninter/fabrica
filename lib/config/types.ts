@@ -145,6 +145,8 @@ export type ResolvedConfig = {
   timeouts: ResolvedTimeouts;
   /** Instance name override from config. Undefined = use auto-generated from instance.json. */
   instanceName?: string;
+  /** Merge trace: maps dotted config paths to the layer that contributed each value. */
+  _trace?: Record<string, string>;
 };
 
 /**

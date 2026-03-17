@@ -13,7 +13,7 @@ import path from "node:path";
 import YAML from "yaml";
 import { ROLE_REGISTRY } from "../roles/registry.js";
 import { DEFAULT_WORKFLOW, type WorkflowConfig } from "../workflow/index.js";
-import { mergeConfig } from "./merge.js";
+import { mergeConfig, mergeConfigWithTrace, type MergeTrace } from "./merge.js";
 import type { FabricaConfig, ResolvedConfig, ResolvedRoleConfig, ResolvedTimeouts, RoleOverride, ModelEntry } from "./types.js";
 import { validateConfig, validateWorkflowIntegrity } from "./schema.js";
 import { DATA_DIR, migrateWorkspaceLayout } from "../setup/migrate-layout.js";
@@ -38,11 +38,14 @@ export async function loadConfig(
 
   // Layer 2: workspace workflow.yaml (in fabrica/ data dir)
   let merged = builtIn;
+  let configTrace: MergeTrace = {};
   const workspaceConfig =
     await readWorkflowFile(dataDir) ??
     await readLegacyConfigFile(path.join(workspaceDir, "projects"));
   if (workspaceConfig) {
-    merged = mergeConfig(merged, workspaceConfig);
+    const { merged: m1, trace: t1 } = mergeConfigWithTrace(merged, workspaceConfig, "built-in", "workspace");
+    merged = m1;
+    configTrace = { ...configTrace, ...t1 };
     sourceLayers.push("workspace");
   }
 
@@ -50,7 +53,14 @@ export async function loadConfig(
   if (!workspaceConfig?.workflow) {
     const legacyWorkflow = await readLegacyWorkflowJson(projectsDir);
     if (legacyWorkflow) {
-      merged = mergeConfig(merged, { workflow: legacyWorkflow });
+      const { merged: m2, trace: t2 } = mergeConfigWithTrace(
+        merged,
+        { workflow: legacyWorkflow },
+        "built-in",
+        "workspace:legacy-workflow-json",
+      );
+      merged = m2;
+      configTrace = { ...configTrace, ...t2 };
       sourceLayers.push("workspace:legacy-workflow-json");
     }
   }
@@ -62,20 +72,36 @@ export async function loadConfig(
       await readWorkflowFile(projectDir) ??
       await readLegacyConfigFile(projectDir);
     if (projectConfig) {
-      merged = mergeConfig(merged, projectConfig);
+      const prevLabel = sourceLayers[sourceLayers.length - 1] ?? "built-in";
+      const { merged: m3, trace: t3 } = mergeConfigWithTrace(
+        merged,
+        projectConfig,
+        prevLabel,
+        `project:${projectName}`,
+      );
+      merged = m3;
+      configTrace = { ...configTrace, ...t3 };
       sourceLayers.push(`project:${projectName}`);
     }
 
     if (!projectConfig?.workflow) {
       const legacyWorkflow = await readLegacyWorkflowJson(projectDir);
       if (legacyWorkflow) {
-        merged = mergeConfig(merged, { workflow: legacyWorkflow });
+        const prevLabel2 = sourceLayers[sourceLayers.length - 1] ?? "built-in";
+        const { merged: m4, trace: t4 } = mergeConfigWithTrace(
+          merged,
+          { workflow: legacyWorkflow },
+          prevLabel2,
+          `project:${projectName}:legacy-workflow-json`,
+        );
+        merged = m4;
+        configTrace = { ...configTrace, ...t4 };
         sourceLayers.push(`project:${projectName}:legacy-workflow-json`);
       }
     }
   }
 
-  return resolve(merged, sourceLayers);
+  return resolve(merged, sourceLayers, configTrace);
 }
 
 /**
@@ -126,7 +152,7 @@ function resolveLevelMaxWorkers(
   return result;
 }
 
-function resolve(config: FabricaConfig, sourceLayers: string[]): ResolvedConfig {
+function resolve(config: FabricaConfig, sourceLayers: string[], trace?: MergeTrace): ResolvedConfig {
   const roles: Record<string, ResolvedRoleConfig> = {};
   const globalMaxWorkers = config.workflow?.maxWorkersPerLevel ?? DEFAULT_MAX_WORKERS_PER_LEVEL;
 
@@ -219,6 +245,7 @@ function resolve(config: FabricaConfig, sourceLayers: string[]): ResolvedConfig 
     roles, workflow, timeouts,
     workflowMeta: buildWorkflowResolutionMeta(workflow, sourceLayers, fixes),
     instanceName: config.instance?.name,
+    ...(trace && Object.keys(trace).length > 0 ? { _trace: trace } : {}),
   };
 }
 
