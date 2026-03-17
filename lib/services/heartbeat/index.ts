@@ -154,6 +154,7 @@ async function processAllAgents(
     totalReviewTransitions: 0,
     totalReviewSkipTransitions: 0,
     totalTestSkipTransitions: 0,
+    totalHoldEscapes: 0,
   };
 
   if (mode !== "triage") {
@@ -196,6 +197,7 @@ async function processAllAgents(
     result.totalReviewTransitions += agentResult.totalReviewTransitions;
     result.totalReviewSkipTransitions += agentResult.totalReviewSkipTransitions;
     result.totalTestSkipTransitions += agentResult.totalTestSkipTransitions;
+    result.totalHoldEscapes += agentResult.totalHoldEscapes;
   }
 
   return result;
