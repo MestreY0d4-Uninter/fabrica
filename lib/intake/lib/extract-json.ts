@@ -38,6 +38,6 @@ export function extractJsonFromStdout(stdout: string): any {
   }
 
   // Prefer the object with `payloads` (agent response), then the last one
-  const withPayloads = parsed.findLast?.((o: any) => o?.payloads) ?? parsed.slice().reverse().find((o: any) => o?.payloads);
+  const withPayloads = parsed.slice().reverse().find((o: any) => o?.payloads);
   return withPayloads ?? parsed[parsed.length - 1];
 }

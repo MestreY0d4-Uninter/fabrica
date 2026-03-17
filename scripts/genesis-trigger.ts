@@ -83,12 +83,23 @@ const stepCtx = {
       provider: opts.provider,
       providerProfile: opts.providerProfile,
       pluginConfig: undefined,
-      runCommand: (cmdArr: string[], runOpts?: { timeoutMs?: number; cwd?: string; env?: Record<string, string | undefined> }) =>
-        runCommand(cmdArr[0], cmdArr.slice(1), {
-          timeout: runOpts?.timeoutMs,
-          cwd: runOpts?.cwd,
-          env: runOpts?.env,
-        }),
+      runCommand: (cmdArr: string[], optionsOrTimeout: number | { timeoutMs: number; cwd?: string; env?: NodeJS.ProcessEnv }) => {
+        const opts = typeof optionsOrTimeout === "number"
+          ? { timeoutMs: optionsOrTimeout }
+          : optionsOrTimeout;
+        return runCommand(cmdArr[0], cmdArr.slice(1), {
+          timeout: opts.timeoutMs,
+          cwd: opts.cwd,
+          env: opts.env as Record<string, string | undefined> | undefined,
+        }).then((r) => ({
+          stdout: r.stdout,
+          stderr: r.stderr,
+          code: r.exitCode,
+          signal: null as NodeJS.Signals | null,
+          killed: false,
+          termination: "exit" as const,
+        }));
+      },
     });
   },
   log: (msg: string) => console.log(`[genesis] ${msg}`),

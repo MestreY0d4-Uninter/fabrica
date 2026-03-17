@@ -63,18 +63,18 @@ async function fixDualStateLabels(
       const toRemove = issueStateLabels.filter((l) => l !== keepLabel);
 
       try {
-        await provider.removeLabels(issue.number, toRemove);
+        await provider.removeLabels(issue.iid, toRemove);
         fixed++;
         await auditLog(workspaceDir, "dual_state_label_fixed", {
           project: projectSlug,
-          issueId: issue.number,
+          issueId: issue.iid,
           keptLabel: keepLabel,
           removedLabels: toRemove,
         }).catch(() => {});
       } catch {
         await auditLog(workspaceDir, "dual_state_label_fix_failed", {
           project: projectSlug,
-          issueId: issue.number,
+          issueId: issue.iid,
           stateLabels: issueStateLabels,
         }).catch(() => {});
       }
