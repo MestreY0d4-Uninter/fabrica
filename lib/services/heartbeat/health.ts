@@ -60,8 +60,12 @@ import { withTelemetrySpan } from "../../observability/telemetry.js";
 // Re-export for consumers that import from health.ts
 export { fetchGatewaySessions, isSessionAlive, type GatewaySession, type SessionLookup } from "../gateway-sessions.js";
 
-/** Grace period: skip session-dead checks for workers started within this window. */
+/** Grace period: skip session-dead checks for workers started within this window.
+ * Now configurable via resolvedConfig.timeouts.healthGracePeriodMs — fallback default preserved for callers without config. */
 export const GRACE_PERIOD_MS = 15 * 60 * 1_000; // 15 minutes (reviewer/tester agents need time for LLM calls)
+
+/** Dispatch confirm timeout: flag dispatches that were never acknowledged by the worker.
+ * Now configurable via resolvedConfig.timeouts.dispatchConfirmTimeoutMs — fallback default preserved for callers without config. */
 export const DISPATCH_CONFIRMATION_TIMEOUT_MS = 2 * 60 * 1_000; // 2 minutes
 
 /** Message sent to nudge a stalled session back to life. */
