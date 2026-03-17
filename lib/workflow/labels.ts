@@ -158,3 +158,42 @@ export function getRoleLabels(
 export function getRoleLabelColor(role: string): string {
   return ROLE_LABEL_COLORS[role] ?? "#cccccc";
 }
+
+import type { IssueProvider } from "../providers/provider.js";
+
+/**
+ * Attempt label transition with automatic dual-state recovery.
+ */
+export async function resilientLabelTransition(
+  provider: IssueProvider,
+  issueId: number,
+  from: string,
+  to: string,
+  log?: (msg: string) => void,
+): Promise<{ success: boolean; dualStateResolved: boolean }> {
+  try {
+    await provider.transitionLabel(issueId, from, to);
+    return { success: true, dualStateResolved: false };
+  } catch (err) {
+    log?.(`Label transition failed (${from} → ${to}), checking for dual state: ${String(err)}`);
+    try {
+      const issue = await provider.getIssue(issueId);
+      const labels = issue?.labels ?? [];
+      if (labels.includes(from) && labels.includes(to)) {
+        for (let i = 0; i < 2; i++) {
+          try {
+            await provider.removeLabels(issueId, [from]);
+            log?.(`Dual state resolved: removed ${from} from issue ${issueId}`);
+            return { success: true, dualStateResolved: true };
+          } catch (retryErr) {
+            log?.(`Retry ${i + 1}/2 to remove ${from} failed: ${String(retryErr)}`);
+          }
+        }
+        log?.(`dual_state_unresolved: issue ${issueId} has both ${from} and ${to}`);
+      }
+    } catch (checkErr) {
+      log?.(`Failed to check issue state: ${String(checkErr)}`);
+    }
+    return { success: false, dualStateResolved: false };
+  }
+}
