@@ -81,6 +81,40 @@ export function registerHeartbeatService(api: OpenClawPluginApi, pluginCtx: Plug
 }
 
 // ---------------------------------------------------------------------------
+// Timeout utility (F1-2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Race a promise against a timeout. Returns "timeout" if the timeout fires first.
+ * Exported for testability (F1-2).
+ */
+export async function raceWithTimeout<T>(
+  fn: () => Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => void,
+): Promise<T | "timeout"> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => {
+      onTimeout();
+      resolve("timeout");
+    }, timeoutMs);
+  });
+  try {
+    const result = await Promise.race([fn(), timeoutPromise]);
+    return result;
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
+const DEFAULT_TICK_TIMEOUT_MS = 50_000;
+let _ticksTimedOut = 0;
+
+/** Expose timeout counter for audit logging (used by tick-runner). */
+export function getTickTimeoutCount(): number { return _ticksTimedOut; }
+
+// ---------------------------------------------------------------------------
 // Tick orchestration
 // ---------------------------------------------------------------------------
 
@@ -122,11 +156,14 @@ async function runHeartbeatTick(
         logTickResult(result, logger, mode);
       }),
     );
-    if (lifecycle) {
-      await lifecycle.track(mode === "repair" ? "recovery" : "heartbeat", {}, run);
-    } else {
-      await run();
-    }
+    // Wrap with timeout to prevent stuck ticks from blocking forever
+    const tickFn = lifecycle
+      ? () => lifecycle.track(mode === "repair" ? "recovery" : "heartbeat", {}, run)
+      : run;
+    await raceWithTimeout(tickFn, DEFAULT_TICK_TIMEOUT_MS, () => {
+      _ticksTimedOut++;
+      logger.warn(`work_heartbeat ${mode} tick timed out after ${DEFAULT_TICK_TIMEOUT_MS}ms (total timeouts: ${_ticksTimedOut})`);
+    });
   } catch (err) {
     logger.error(`work_heartbeat ${mode} tick failed: ${err}`);
   } finally {
