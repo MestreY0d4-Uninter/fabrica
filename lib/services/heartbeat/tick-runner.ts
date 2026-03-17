@@ -25,6 +25,7 @@ import {
 } from "./passes.js";
 import { computeHealthScore } from "../../observability/health-score.js";
 import { shouldAlert, type AlertState } from "../../observability/alerting.js";
+import { withTelemetrySpan as withTickSpan } from "../../observability/tracer.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -147,41 +148,44 @@ export async function tick(opts: {
       }
 
       if (mode !== "triage") {
-        // Health pass: auto-fix zombies and stale workers
-        result.totalHealthFixes += await performHealthPass(
-          workspaceDir,
-          slug,
-          project,
-          sessions,
-          provider,
-          resolvedConfig.timeouts.staleWorkerHours,
-          instanceName,
-          runCommand,
-          resolvedConfig.timeouts.stallTimeoutMinutes,
-          agentId,
-          resolvedConfig,
-          runtime,
-        );
+        // Wrap passes in a telemetry span for observability
+        await withTickSpan(`heartbeat.project.${slug}`, async () => {
+          // Health pass: auto-fix zombies and stale workers
+          result.totalHealthFixes += await performHealthPass(
+            workspaceDir,
+            slug,
+            project,
+            sessions,
+            provider,
+            resolvedConfig.timeouts.staleWorkerHours,
+            instanceName,
+            runCommand,
+            resolvedConfig.timeouts.stallTimeoutMinutes,
+            agentId,
+            resolvedConfig,
+            runtime,
+          );
 
-        // Review pass: transition issues whose PR check condition is met
-        result.totalReviewTransitions += await performReviewPass(
-          workspaceDir, slug, project, provider, resolvedConfig, pluginConfig, runtime, runCommand,
-        );
+          // Review pass: transition issues whose PR check condition is met
+          result.totalReviewTransitions += await performReviewPass(
+            workspaceDir, slug, project, provider, resolvedConfig, pluginConfig, runtime, runCommand,
+          );
 
-        // Review skip pass: auto-merge and transition review:skip issues through the review queue
-        result.totalReviewSkipTransitions += await performReviewSkipPass(
-          workspaceDir, slug, project, provider, resolvedConfig, pluginConfig, runtime, runCommand,
-        );
+          // Review skip pass: auto-merge and transition review:skip issues through the review queue
+          result.totalReviewSkipTransitions += await performReviewSkipPass(
+            workspaceDir, slug, project, provider, resolvedConfig, pluginConfig, runtime, runCommand,
+          );
 
-        // Test skip pass: auto-transition test:skip issues through the test queue
-        result.totalTestSkipTransitions += await performTestSkipPass(
-          workspaceDir, slug, project, provider, resolvedConfig, runCommand,
-        );
+          // Test skip pass: auto-transition test:skip issues through the test queue
+          result.totalTestSkipTransitions += await performTestSkipPass(
+            workspaceDir, slug, project, provider, resolvedConfig, runCommand,
+          );
 
-        // Hold escape pass: close issues stuck in hold states with merged PRs
-        result.totalHoldEscapes += await performHoldEscapePass(
-          workspaceDir, slug, provider, resolvedConfig,
-        );
+          // Hold escape pass: close issues stuck in hold states with merged PRs
+          result.totalHoldEscapes += await performHoldEscapePass(
+            workspaceDir, slug, provider, resolvedConfig,
+          );
+        });
       }
 
       if (mode === "repair") continue;
