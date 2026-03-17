@@ -13,6 +13,11 @@ import { log as auditLog } from "../audit.js";
 import type { PluginRuntime } from "openclaw/plugin-sdk";
 import type { RunCommand } from "../context.js";
 import { randomUUID } from "node:crypto";
+import {
+  computeNotifyKey,
+  writeIntent,
+  markDelivered,
+} from "./notification-outbox.js";
 
 /** Per-event-type toggle. All default to true — set to false to suppress. */
 export type NotificationConfig = Partial<Record<NotifyEvent["type"], boolean>>;
@@ -472,6 +477,24 @@ export async function notify(
     return true; // Not an error, just nothing to do
   }
 
+  // Idempotency: write intent to outbox before sending; skip if duplicate
+  const notifyKey = computeNotifyKey(
+    (event as any).project ?? "global",
+    (event as any).issueId ?? 0,
+    event.type,
+  );
+  const isNew = await writeIntent(opts.workspaceDir, notifyKey, event as Record<string, unknown>).catch(() => true);
+  if (!isNew) {
+    await auditLog(opts.workspaceDir, "notify_skip", {
+      eventId,
+      correlationId,
+      eventType: event.type,
+      reason: "duplicate outbox key",
+      key: notifyKey,
+    }).catch(() => {});
+    return true;
+  }
+
   await auditLog(opts.workspaceDir, "notify", {
     eventId,
     correlationId,
@@ -485,7 +508,7 @@ export async function notify(
     message,
   });
 
-  return sendMessage(
+  const sent = await sendMessage(
     target.channelId,
     message,
     target.channel,
@@ -502,6 +525,12 @@ export async function notify(
       target,
     },
   );
+
+  if (sent) {
+    await markDelivered(opts.workspaceDir, notifyKey).catch(() => {}); // best-effort
+  }
+
+  return sent;
 }
 
 /**

@@ -17,6 +17,7 @@ import { holdEscapePass } from "./hold-escape.js";
 import type { ResolvedConfig } from "../../config/types.js";
 import { resolveNotifyChannel, getStateLabels } from "../../workflow/index.js";
 import { notify, getNotificationConfig } from "../../dispatch/notify.js";
+import { getPendingIntents, markDelivered } from "../../dispatch/notification-outbox.js";
 import { log as auditLog } from "../../audit.js";
 
 // ---------------------------------------------------------------------------
@@ -102,6 +103,26 @@ export async function performHealthPass(
   runtime?: PluginRuntime,
 ): Promise<number> {
   let fixedCount = 0;
+
+  // Reprocess any notifications pending > 2 minutes (crash recovery)
+  try {
+    const pendingIntents = await getPendingIntents(workspaceDir).catch(() => []);
+    const staleThreshold = Date.now() - 2 * 60_000;
+    const notifyConfig = getNotificationConfig(resolvedConfig as unknown as Record<string, unknown> | undefined);
+    for (const intent of pendingIntents) {
+      if (intent.ts < staleThreshold) {
+        try {
+          await notify(intent.data as any, {
+            workspaceDir,
+            config: notifyConfig,
+            runtime,
+            runCommand,
+          });
+          await markDelivered(workspaceDir, intent.key).catch(() => {});
+        } catch { /* best-effort */ }
+      }
+    }
+  } catch { /* best-effort — must not abort health pass */ }
 
   for (const role of Object.keys(project.workers)) {
     // Check worker health (session liveness, label consistency, etc)
