@@ -245,10 +245,13 @@ describe("runTriageLogic", () => {
     dodCount: 2,
     filesChanged: 3,
     totalRisks: 0,
-    objective: "Build a CLI tool",
+    // Objective satisfies spec quality gate: >=20 words
+    objective: "Build a CLI tool in Python that counts words in text files and displays the total count with filtering options",
     rawIdea: "Criar um programa para contar palavras",
-    acText: "O programa conta palavras no terminal",
-    scopeText: "Implementar contagem via comando",
+    // acText: 3 items with action verbs (satisfies spec quality gate)
+    acText: "deve aceitar arquivos de texto como entrada\nretorna a contagem total de palavras\nvalida que o arquivo existe antes de processar",
+    // scopeText: 3 items, mentions "testes" (used as dod in runTriageLogic)
+    scopeText: "Implementar contagem de palavras via comando\nAdicionarsuporte a multiplos arquivos\nCobertura de testes automatizados",
     oosText: "Sem interface gráfica",
     authSignal: false,
   };

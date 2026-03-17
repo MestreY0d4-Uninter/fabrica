@@ -102,6 +102,20 @@ IMPORTANT: Acceptance criteria must be domain-specific, not generic.`;
 
         if (specData.title && specData.objective) {
           ctx.log(`LLM spec generated: "${specData.title}"`);
+
+          // Vague scope detection — flag for follow-up if scope is thin
+          const scopeCount = Array.isArray(specData.scope_v1) ? specData.scope_v1.length : 0;
+          const objectiveWordCount = (specData.objective ?? "").trim().split(/\s+/).length;
+          if (scopeCount < 3 || objectiveWordCount < 20) {
+            ctx.log(`Spec scope appears vague — flagging for follow-up`);
+            return {
+              ...payload,
+              step: "conduct-interview",
+              spec_data: specData,
+              metadata: { ...payload.metadata, needs_spec_refinement: true },
+            };
+          }
+
           return {
             ...payload,
             step: "conduct-interview",

@@ -44,6 +44,7 @@ export type TriageDecision = {
   level: string;
   readyForDispatch: boolean;
   errors: string[];
+  specQualityBlock?: boolean;
 };
 
 /** Calculate effort from files changed and AC count. */
@@ -154,9 +155,75 @@ export function runTriageLogic(input: TriageInput, matrix: TriageMatrix): Triage
   const readyForDispatch = dorErrors.length === 0;
   const level = determineLevel(effort, targetState);
 
+  // Spec quality gate (F3-5)
+  const specQualityErrors = validateSpecQuality({
+    objective: input.objective ?? input.rawIdea,
+    scopeItems: (input.scopeText ?? "").split("\n").filter((l) => l.trim()),
+    acceptanceCriteria: (input.acText ?? "").split("\n").filter((l) => l.trim()),
+    dod: input.scopeText ?? "",
+  });
+  const specQualityBlock = specQualityErrors.length > 0;
+
   return {
     priority, priorityLabel, effort, effortLabel,
     typeLabel, targetState, dispatchLabel, level,
+    // errors contains DoR errors only — used for readyForDispatch gate.
+    // Spec quality errors are surfaced separately via specQualityBlock.
     readyForDispatch, errors: dorErrors,
+    specQualityBlock,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Spec quality gate (F3-5)
+// ---------------------------------------------------------------------------
+
+export type SpecQualityInput = {
+  objective: string;
+  scopeItems: string[];
+  acceptanceCriteria: string[];
+  dod: string;
+};
+
+/**
+ * Action verbs that indicate concrete, verifiable acceptance criteria.
+ * Bilingual PT+EN. Extensible via classification-rules.json in future.
+ */
+const ACTION_VERBS = /\b(deve|retorna|valida|exibe|permite|rejeita|calcula|should|returns|validates|displays|allows|rejects|calculates|aceita|processa|envia|recebe|cria|remove|atualiza|lista)\b/i;
+
+/**
+ * Validate spec quality to prevent vibe-coded projects.
+ * Returns array of error codes. Empty = spec is good.
+ */
+export function validateSpecQuality(input: SpecQualityInput): string[] {
+  const errors: string[] = [];
+
+  // Objective: > 20 words
+  const wordCount = input.objective.trim().split(/\s+/).length;
+  if (wordCount < 20) {
+    errors.push("spec_objective_too_short");
+  }
+
+  // Scope: >= 3 concrete items
+  if (input.scopeItems.length < 3) {
+    errors.push("spec_scope_insufficient");
+  }
+
+  // Acceptance criteria: >= 3 items
+  if (input.acceptanceCriteria.length < 3) {
+    errors.push("spec_ac_insufficient");
+  }
+
+  // Acceptance criteria: must contain action verbs
+  const hasActionVerbs = input.acceptanceCriteria.some((ac) => ACTION_VERBS.test(ac));
+  if (input.acceptanceCriteria.length >= 3 && !hasActionVerbs) {
+    errors.push("spec_ac_no_action_verbs");
+  }
+
+  // DoD: must mention "test", "teste", "testes", "testing", "tests"
+  if (!/\bteste?s?\b|\btesting\b/i.test(input.dod)) {
+    errors.push("spec_dod_no_test_mention");
+  }
+
+  return errors;
 }
