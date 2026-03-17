@@ -242,6 +242,17 @@ export function isSessionExhausted(session: {
   );
 }
 
+/**
+ * Returns true if the dispatch has not been confirmed within the given timeout.
+ * Exported for testability (F2-5).
+ */
+export function isDispatchUnconfirmed(
+  dispatchedAtMs: number,
+  timeoutMs: number = DISPATCH_CONFIRMATION_TIMEOUT_MS,
+): boolean {
+  return Date.now() - dispatchedAtMs > timeoutMs;
+}
+
 export async function checkWorkerHealth(opts: {
   workspaceDir: string;
   projectSlug: string;
@@ -262,11 +273,14 @@ export async function checkWorkerHealth(opts: {
   runtime?: PluginRuntime;
   /** Agent ID for sendToAgent calls */
   agentId?: string;
+  /** Configurable dispatch confirmation timeout in ms (default: DISPATCH_CONFIRMATION_TIMEOUT_MS) */
+  dispatchConfirmTimeoutMs?: number;
 }): Promise<HealthFix[]> {
   const {
     workspaceDir, projectSlug, project, role, autoFix, provider, sessions,
     workflow = DEFAULT_WORKFLOW,
     staleWorkerHours = 2,
+    dispatchConfirmTimeoutMs = DISPATCH_CONFIRMATION_TIMEOUT_MS,
   } = opts;
 
   const fixes: HealthFix[] = [];
@@ -564,7 +578,7 @@ export async function checkWorkerHealth(opts: {
         currentLabel === expectedLabel &&
         dispatchRequestedAt !== null &&
         !dispatchConfirmed &&
-        (Date.now() - dispatchRequestedAt) > DISPATCH_CONFIRMATION_TIMEOUT_MS
+        (Date.now() - dispatchRequestedAt) > dispatchConfirmTimeoutMs
       ) {
         const fix: HealthFix = {
           issue: {

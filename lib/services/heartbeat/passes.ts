@@ -118,6 +118,7 @@ export async function performHealthPass(
       runCommand: runCommand!,
       runtime,
       agentId,
+      dispatchConfirmTimeoutMs: resolvedConfig?.timeouts?.dispatchConfirmTimeoutMs,
     });
     fixedCount += healthFixes.filter((f) => f.fixed).length;
 

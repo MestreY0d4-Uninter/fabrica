@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { checkWorkerHealth } from "../../lib/services/heartbeat/health.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { checkWorkerHealth, isDispatchUnconfirmed } from "../../lib/services/heartbeat/health.js";
 import type { SessionLookup } from "../../lib/services/gateway-sessions.js";
 import { createTestHarness, type TestHarness } from "../../lib/testing/index.js";
 import { DATA_DIR } from "../../lib/setup/migrate-layout.js";
@@ -289,5 +289,54 @@ describe("isSessionExhausted", () => {
 
   it("returns false when percentUsed is undefined", () => {
     expect(isSessionExhausted({})).toBe(false);
+  });
+});
+
+describe("isDispatchUnconfirmed (configurable timeout)", () => {
+  it("returns true when elapsed > timeoutMs", () => {
+    const dispatchedAt = Date.now() - 70_000; // 70s ago
+    expect(isDispatchUnconfirmed(dispatchedAt, 60_000)).toBe(true);
+  });
+
+  it("returns false when elapsed < timeoutMs", () => {
+    const dispatchedAt = Date.now() - 30_000; // 30s ago
+    expect(isDispatchUnconfirmed(dispatchedAt, 60_000)).toBe(false);
+  });
+
+  it("uses DISPATCH_CONFIRMATION_TIMEOUT_MS default when no timeout given", () => {
+    // Worker dispatched 3 minutes ago — should be unconfirmed (default is 2min)
+    const dispatchedAt = Date.now() - 3 * 60_000;
+    expect(isDispatchUnconfirmed(dispatchedAt)).toBe(true);
+  });
+});
+
+describe("performHealthPass — dispatchConfirmTimeoutMs propagation", () => {
+  it("passes dispatchConfirmTimeoutMs from resolvedConfig into checkWorkerHealth", async () => {
+    const { performHealthPass } = await import("../../lib/services/heartbeat/passes.js");
+    const healthModule = await import("../../lib/services/heartbeat/health.js");
+    const spy = vi.spyOn(healthModule, "checkWorkerHealth").mockResolvedValue([]);
+    vi.spyOn(healthModule, "scanOrphanedLabels").mockResolvedValue([]);
+    vi.spyOn(healthModule, "scanStatelessIssues").mockResolvedValue([]);
+
+    const project = {
+      workers: { developer: { levels: {} } },
+      channels: [],
+      slug: "test",
+      name: "test",
+    } as any;
+    const provider = {
+      listIssues: vi.fn().mockResolvedValue([]),
+    } as any;
+    const resolvedConfig = {
+      timeouts: { dispatchConfirmTimeoutMs: 9999, staleWorkerHours: 1, stallTimeoutMinutes: 5 },
+      workflow: { states: {} },
+    } as any;
+
+    await performHealthPass(".", "test", project, null, provider, undefined, undefined, undefined, undefined, undefined, resolvedConfig);
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ dispatchConfirmTimeoutMs: 9999 }),
+    );
+    spy.mockRestore();
   });
 });
