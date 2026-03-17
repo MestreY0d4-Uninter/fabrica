@@ -24,6 +24,7 @@ import {
   performHoldEscapePass,
 } from "./passes.js";
 import { computeHealthScore } from "../../observability/health-score.js";
+import { shouldAlert, type AlertState } from "../../observability/alerting.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,6 +44,7 @@ export type TickMode = "full" | "repair" | "triage";
 
 const discoveredProjects = new Set<string>();
 let _tickCount = 0;
+const _alertState: AlertState = { lastAlertTs: 0, lastAlertScore: 100, cooldownMs: 1800_000 };
 
 // ---------------------------------------------------------------------------
 // Workflow integrity validation (cached per tick)
@@ -254,6 +256,16 @@ export async function tick(opts: {
       status: healthScore.status,
       tickCount: _tickCount,
     }).catch(() => {});
+    const decision = shouldAlert(healthScore.score, 60, _alertState, Date.now());
+    if (decision === "alert" || decision === "recovered") {
+      _alertState.lastAlertTs = Date.now();
+      _alertState.lastAlertScore = healthScore.score;
+      await auditLog(workspaceDir, "health_alert", {
+        decision,
+        score: healthScore.score,
+        status: healthScore.status,
+      }).catch(() => {});
+    }
   }
 
   return result;
