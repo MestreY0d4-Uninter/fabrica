@@ -1208,7 +1208,10 @@ dev = [
 ]
 
 [project.scripts]
-$REPO_NAME = "src.${pkg_name}.main:main"
+$REPO_NAME = "${pkg_name}.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

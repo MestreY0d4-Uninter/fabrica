@@ -109,6 +109,15 @@ export type NotifyEvent =
       issueUrl: string;
       issueTitle: string;
       prUrl?: string;
+    }
+  | {
+      type: "holdEscapeResolved";
+      project: string;
+      issueId: number;
+      issueUrl: string;
+      issueTitle: string;
+      prUrl?: string;
+      fromState: string;
     };
 
 /**
@@ -280,6 +289,15 @@ function buildMessage(event: NotifyEvent): string {
       if (event.prUrl) msg += `\n🔗 ${prLink(event.prUrl)}`;
       msg += `\n📋 [Issue #${event.issueId}](${event.issueUrl})`;
       msg += `\n✅ Issue closed — work delivered.`;
+      return msg;
+    }
+
+    case "holdEscapeResolved": {
+      let msg = `✅ Auto-resolved: #${event.issueId} — ${event.issueTitle}`;
+      msg += `\nPR merged — issue closed automatically (was stuck in ${event.fromState})`;
+      if (event.prUrl) msg += `\n🔗 ${prLink(event.prUrl)}`;
+      msg += `\n📋 [Issue #${event.issueId}](${event.issueUrl})`;
+      msg += `\n🏁 Done — no human action needed.`;
       return msg;
     }
   }

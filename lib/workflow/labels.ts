@@ -29,6 +29,28 @@ export const LEGACY_OPERATIONAL_LABELS: readonly string[] = [
   "approved",
 ] as const;
 
+/**
+ * Operational labels used by triage and issue management.
+ * Created during project registration so that triage can apply them immediately.
+ */
+export const OPERATIONAL_LABELS: ReadonlyArray<{ name: string; color: string }> = [
+  { name: "priority:critical", color: "B60205" },
+  { name: "priority:high",     color: "D93F0B" },
+  { name: "priority:medium",   color: "FBCA04" },
+  { name: "priority:normal",   color: "0E8A16" },
+  { name: "effort:small",      color: "C2E0C6" },
+  { name: "effort:medium",     color: "FEF2C0" },
+  { name: "effort:large",      color: "F9D0C4" },
+  { name: "effort:xlarge",     color: "BFD4F2" },
+  { name: "type:feature",      color: "0E8A16" },
+  { name: "type:bugfix",       color: "D93F0B" },
+  { name: "type:refactor",     color: "FBCA04" },
+  { name: "type:research",     color: "0075CA" },
+  { name: "type:infra",        color: "5319E7" },
+  { name: "needs-human",       color: "d73a4a" },
+  { name: "approved",          color: "0e8a16" },
+] as const;
+
 /** Step routing label color. */
 export const STEP_ROUTING_COLOR = "#d93f0b";
 

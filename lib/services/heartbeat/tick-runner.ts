@@ -183,7 +183,7 @@ export async function tick(opts: {
 
           // Hold escape pass: close issues stuck in hold states with merged PRs
           result.totalHoldEscapes += await performHoldEscapePass(
-            workspaceDir, slug, provider, resolvedConfig,
+            workspaceDir, slug, project, provider, resolvedConfig, pluginConfig, runtime, runCommand,
           );
         });
       }

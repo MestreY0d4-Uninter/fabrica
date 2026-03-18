@@ -210,7 +210,7 @@ describe("GitHub invariants", () => {
     ), propertyConfig);
   });
 
-  it("INVARIANTE 3 — Done exige artifactOfRecord", async () => {
+  it("INVARIANTE 3 — Done exige artifactOfRecord (exceto quando API confirma merge)", async () => {
     await fc.assert(fc.asyncProperty(
       fc.constantFrom<"closed" | "merged">("closed", "merged"),
       fc.boolean(),
@@ -229,8 +229,19 @@ describe("GitHub invariants", () => {
           followUpPrRequired,
         });
 
-        expect(result.allowed).toBe(false);
-        expect(result.reason).toBe("missing_artifact_of_record");
+        if (prState === "merged") {
+          // Live API confirms merge → artifact proven, close allowed (unless follow-up required)
+          if (followUpPrRequired) {
+            expect(result.allowed).toBe(false);
+            expect(result.reason).toBe("follow_up_pr_required");
+          } else {
+            expect(result.allowed).toBe(true);
+          }
+        } else {
+          // PR closed without merge → artifact missing, block close
+          expect(result.allowed).toBe(false);
+          expect(result.reason).toBe("missing_artifact_of_record");
+        }
       },
     ), propertyConfig);
   });

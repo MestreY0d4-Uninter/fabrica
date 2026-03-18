@@ -26,6 +26,8 @@ export type PrContext = {
   diff?: string;
   /** PR description body (markdown). Includes QA Evidence, Summary, etc. */
   body?: string;
+  /** Source branch name for the PR (e.g. "feature/1-json-yaml-cli"). */
+  sourceBranch?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -87,7 +89,7 @@ export async function fetchPrContext(
       return undefined;
     }
     const diff = await provider.getPrDiff(issueId, selector) ?? undefined;
-    return { url: prStatus.url, diff, body: prStatus.body };
+    return { url: prStatus.url, diff, body: prStatus.body, sourceBranch: prStatus.sourceBranch };
   } catch {
     return undefined;
   }
@@ -102,6 +104,16 @@ export async function fetchPrContext(
  */
 export function formatPrContext(prContext: PrContext): string[] {
   const parts: string[] = [``, `## Pull Request`, `🔗 ${prContext.url}`];
+  if (prContext.sourceBranch) {
+    parts.push(
+      ``,
+      `**⚠️ IMPORTANT: Test on the PR branch, not the base branch.**`,
+      `\`\`\`bash`,
+      `git fetch origin ${prContext.sourceBranch}`,
+      `git checkout ${prContext.sourceBranch}`,
+      `\`\`\``,
+    );
+  }
   if (prContext.body) {
     const maxBodyLen = 10_000;
     const body = prContext.body.length > maxBodyLen

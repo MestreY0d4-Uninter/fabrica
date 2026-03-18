@@ -29,6 +29,7 @@ export async function holdEscapePass(opts: {
   projectName: string;
   workflow: WorkflowConfig;
   provider: IssueProvider;
+  onEscape?: (issueId: number, fromLabel: string, prUrl: string) => void;
 }): Promise<number> {
   const { workspaceDir, projectName, workflow, provider } = opts;
   let transitions = 0;
@@ -97,6 +98,9 @@ export async function holdEscapePass(opts: {
           prNumber: selector.prNumber,
           prUrl: status.url,
         });
+
+        // Fire notification callback (best-effort, never blocks transition)
+        try { opts.onEscape?.(issue.iid, state.label, status.url ?? ""); } catch { /* ignore */ }
 
         transitions++;
       } catch (err) {

@@ -153,6 +153,7 @@ export async function performHealthPass(
       autoFix: true,
       provider,
       instanceName,
+      workflow: resolvedConfig?.workflow,
     });
     fixedCount += orphanFixes.filter((f) => f.fixed).length;
   }
@@ -393,13 +394,51 @@ export async function performTestSkipPass(
 export async function performHoldEscapePass(
   workspaceDir: string,
   projectSlug: string,
+  project: Project,
   provider: import("../../providers/provider.js").IssueProvider,
   resolvedConfig: ResolvedConfig,
+  pluginConfig: Record<string, unknown> | undefined,
+  runtime?: PluginRuntime,
+  runCommand?: RunCommand,
 ): Promise<number> {
+  const notifyConfig = getNotificationConfig(pluginConfig);
+
   return holdEscapePass({
     workspaceDir,
     projectName: projectSlug,
     workflow: resolvedConfig.workflow,
     provider,
+    onEscape: (issueId, fromLabel, prUrl) => {
+      provider
+        .getIssue(issueId)
+        .then((issue) => {
+          const target = resolveNotifyChannel(
+            issue.labels,
+            project.channels,
+          );
+          notify(
+            {
+              type: "holdEscapeResolved",
+              project: project.name,
+              issueId,
+              issueUrl: issue.web_url,
+              issueTitle: issue.title,
+              prUrl,
+              fromState: fromLabel,
+            },
+            {
+              workspaceDir,
+              config: notifyConfig,
+              channelId: target?.channelId,
+              channel: target?.channel ?? "telegram",
+              runtime,
+              accountId: target?.accountId,
+              messageThreadId: target?.messageThreadId,
+              runCommand,
+            },
+          ).catch(() => {});
+        })
+        .catch(() => {});
+    },
   });
 }

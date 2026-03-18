@@ -194,7 +194,7 @@ export async function ensureSessionReady(
 
 export function sendToAgent(
   sessionKey: string, taskMessage: string,
-  opts: { agentId?: string; projectName: string; issueId: number; role: string; level?: string; slotIndex?: number; fromLabel?: string; orchestratorSessionKey?: string; workspaceDir: string; dispatchTimeoutMs?: number; extraSystemPrompt?: string; runCommand: RunCommand; runtime?: PluginRuntime },
+  opts: { agentId?: string; projectName: string; projectSlug?: string; issueId: number; role: string; level?: string; slotIndex?: number; fromLabel?: string; orchestratorSessionKey?: string; workspaceDir: string; dispatchTimeoutMs?: number; extraSystemPrompt?: string; runCommand: RunCommand; runtime?: PluginRuntime },
 ): void {
   const idempotencyKey = `fabrica-${opts.projectName}-${opts.issueId}-${opts.role}-${opts.level ?? "unknown"}-${opts.slotIndex ?? 0}-${opts.fromLabel ?? "unknown"}-${sessionKey}`;
 
@@ -215,6 +215,16 @@ export function sendToAgent(
         issue: opts.issueId, role: opts.role,
         method: "runtime.subagent.run",
         runId: result?.runId ?? null,
+      }).catch(() => {});
+      // runtime.subagent.run is in-process — the dispatch is confirmed immediately.
+      // Record agent_accepted so the health checker doesn't flag this as dispatch_unconfirmed.
+      recordIssueLifecycle({
+        workspaceDir: opts.workspaceDir,
+        slug: opts.projectSlug ?? opts.projectName,
+        issueId: opts.issueId,
+        stage: "agent_accepted",
+        sessionKey,
+        details: { method: "runtime.subagent.run" },
       }).catch(() => {});
     }).catch((err) => {
       auditLog(opts.workspaceDir, "dispatch_warning", {

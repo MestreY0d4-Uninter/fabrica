@@ -70,7 +70,9 @@ describe("checkWorkerHealth", () => {
     expect(h.provider.callsTo("transitionLabel")).toHaveLength(0);
   });
 
-  it("nudges stalled sessions conservatively instead of requeueing on low context tokens", async () => {
+  it("deactivates slot and requeues after MAX_STALL_NUDGES × stallThreshold idle time (model_unresponsive)", async () => {
+    // MAX_STALL_NUDGES = 3, stallTimeoutMinutes = 1 → model_unresponsive threshold = 3 min
+    // Session idle for 4 min > 3 min threshold → model_unresponsive
     h = await createTestHarness({
       workers: {
         developer: {
@@ -78,18 +80,19 @@ describe("checkWorkerHealth", () => {
           issueId: "42",
           sessionKey: "agent:main:subagent:test-project-developer-senior-ada",
           level: "senior",
-          startTime: new Date(Date.now() - 20 * 60_000).toISOString(),
+          startTime: new Date(Date.now() - 60 * 60_000).toISOString(),
+          previousLabel: "To Do",
         },
       },
     });
-    h.provider.seedIssue({ iid: 42, title: "Investigate idle worker", labels: ["Doing"] });
+    h.provider.seedIssue({ iid: 42, title: "Quota-exhausted model", labels: ["Doing"] });
 
     const sessions: SessionLookup = new Map([
       [
         "agent:main:subagent:test-project-developer-senior-ada",
         {
           key: "agent:main:subagent:test-project-developer-senior-ada",
-          updatedAt: Date.now() - 20 * 60_000,
+          updatedAt: Date.now() - 4 * 60_000, // 4 min idle > 3 × 1 min = model_unresponsive
           percentUsed: 1,
           totalTokens: 10,
           contextTokens: 50,
@@ -107,6 +110,136 @@ describe("checkWorkerHealth", () => {
       sessions,
       staleWorkerHours: 999,
       stallTimeoutMinutes: 1,
+      runCommand: h.runCommand,
+      agentId: "main",
+    });
+
+    expect(fixes).toHaveLength(1);
+    expect(fixes[0]?.issue.type).toBe("model_unresponsive");
+    expect(fixes[0]?.fixed).toBe(true);
+    expect(fixes[0]?.nudgeSent).toBeUndefined();
+
+    // Issue should be requeued
+    const transitions = h.provider.callsTo("transitionLabel");
+    expect(transitions).toHaveLength(1);
+    expect(transitions[0]?.args).toMatchObject({ issueId: 42, from: "Doing" });
+
+    // Slot should be deactivated
+    const afterData = await h.readProjects();
+    const afterSlot = afterData.projects[h.project.slug]?.workers.developer.levels.senior?.[0];
+    expect(afterSlot?.active).toBe(false);
+
+    const events = await readAuditEvents(h.workspaceDir);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "model_unresponsive",
+          action: "requeue_after_max_stall_intervals",
+        }),
+        expect.objectContaining({
+          event: "health_fix_applied",
+          type: "model_unresponsive",
+          action: "requeue_issue",
+        }),
+      ]),
+    );
+
+    // No nudge should be sent
+    expect(h.commands.taskMessages()).toHaveLength(0);
+  });
+
+  it("sends nudge (not model_unresponsive) when idle is between 1× and 3× stall threshold", async () => {
+    // stallTimeoutMinutes = 1 → stall at 1 min, model_unresponsive at 3 min
+    // Session idle for 2 min → inside stall window but below model_unresponsive threshold
+    h = await createTestHarness({
+      workers: {
+        developer: {
+          active: true,
+          issueId: "42",
+          sessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+          level: "senior",
+          startTime: new Date(Date.now() - 60 * 60_000).toISOString(),
+        },
+      },
+    });
+    h.provider.seedIssue({ iid: 42, title: "Stalling worker", labels: ["Doing"] });
+
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-senior-ada",
+        {
+          key: "agent:main:subagent:test-project-developer-senior-ada",
+          updatedAt: Date.now() - 2 * 60_000, // 2 min idle — stalled but < 3× threshold
+          percentUsed: 5,
+          totalTokens: 100,
+          contextTokens: 500,
+        },
+      ],
+    ]);
+
+    const fixes = await checkWorkerHealth({
+      workspaceDir: h.workspaceDir,
+      projectSlug: h.project.slug,
+      project: h.project,
+      role: "developer",
+      autoFix: true,
+      provider: h.provider,
+      sessions,
+      staleWorkerHours: 999,
+      stallTimeoutMinutes: 1,
+      runCommand: h.runCommand,
+      agentId: "main",
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fixes).toHaveLength(1);
+    expect(fixes[0]?.issue.type).toBe("session_stalled");
+    expect(fixes[0]?.nudgeSent).toBe(true);
+    // Slot stays active (nudge only)
+    expect(h.provider.callsTo("transitionLabel")).toHaveLength(0);
+  });
+
+  it("nudges stalled sessions conservatively instead of requeueing on low context tokens", async () => {
+    // stallTimeoutMinutes: 10 → model_unresponsive threshold = 30 min
+    // Session idle 20 min → stalled (>10 min) but not model_unresponsive (<30 min) → nudge
+    h = await createTestHarness({
+      workers: {
+        developer: {
+          active: true,
+          issueId: "42",
+          sessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+          level: "senior",
+          startTime: new Date(Date.now() - 60 * 60_000).toISOString(),
+        },
+      },
+    });
+    h.provider.seedIssue({ iid: 42, title: "Investigate idle worker", labels: ["Doing"] });
+
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-senior-ada",
+        {
+          key: "agent:main:subagent:test-project-developer-senior-ada",
+          updatedAt: Date.now() - 20 * 60_000, // 20 min idle
+          percentUsed: 1,
+          totalTokens: 10,
+          contextTokens: 50,
+        },
+      ],
+    ]);
+
+    const fixes = await checkWorkerHealth({
+      workspaceDir: h.workspaceDir,
+      projectSlug: h.project.slug,
+      project: h.project,
+      role: "developer",
+      autoFix: true,
+      provider: h.provider,
+      sessions,
+      staleWorkerHours: 999,
+      stallTimeoutMinutes: 10, // model_unresponsive at 30 min; 20 min idle → nudge only
       runCommand: h.runCommand,
       agentId: "main",
     });

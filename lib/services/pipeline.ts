@@ -675,7 +675,10 @@ export function evaluateIssueCloseGuard(opts: {
   );
 
   if (!prStillOpen) {
-    if (hadCanonicalPrCycle && !issueRuntime?.artifactOfRecord) {
+    // If the live API confirms the PR is merged, that IS the artifact — allow close
+    // even if issueRuntime.artifactOfRecord hasn't been persisted yet (race with webhook).
+    const prConfirmedMerged = prStatus.state === PrState.MERGED;
+    if (hadCanonicalPrCycle && !issueRuntime?.artifactOfRecord && !prConfirmedMerged) {
       return { allowed: false, reason: "missing_artifact_of_record", currentPrNumber };
     }
     if (followUpPrRequired) {

@@ -19,6 +19,7 @@ import {
   getStateLabels,
   getLabelColors,
   getRoleLabels,
+  OPERATIONAL_LABELS,
 } from "../../workflow/index.js";
 import { log as auditLog } from "../../audit.js";
 
@@ -94,6 +95,11 @@ export function createSyncLabelsTool(ctx: PluginContext) {
           // Role:level + step routing labels
           const roleLabels = getRoleLabels(resolvedConfig.roles);
           for (const { name, color } of roleLabels) {
+            await provider.ensureLabel(name, color);
+          }
+
+          // Operational labels (priority/effort/type/needs-human/approved)
+          for (const { name, color } of OPERATIONAL_LABELS) {
             await provider.ensureLabel(name, color);
           }
 

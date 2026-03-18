@@ -138,6 +138,32 @@ export async function dispatchTask(
     }
   }
 
+  // Feedback-cycle guard: when a developer issue returns from a feedback queue
+  // (for example `To Improve` after TESTER FAIL), force a fresh session even for
+  // the same issue. Reusing the old session tends to preserve the prior
+  // “already done” mindset and can create a no-op loop where the developer keeps
+  // sending `work_finish(done)` without addressing the new feedback.
+  if (existingSessionKey && role === "developer" && isFeedbackState(project.workflow, fromLabel)) {
+    await rc(
+      ["openclaw", "gateway", "call", "sessions.delete", "--params", JSON.stringify({ key: existingSessionKey })],
+      { timeoutMs: 10_000 },
+    ).catch((err: Error) => console.error("[fabrica] silent-catch:", err.message));
+    await updateSlot(workspaceDir, project.slug, role, level, slotIndex, {
+      sessionKey: null,
+    });
+    await auditLog(workspaceDir, "session_feedback_reset", {
+      project: project.name,
+      projectSlug: project.slug,
+      issue: issueId,
+      role,
+      level,
+      fromLabel,
+      sessionKey: existingSessionKey,
+      reason: "developer_feedback_cycle_requires_fresh_context",
+    }).catch(() => {});
+    existingSessionKey = null;
+  }
+
   // Context budget check: clear session if over budget (unless same issue — feedback cycle)
   if (existingSessionKey && timeouts.sessionContextBudget < 1) {
     const shouldClear = await shouldClearSession(existingSessionKey, slot.issueId, issueId, timeouts, workspaceDir, project.name, rc);
@@ -355,7 +381,7 @@ export async function dispatchTask(
   // Model is set on the session via sessions.patch (pre-commitment), not on the agent RPC —
   // the gateway's agent endpoint rejects unknown properties like 'model'.
   sendToAgent(sessionKey, taskMessage, {
-    agentId, projectName: project.name, issueId, role, level, slotIndex, fromLabel,
+    agentId, projectName: project.name, projectSlug: project.slug, issueId, role, level, slotIndex, fromLabel,
     orchestratorSessionKey: opts.sessionKey, workspaceDir,
     dispatchTimeoutMs: timeouts.dispatchMs,
     extraSystemPrompt: roleInstructions.trim() || undefined,

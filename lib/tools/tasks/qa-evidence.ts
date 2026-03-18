@@ -63,11 +63,19 @@ export function validateQaEvidence(body?: string | null): QaEvidenceValidation {
   // Enhanced checks — structured error codes
   const section = qaBody;
 
-  // 1. Required gate presence check
-  const GATE_NAMES = ["lint", "types", "security", "tests", "coverage"] as const;
-  for (const gate of GATE_NAMES) {
-    const gateRegex = new RegExp(`###?\\s*${gate}`, "i");
-    if (!gateRegex.test(section)) {
+  // 1. Required gate presence check.
+  // Accepts both markdown headings (## lint) and horizontal-rule delimiters (--- Ruff lint ---),
+  // plus tool-name aliases so scripts using "Mypy" still satisfy the "types" gate, etc.
+  const GATE_ALIASES: Record<string, string[]> = {
+    lint:     ["lint", "ruff", "eslint", "golangci", "flake8", "pylint"],
+    types:    ["types", "mypy", "tsc", "typecheck", "type.check"],
+    security: ["security", "secret", "audit", "pip.audit", "npm.audit"],
+    tests:    ["tests", "pytest", "jest", "vitest", "go test", "test session"],
+    coverage: ["coverage"],
+  };
+  for (const [gate, aliases] of Object.entries(GATE_ALIASES)) {
+    const found = aliases.some((alias) => new RegExp(alias, "i").test(section));
+    if (!found) {
       errors.push(`qa_gate_missing_${gate}`);
     }
   }
@@ -80,8 +88,13 @@ export function validateQaEvidence(body?: string | null): QaEvidenceValidation {
   }
 
   // 3. Coverage threshold check (default: 80%)
+  // Use specific coverage-summary patterns to avoid matching test progress like "[ 14%]"
   const coverageThreshold = 80;
-  const coverageMatch = section.match(/(\d+(?:\.\d+)?)%/);
+  const coverageMatch =
+    section.match(/total coverage:\s*(\d+(?:\.\d+)?)%/i) ??
+    section.match(/^TOTAL\b.*?(\d+(?:\.\d+)?)%/m) ??
+    section.match(/^Statements\s*:\s*(\d+(?:\.\d+)?)%/m) ??
+    section.match(/^All files\b.*?(\d+(?:\.\d+)?)%/m);
   if (coverageMatch) {
     const cov = parseFloat(coverageMatch[1]!);
     if (cov < coverageThreshold) {
@@ -113,5 +126,6 @@ export function formatQaEvidenceValidationFailure(
     ? 'Replace the existing "## QA Evidence" section with fresh sanitized output from scripts/qa.sh (exactly one section, Exit code: 0), then call work_finish again.'
     : 'Reject the PR and instruct the developer to replace the existing "## QA Evidence" section in the PR body with fresh sanitized output from scripts/qa.sh (exactly one section, Exit code: 0).';
 
-  return `${intro}\n\n${validation.problems.map((problem) => `- ${problem}`).join("\n")}\n\n${guidance}`;
+  const allIssues = [...validation.problems, ...validation.errors];
+  return `${intro}\n\n${allIssues.map((issue) => `- ${issue}`).join("\n")}\n\n${guidance}`;
 }

@@ -21,7 +21,7 @@ pytest — 12 passed
 Exit code: 0
 
 ### coverage
-coverage: 85.3%
+TOTAL                                         82      1    99%
 Exit code: 0`;
 
     const result = validateQaEvidence(body);
@@ -68,9 +68,38 @@ OK
 ### tests
 OK
 ### coverage
-coverage: 60.0%`;
+TOTAL                                         50      20    60%`;
 
     const result = validateQaEvidence(body);
     expect(result.errors).toContain("qa_coverage_below_threshold_60");
+  });
+
+  it("does not confuse test progress indicators with coverage", () => {
+    const body = `## QA Evidence
+\`\`\`text
+--- Ruff lint ---
+All checks passed!
+--- Mypy ---
+Success: no issues found in 3 source files
+--- Tests ---
+tests/test_main.py::test_one PASSED             [ 14%]
+tests/test_main.py::test_two PASSED             [ 28%]
+tests/test_main.py::test_three PASSED           [ 42%]
+tests/test_main.py::test_four PASSED            [ 57%]
+tests/test_main.py::test_five PASSED            [ 71%]
+tests/test_main.py::test_six PASSED             [ 85%]
+tests/test_main.py::test_seven PASSED           [100%]
+--- Coverage (>=80%) ---
+TOTAL                                         82      1    99%
+Required test coverage of 80% reached. Total coverage: 98.78%
+--- Secrets scan ---
+No hardcoded secrets found
+\`\`\`
+
+Exit code: 0`;
+
+    const result = validateQaEvidence(body);
+    expect(result.errors).not.toContain("qa_coverage_below_threshold_14");
+    expect(result.errors.filter(e => e.startsWith("qa_coverage_below_threshold"))).toHaveLength(0);
   });
 });

@@ -22,7 +22,7 @@ import { resolveRepoPath } from "../../projects/index.js";
 import { createProvider } from "../../providers/index.js";
 import { log as auditLog } from "../../audit.js";
 import { getAllRoleIds } from "../../roles/index.js";
-import { getRoleLabels } from "../../workflow/index.js";
+import { getRoleLabels, OPERATIONAL_LABELS } from "../../workflow/index.js";
 import { loadConfig } from "../../config/index.js";
 import { DATA_DIR } from "../../setup/migrate-layout.js";
 import { createProjectForumTopic } from "../../telegram/topic-service.js";
@@ -277,6 +277,9 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
     }
     const roleLabels = getRoleLabels(resolvedConfig.roles);
     for (const { name: labelName, color } of roleLabels) {
+      await provider.ensureLabel(labelName, color);
+    }
+    for (const { name: labelName, color } of OPERATIONAL_LABELS) {
       await provider.ensureLabel(labelName, color);
     }
 

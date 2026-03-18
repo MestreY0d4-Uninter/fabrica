@@ -62,7 +62,7 @@ export { fetchGatewaySessions, isSessionAlive, type GatewaySession, type Session
 
 /** Grace period: skip session-dead checks for workers started within this window.
  * Now configurable via resolvedConfig.timeouts.healthGracePeriodMs — fallback default preserved for callers without config. */
-export const GRACE_PERIOD_MS = 15 * 60 * 1_000; // 15 minutes (reviewer/tester agents need time for LLM calls)
+export const GRACE_PERIOD_MS = 5 * 60 * 1_000; // 5 minutes (enough for dispatch + LLM bootstrap; was 15 min which masked dead subagents)
 
 /** Dispatch confirm timeout: flag dispatches that were never acknowledged by the worker.
  * Now configurable via resolvedConfig.timeouts.dispatchConfirmTimeoutMs — fallback default preserved for callers without config. */
@@ -70,6 +70,14 @@ export const DISPATCH_CONFIRMATION_TIMEOUT_MS = 2 * 60 * 1_000; // 2 minutes
 
 /** Message sent to nudge a stalled session back to life. */
 const NUDGE_MESSAGE = `You appear to have stalled. Continue working on your current task. If you are blocked or unable to proceed, call work_finish with result "blocked".`;
+
+/**
+ * Maximum consecutive stall nudges before treating the slot as model-unresponsive.
+ * When a model provider is quota-exhausted or returning empty responses, the session
+ * receives nudges but never produces output. After MAX_STALL_NUDGES the slot is
+ * deactivated and the issue is requeued, preventing an infinite stall-nudge loop.
+ */
+const MAX_STALL_NUDGES = 3;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -89,7 +97,8 @@ export type HealthIssue = {
     | "session_exhausted"   // Case 1d: active worker session near 100% context without work_finish
     | "session_stalled"     // Active worker but session inactive for >stallTimeoutMinutes
     | "dispatch_unconfirmed" // Active worker never reached agent bootstrap/activity after dispatch
-    | "stateless_issue";     // Case 8: open managed issue with no state label (#473)
+    | "stateless_issue"      // Case 8: open managed issue with no state label (#473)
+    | "model_unresponsive";  // Slot deactivated after MAX_STALL_NUDGES — model/provider quota exhausted
   severity: "critical" | "warning";
   project: string;
   projectSlug: string;
@@ -624,6 +633,59 @@ export async function checkWorkerHealth(opts: {
         if (sessionIdleMs > stallThresholdMs) {
           const idleMinutes = Math.round(sessionIdleMs / 60_000);
 
+          // After MAX_STALL_NUDGES stall intervals the model/provider is likely
+          // quota-exhausted or persistently unresponsive. Deactivate and requeue
+          // rather than looping forever.
+          // Use slot.startTime (wall-clock age) instead of sessionIdleMs because
+          // nudges reset session.updatedAt, which would prevent this threshold from
+          // ever being reached (infinite nudge loop bug — E2E #5 Round B).
+          const modelUnresponsiveMs = stallThresholdMs * MAX_STALL_NUDGES;
+          const slotAgeMs = slot.startTime ? Date.now() - new Date(slot.startTime).getTime() : sessionIdleMs;
+          if (slotAgeMs > modelUnresponsiveMs) {
+            const fix: HealthFix = {
+              issue: {
+                type: "model_unresponsive",
+                severity: "critical",
+                project: project.name,
+                projectSlug,
+                role,
+                level,
+                sessionKey,
+                issueId: slot.issueId,
+                slotIndex,
+                message: `${role.toUpperCase()} ${level}[${slotIndex}] model unresponsive for ${idleMinutes}m (>${MAX_STALL_NUDGES} stall intervals) — deactivating and requeueing`,
+              },
+              fixed: false,
+            };
+            if (autoFix) {
+              await revertLabel(fix, expectedLabel, slotQueueLabel);
+              if (!fix.labelRevertFailed) {
+                await deactivateSlot();
+                fix.fixed = true;
+                await auditHealthFixApplied(workspaceDir, fix, {
+                  action: "requeue_issue",
+                  fromLabel: expectedLabel,
+                  toLabel: slotQueueLabel,
+                  idleMinutes,
+                });
+              }
+            }
+            await auditLog(workspaceDir, "model_unresponsive", {
+              project: project.name,
+              projectSlug,
+              role,
+              level,
+              sessionKey,
+              issueId: slot.issueId,
+              slotIndex,
+              idleMinutes,
+              deliveryState,
+              action: "requeue_after_max_stall_intervals",
+            }).catch(() => {});
+            fixes.push(fix);
+            continue;
+          }
+
           const fix: HealthFix = {
             issue: {
               type: "session_stalled",
@@ -881,7 +943,22 @@ export async function scanOrphanedLabels(opts: {
     }
 
     if (!isTracked) {
-      // Orphaned label: issue has active label but no slot tracking it
+      // Orphaned label: issue has active label but no slot tracking it.
+      // Re-fetch the issue to guard against GitHub propagation delay:
+      // session_dead may have already transitioned the label moments ago,
+      // but listIssuesByLabel() returned a stale result. Confirm the active
+      // label is still present before acting to avoid a double-transition.
+      let confirmedActiveLabel = false;
+      try {
+        const freshIssue = await provider.getIssue(issue.iid);
+        const freshLabel = freshIssue ? getCurrentStateLabel(freshIssue.labels, workflow) : null;
+        confirmedActiveLabel = freshLabel === activeLabel;
+      } catch {
+        // If we can't confirm, skip this orphan rather than risk a false transition.
+        continue;
+      }
+      if (!confirmedActiveLabel) continue; // label already changed — not orphaned
+
       const fix: HealthFix = {
         issue: {
           type: "orphaned_label",
