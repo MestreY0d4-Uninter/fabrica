@@ -9,7 +9,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/stack-detection-lib.sh"
 source "$SCRIPT_DIR/genesis-telemetry.sh"
 
-INPUT="$(cat)"
+if [[ -n "${1:-}" && -f "${1:-}" ]]; then
+  INPUT="$(cat "$1")"
+else
+  INPUT="$(cat)"
+fi
 SESSION_ID="$(echo "$INPUT" | jq -r '.session_id')"
 SPEC="$(echo "$INPUT" | jq '.spec // {}')"
 TYPE="$(echo "$INPUT" | jq -r '.classification.type // "feature"')"

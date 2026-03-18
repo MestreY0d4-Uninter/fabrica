@@ -17,7 +17,11 @@ source "$SCRIPT_DIR/genesis-telemetry.sh"
 # Load .env if available
 genesis_load_env_file "$HOME/.openclaw/.env"
 
-INPUT="$(cat)"
+if [[ -n "${1:-}" && -f "${1:-}" ]]; then
+  INPUT="$(cat "$1")"
+else
+  INPUT="$(cat)"
+fi
 TARGET_RESOLUTION="$(genesis_resolve_canonical_target "$INPUT" || jq -n '{metadata:{}}')"
 INPUT="$(printf '%s' "$INPUT" | jq --argjson resolved "$TARGET_RESOLUTION" '
   .metadata = ((.metadata // {}) + ($resolved.metadata // {}))

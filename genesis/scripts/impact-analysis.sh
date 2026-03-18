@@ -5,7 +5,11 @@ set -euo pipefail
 # Input: stdin JSON (spec + project_map)
 # Output: JSON with impact report to stdout
 
-INPUT="$(cat)"
+if [[ -n "${1:-}" && -f "${1:-}" ]]; then
+  INPUT="$(cat "$1")"
+else
+  INPUT="$(cat)"
+fi
 SESSION_ID="$(echo "$INPUT" | jq -r '.session_id')"
 IS_GREENFIELD="$(echo "$INPUT" | jq -r '.is_greenfield // false')"
 SPEC="$(echo "$INPUT" | jq '.spec // {}')"

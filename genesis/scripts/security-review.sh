@@ -8,7 +8,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SECURECLAW_AUDIT="$HOME/.openclaw/extensions/secureclaw/skill/scripts/quick-audit.sh"
 
-INPUT="$(cat)"
+if [[ -n "${1:-}" && -f "${1:-}" ]]; then
+  INPUT="$(cat "$1")"
+else
+  INPUT="$(cat)"
+fi
 SESSION_ID="$(echo "$INPUT" | jq -r '.session_id')"
 SPEC="$(echo "$INPUT" | jq '.spec // {}')"
 METADATA="$(echo "$INPUT" | jq '.metadata // {}')"

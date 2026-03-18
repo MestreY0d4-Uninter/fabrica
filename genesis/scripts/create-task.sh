@@ -142,12 +142,20 @@ genesis_load_env_file "$HOME/.openclaw/.env"
 
 # Dry-run: output preview without creating issue
 if [[ "${GENESIS_DRY_RUN:-false}" == "true" ]]; then
+  if [[ -n "${1:-}" && -f "${1:-}" ]]; then
+  INPUT="$(cat "$1")"
+else
   INPUT="$(cat)"
+fi
   echo '{"step":"create_task","dry_run":true,"message":"Dry run — issue creation skipped. Pipeline complete.","session_id":"'"$(echo "$INPUT" | jq -r '.session_id')"'"}' >&1
   exit 0
 fi
 
-INPUT="$(cat)"
+if [[ -n "${1:-}" && -f "${1:-}" ]]; then
+  INPUT="$(cat "$1")"
+else
+  INPUT="$(cat)"
+fi
 TARGET_RESOLUTION="$(genesis_resolve_canonical_target "$INPUT" || jq -n '{metadata:{}}')"
 INPUT="$(printf '%s' "$INPUT" | jq --argjson resolved "$TARGET_RESOLUTION" '
   .metadata = ((.metadata // {}) + ($resolved.metadata // {}))

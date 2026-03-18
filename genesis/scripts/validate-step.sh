@@ -7,7 +7,11 @@ set -euo pipefail
 # Output: same JSON on stdout (if valid)
 
 STEP="${1:-}"
-INPUT="$(cat)"
+if [[ -n "${1:-}" && -f "${1:-}" ]]; then
+  INPUT="$(cat "$1")"
+else
+  INPUT="$(cat)"
+fi
 
 fail() {
   local reason="${1:-validation_failed}"

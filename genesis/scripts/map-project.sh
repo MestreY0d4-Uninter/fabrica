@@ -20,7 +20,11 @@ STATE_HAS_INPUT=false
 # Always try to load stdin state if present, even when $1 is set.
 # This keeps session_id/spec/metadata flowing through the pipeline.
 if [[ ! -t 0 ]]; then
-  STATE_INPUT="$(cat)"
+  STATE_if [[ -n "${1:-}" && -f "${1:-}" ]]; then
+  INPUT="$(cat "$1")"
+else
+  INPUT="$(cat)"
+fi
   if [[ -n "$STATE_INPUT" ]]; then
     STATE_HAS_INPUT=true
     SESSION_ID="$(echo "$STATE_INPUT" | jq -r '.session_id // ""')"

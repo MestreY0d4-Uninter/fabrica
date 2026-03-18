@@ -12,7 +12,11 @@ exec 2> >(tee -a "$GENESIS_LOG" >&2)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-INPUT="$(cat)"
+if [[ -n "${1:-}" && -f "${1:-}" ]]; then
+  INPUT="$(cat "$1")"
+else
+  INPUT="$(cat)"
+fi
 SESSION_ID="$(echo "$INPUT" | jq -r '.session_id')"
 echo "=== $(date -Iseconds) | conduct-interview.sh | session=$SESSION_ID ===" >&2
 IDEA="$(echo "$INPUT" | jq -r '.raw_idea // .idea // ""')"

@@ -64,7 +64,11 @@ sanitize_repo_description() {
   printf '%s' "$cleaned"
 }
 
-INPUT="$(cat)"
+if [[ -n "${1:-}" && -f "${1:-}" ]]; then
+  INPUT="$(cat "$1")"
+else
+  INPUT="$(cat)"
+fi
 SESSION_ID="$(echo "$INPUT" | jq -r '.session_id')"
 genesis_metric_start "scaffold-project" "$SESSION_ID"
 echo "=== $(date -Iseconds) | scaffold-project.sh | session=$SESSION_ID ===" >&2

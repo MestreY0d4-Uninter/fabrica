@@ -10,7 +10,11 @@ GENESIS_LOG="${GENESIS_LOG:-$HOME/.openclaw/workspace/logs/genesis.log}"
 mkdir -p "$(dirname "$GENESIS_LOG")"
 exec 2> >(tee -a "$GENESIS_LOG" >&2)
 
-INPUT="$(cat)"
+if [[ -n "${1:-}" && -f "${1:-}" ]]; then
+  INPUT="$(cat "$1")"
+else
+  INPUT="$(cat)"
+fi
 SESSION_ID="$(echo "$INPUT" | jq -r '.session_id')"
 echo "=== $(date -Iseconds) | research-idea.sh | session=$SESSION_ID ===" >&2
 

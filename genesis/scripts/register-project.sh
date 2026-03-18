@@ -18,7 +18,11 @@ source "$SCRIPT_DIR/genesis-telemetry.sh"
 # Load .env if available
 genesis_load_env_file "$HOME/.openclaw/.env"
 
-INPUT="$(cat)"
+if [[ -n "${1:-}" && -f "${1:-}" ]]; then
+  INPUT="$(cat "$1")"
+else
+  INPUT="$(cat)"
+fi
 SESSION_ID="$(echo "$INPUT" | jq -r '.session_id')"
 genesis_metric_start "register-project" "$SESSION_ID"
 echo "=== $(date -Iseconds) | register-project.sh | session=$SESSION_ID ===" >&2

@@ -11,7 +11,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/delivery-target-lib.sh"
 
-INPUT="$(cat)"
+if [[ -n "${1:-}" && -f "${1:-}" ]]; then
+  INPUT="$(cat "$1")"
+else
+  INPUT="$(cat)"
+fi
 SESSION_ID="$(echo "$INPUT" | jq -r '.session_id')"
 RAW_IDEA="$(echo "$INPUT" | jq -r '.raw_idea')"
 TYPE="$(echo "$INPUT" | jq -r '.classification.type')"

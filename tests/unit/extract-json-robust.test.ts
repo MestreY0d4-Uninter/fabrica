@@ -37,4 +37,25 @@ describe("extractJsonFromStdout — robust ANSI handling", () => {
     const result = extractJsonFromStdout(input);
     expect(result).toEqual({ payloads: [{ text: "ok" }] });
   });
+
+  it("extracts payloads from pretty-printed multi-line JSON after pino log lines", () => {
+    // This is the real output format from `openclaw agent --local --json`
+    const pinoLine1 = '{"level":30,"time":1234567890,"name":"fabrica","msg":"plugin registered"}';
+    const pinoLine2 = '{"level":30,"time":1234567891,"name":"fabrica","msg":"route registered"}';
+    const multiLinePayload = [
+      "{",
+      '  "payloads": [',
+      "    {",
+      '      "text": "{\\"type\\":\\"feature\\",\\"confidence\\":0.9}",',
+      '      "mediaUrl": null',
+      "    }",
+      "  ],",
+      '  "meta": { "durationMs": 100 }',
+      "}",
+    ].join("\n");
+    const input = [pinoLine1, pinoLine2, multiLinePayload].join("\n");
+    const result = extractJsonFromStdout(input);
+    expect(result).toHaveProperty("payloads");
+    expect(result.payloads[0].text).toContain("feature");
+  });
 });

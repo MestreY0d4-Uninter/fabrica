@@ -18,7 +18,11 @@ score_gt_zero() {
   [[ "$(echo "$value > 0" | bc 2>/dev/null || echo 0)" == "1" ]]
 }
 
-INPUT="$(cat)"
+if [[ -n "${1:-}" && -f "${1:-}" ]]; then
+  INPUT="$(cat "$1")"
+else
+  INPUT="$(cat)"
+fi
 SESSION_ID="$(echo "$INPUT" | jq -r '.session_id')"
 echo "=== $(date -Iseconds) | classify-idea.sh | session=$SESSION_ID ===" >&2
 RAW_IDEA="$(echo "$INPUT" | jq -r '.raw_idea')"

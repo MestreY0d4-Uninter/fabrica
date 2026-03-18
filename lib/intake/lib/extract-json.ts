@@ -26,18 +26,33 @@ export function extractJsonFromStdout(stdout: string): any {
     }
   }
 
-  if (parsed.length === 0) {
-    // Fallback: try parsing from the first '{' in the whole output
-    const idx = stripped.indexOf("{");
-    if (idx < 0) return null;
-    try {
-      return JSON.parse(stripped.slice(idx));
-    } catch {
-      return null;
+  // Prefer the object with `payloads` (agent response) from per-line parse
+  const withPayloads = parsed.slice().reverse().find((o: any) => o?.payloads);
+  if (withPayloads) return withPayloads;
+
+  // Try to find a multi-line JSON block (e.g., pretty-printed response object).
+  // Scan backward for a line that is just '{' and try parsing from there.
+  const lineArray = stripped.split("\n");
+  for (let i = lineArray.length - 1; i >= 0; i--) {
+    if (lineArray[i]!.trim() === "{") {
+      const candidate = lineArray.slice(i).join("\n");
+      try {
+        const obj = JSON.parse(candidate);
+        return obj;
+      } catch {
+        continue;
+      }
     }
   }
 
-  // Prefer the object with `payloads` (agent response), then the last one
-  const withPayloads = parsed.slice().reverse().find((o: any) => o?.payloads);
-  return withPayloads ?? parsed[parsed.length - 1];
+  if (parsed.length > 0) return parsed[parsed.length - 1];
+
+  // Last resort: try parsing from the first '{' in the whole output
+  const idx = stripped.indexOf("{");
+  if (idx < 0) return null;
+  try {
+    return JSON.parse(stripped.slice(idx));
+  } catch {
+    return null;
+  }
 }
