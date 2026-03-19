@@ -221,6 +221,10 @@ export const fabricaRunMachine = fabricaRunMachineSetup.createMachine({
           target: "passed",
           actions: ["setArtifactOfRecord", "emitCheckRun", "logTransition"],
         },
+        PR_CLOSED_UNMERGED: {
+          target: "aborted",
+          actions: ["markAborted", "emitCheckRun", "logTransition"],
+        },
         ABORT: {
           target: "failed",
           actions: ["markAborted", "emitCheckRun", "logTransition"],
@@ -260,6 +264,10 @@ export const fabricaRunMachine = fabricaRunMachineSetup.createMachine({
           target: "passed",
           actions: ["setArtifactOfRecord", "emitCheckRun", "logTransition"],
         },
+        PR_CLOSED_UNMERGED: {
+          target: "aborted",
+          actions: ["markAborted", "emitCheckRun", "logTransition"],
+        },
         ABORT: {
           target: "failed",
           actions: ["markAborted", "emitCheckRun", "logTransition"],
@@ -289,6 +297,10 @@ export const fabricaRunMachine = fabricaRunMachineSetup.createMachine({
           target: "passed",
           actions: ["setArtifactOfRecord", "emitCheckRun", "logTransition"],
         },
+        PR_CLOSED_UNMERGED: {
+          target: "aborted",
+          actions: ["markAborted", "emitCheckRun", "logTransition"],
+        },
         ABORT: {
           target: "failed",
           actions: ["markAborted", "emitCheckRun", "logTransition"],
@@ -316,6 +328,10 @@ export const fabricaRunMachine = fabricaRunMachineSetup.createMachine({
         PR_MERGED: {
           target: "passed",
           actions: ["setArtifactOfRecord", "emitCheckRun", "logTransition"],
+        },
+        PR_CLOSED_UNMERGED: {
+          target: "aborted",
+          actions: ["markAborted", "emitCheckRun", "logTransition"],
         },
         ABORT: {
           target: "failed",
