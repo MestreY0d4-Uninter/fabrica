@@ -565,9 +565,9 @@ export class GitHubProvider implements IssueProvider {
     if (!repo) return null;
 
     try {
-      const query = `{
-        repository(owner: "${repo.owner}", name: "${repo.name}") {
-          issue(number: ${issueId}) {
+      const query = `query($owner: String!, $name: String!, $issueNumber: Int!) {
+        repository(owner: $owner, name: $name) {
+          issue(number: $issueNumber) {
             timelineItems(itemTypes: [CONNECTED_EVENT, CROSS_REFERENCED_EVENT], first: 20) {
               nodes {
                 __typename
@@ -583,7 +583,13 @@ export class GitHubProvider implements IssueProvider {
         }
       }`;
 
-      const raw = await this.gh(["api", "graphql", "-f", `query=${query}`]);
+      const raw = await this.gh([
+        "api", "graphql",
+        "-F", `owner=${repo.owner}`,
+        "-F", `name=${repo.name}`,
+        "-F", `issueNumber=${issueId}`,
+        "-f", `query=${query}`,
+      ]);
       const data = JSON.parse(raw);
       const nodes = data?.data?.repository?.issue?.timelineItems?.nodes ?? [];
 
@@ -1155,7 +1161,7 @@ export class GitHubProvider implements IssueProvider {
     const raw = await this.gh([
       "api", `repos/:owner/:repo/issues/${prNumber}/comments`,
       "--method", "POST",
-      "--field", `body=${body}`,
+      "-f", `body=${body}`,
     ]);
     const parsed = JSON.parse(raw) as { id: number };
     return {
@@ -1199,7 +1205,7 @@ export class GitHubProvider implements IssueProvider {
     const raw = await this.gh([
       "api", `repos/:owner/:repo/issues/${issueId}/comments`,
       "--method", "POST",
-      "--field", `body=${body}`,
+      "-f", `body=${body}`,
     ]);
     const parsed = JSON.parse(raw) as { id: number };
     return parsed.id;

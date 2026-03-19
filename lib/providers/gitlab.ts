@@ -493,7 +493,7 @@ export class GitLabProvider implements IssueProvider {
     const raw = await this.glab([
       "api", `projects/:id/merge_requests/${open.iid}/notes`,
       "--method", "POST",
-      "--field", `body=${body}`,
+      "-f", `body=${body}`,
     ]);
     const parsed = JSON.parse(raw) as { id: number };
     return {
@@ -521,7 +521,7 @@ export class GitLabProvider implements IssueProvider {
     const raw = await this.glab([
       "api", `projects/:id/issues/${issueId}/notes`,
       "--method", "POST",
-      "--field", `body=${body}`,
+      "-f", `body=${body}`,
     ]);
     const parsed = JSON.parse(raw) as { id: number };
     return parsed.id;
