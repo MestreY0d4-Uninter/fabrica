@@ -7,9 +7,14 @@ import { classifyByKeywords, resolveDeliveryTarget, type ClassificationRules } f
 import { extractJsonFromStdout } from "../lib/extract-json.js";
 import { resolveOpenClawCli } from "../lib/runtime-paths.js";
 import { withLlmRetry } from "../lib/llm-retry.js";
+import { z } from "zod";
 
 import { createRequire } from "node:module";
 const _require = createRequire(import.meta.url);
+
+const LlmResponseSchema = z.object({
+  payloads: z.array(z.object({ text: z.string() })).min(1),
+}).passthrough();
 
 // Loaded lazily (JSON import)
 let cachedRules: ClassificationRules | null = null;
@@ -55,7 +60,11 @@ Return ONLY valid JSON (no markdown fences, no explanation):
 
       if (result.exitCode === 0 && result.stdout) {
         const parsed = extractJsonFromStdout(result.stdout);
-        const text = parsed?.payloads?.[0]?.text ?? "";
+        const validated = LlmResponseSchema.safeParse(parsed);
+        if (!validated.success) {
+          throw new Error(`classify: LLM output failed schema validation: ${validated.error.message}`);
+        }
+        const text = validated.data.payloads[0].text;
         const cleaned = text.replace(/^```(json)?/gm, "").replace(/```$/gm, "").trim();
         const llmResult = JSON.parse(cleaned);
 

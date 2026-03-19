@@ -477,7 +477,7 @@ scaffold_nextjs() {
   }
 }
 EOF
-  sed -i "s/REPO_NAME_PLACEHOLDER/$REPO_NAME/" package.json
+  jq --arg name "$REPO_NAME" '.name = $name' package.json > package.json.tmp && mv package.json.tmp package.json
   FILES_CREATED+=("package.json")
   generate_node_lockfile
 
@@ -627,7 +627,7 @@ scaffold_express() {
   }
 }
 EOF
-  sed -i "s/REPO_NAME_PLACEHOLDER/$REPO_NAME/" package.json
+  jq --arg name "$REPO_NAME" '.name = $name' package.json > package.json.tmp && mv package.json.tmp package.json
   FILES_CREATED+=("package.json")
   generate_node_lockfile
 

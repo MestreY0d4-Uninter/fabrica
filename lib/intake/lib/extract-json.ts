@@ -12,6 +12,17 @@
 // Comprehensive ANSI strip: SGR, 8-bit, 24-bit, cursor, OSC, CSI
 const ANSI_REGEX = /\x1b(?:\[[0-9;]*[A-Za-z]|\].*?(?:\x07|\x1b\\)|\[[0-9;]*m)/g;
 
+function stripDangerousKeys(obj: unknown): unknown {
+  if (typeof obj !== "object" || obj === null) return obj;
+  if (Array.isArray(obj)) return obj.map(stripDangerousKeys);
+  const clean: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
+    clean[key] = stripDangerousKeys(value);
+  }
+  return clean;
+}
+
 export function extractJsonFromStdout(stdout: string): any {
   const stripped = stdout.replace(ANSI_REGEX, "");
 
@@ -20,7 +31,7 @@ export function extractJsonFromStdout(stdout: string): any {
 
   for (const line of lines) {
     try {
-      parsed.push(JSON.parse(line.trim()));
+      parsed.push(stripDangerousKeys(JSON.parse(line.trim())));
     } catch {
       // skip non-JSON or malformed lines
     }
@@ -37,7 +48,7 @@ export function extractJsonFromStdout(stdout: string): any {
     if (lineArray[i]!.trim() === "{") {
       const candidate = lineArray.slice(i).join("\n");
       try {
-        const obj = JSON.parse(candidate);
+        const obj = stripDangerousKeys(JSON.parse(candidate));
         return obj;
       } catch {
         continue;
@@ -47,12 +58,5 @@ export function extractJsonFromStdout(stdout: string): any {
 
   if (parsed.length > 0) return parsed[parsed.length - 1];
 
-  // Last resort: try parsing from the first '{' in the whole output
-  const idx = stripped.indexOf("{");
-  if (idx < 0) return null;
-  try {
-    return JSON.parse(stripped.slice(idx));
-  } catch {
-    return null;
-  }
+  return null;
 }

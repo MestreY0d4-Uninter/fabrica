@@ -5,6 +5,11 @@ import type { PipelineStep, GenesisPayload, SpecData } from "../types.js";
 import { extractJsonFromStdout } from "../lib/extract-json.js";
 import { resolveOpenClawCli } from "../lib/runtime-paths.js";
 import { withLlmRetry } from "../lib/llm-retry.js";
+import { z } from "zod";
+
+const LlmResponseSchema = z.object({
+  payloads: z.array(z.object({ text: z.string() })).min(1),
+}).passthrough();
 
 /** Type-aware deterministic defaults when LLM fails. */
 function fallbackSpecData(type: string, rawIdea: string): SpecData {
@@ -96,7 +101,11 @@ IMPORTANT: Acceptance criteria must be domain-specific, not generic.`;
 
       if (result.exitCode === 0 && result.stdout) {
         const parsed = extractJsonFromStdout(result.stdout);
-        const text = parsed?.payloads?.[0]?.text ?? "";
+        const validated = LlmResponseSchema.safeParse(parsed);
+        if (!validated.success) {
+          throw new Error(`conduct-interview: LLM output failed schema validation: ${validated.error.message}`);
+        }
+        const text = validated.data.payloads[0].text;
         const cleaned = text.replace(/^```(json)?/gm, "").replace(/```$/gm, "").trim();
         const specData = JSON.parse(cleaned) as SpecData;
 
