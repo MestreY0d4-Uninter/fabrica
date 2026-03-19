@@ -85,6 +85,36 @@ describe("P0-3: timed-out tick does not immediately release the mutex", () => {
     await new Promise<void>((res) => setTimeout(res, 5));
     expect(slowFnSettled.value).toBe(true);
   });
+
+  it("mutex stays held while timed-out tick is still running", async () => {
+    const mod = await import("../../lib/services/heartbeat/index.js?isolate-p0-3-held-" + Date.now());
+
+    // Start a slow async operation via withTickMutex
+    let resolveSlowFn!: () => void;
+    const slowFnDone = new Promise<void>(r => { resolveSlowFn = r; });
+
+    // Start the mutex-held operation (don't await yet)
+    const mutexOp = mod.withTickMutex(async () => {
+      await slowFnDone;
+      return "done";
+    });
+
+    // Allow the async fn to start (yield to event loop)
+    await new Promise(r => setTimeout(r, 0));
+
+    // Now the mutex should be held — a second call should return "busy"
+    const busyResult = await mod.withTickMutex(async () => "should-not-run");
+    expect(busyResult).toBe("busy");
+
+    // Release the slow fn and verify the first call completes
+    resolveSlowFn();
+    const result = await mutexOp;
+    expect(result).toBe("done");
+
+    // After settling, mutex should be released
+    const freeResult = await mod.withTickMutex(async () => "should-run");
+    expect(freeResult).toBe("should-run");
+  });
 });
 
 describe("P0-4: withTickMutex — basic behaviour", () => {

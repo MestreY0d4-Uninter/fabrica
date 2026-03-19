@@ -199,9 +199,9 @@ async function runHeartbeatTick(
           _anyTickRunning = false;
         });
       } else {
-        // Fallback: promise wasn't captured (shouldn't happen) — release now.
-        _tickRunning[mode] = false;
-        _anyTickRunning = false;
+        // tickPromise is undefined — this should never happen in single-threaded JS
+        // but if it does, log and let the finally() on runHeartbeatTick handle cleanup
+        logger.error("tick_mutex: tickPromise undefined in timeout handler — this is a bug");
       }
     });
     void raceResult; // used only for logging; mutex lifecycle handled above/below
