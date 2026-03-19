@@ -140,6 +140,7 @@ export async function performHealthPass(
       runCommand: runCommand!,
       runtime,
       agentId,
+      workflow: resolvedConfig?.workflow,
       dispatchConfirmTimeoutMs: resolvedConfig?.timeouts?.dispatchConfirmTimeoutMs,
     });
     fixedCount += healthFixes.filter((f) => f.fixed).length;
@@ -181,6 +182,7 @@ export async function performHealthPass(
     provider,
     autoFix: true,
     instanceName,
+    workflow: resolvedConfig?.workflow,
   });
   fixedCount += statelessFixes.filter((f) => f.fixed).length;
 
