@@ -259,6 +259,11 @@ export function registerCli(program: Command, ctx: PluginContext): void {
         logger: ctx.logger,
       });
 
+      if (result === null) {
+        console.warn("Heartbeat sweep skipped: a tick is already running");
+        return;
+      }
+
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
         return;
@@ -292,6 +297,11 @@ export function registerCli(program: Command, ctx: PluginContext): void {
         agentId: opts.agent,
         logger: ctx.logger,
       });
+
+      if (result === null) {
+        console.warn("Triage sweep skipped: a tick is already running");
+        return;
+      }
 
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
@@ -574,6 +584,11 @@ export function registerCli(program: Command, ctx: PluginContext): void {
         agentId: opts.agent,
         logger: ctx.logger,
       });
+
+      if (result === null) {
+        console.warn("Health sweep skipped: a tick is already running");
+        return;
+      }
 
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));

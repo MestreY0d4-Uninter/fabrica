@@ -114,6 +114,21 @@ let _ticksTimedOut = 0;
 /** Expose timeout counter for audit logging (used by tick-runner). */
 export function getTickTimeoutCount(): number { return _ticksTimedOut; }
 
+/**
+ * Acquire the global tick mutex, run fn(), then release it.
+ * Returns "busy" immediately if the mutex is already held.
+ * Used by CLI sweeps so they never run concurrently with the background heartbeat.
+ */
+export async function withTickMutex<T>(fn: () => Promise<T>): Promise<T | "busy"> {
+  if (_anyTickRunning) return "busy";
+  _anyTickRunning = true;
+  try {
+    return await fn();
+  } finally {
+    _anyTickRunning = false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Tick orchestration
 // ---------------------------------------------------------------------------
@@ -141,6 +156,7 @@ async function runHeartbeatTick(
   if (_anyTickRunning || _tickRunning[mode]) return;
   _anyTickRunning = true;
   _tickRunning[mode] = true;
+  let timedOut = false;
   try {
     const workspace = discoverAgents(ctx.config)[0]?.workspace;
     const lifecycle = workspace ? await getLifecycleService(workspace, logger) : null;
@@ -156,19 +172,48 @@ async function runHeartbeatTick(
         logTickResult(result, logger, mode);
       }),
     );
-    // Wrap with timeout to prevent stuck ticks from blocking forever
+    // Wrap with timeout to prevent stuck ticks from blocking forever.
+    // P0-3: When the timeout fires we must NOT release the mutex — the original
+    // tick promise is still running. We keep _anyTickRunning = true and attach
+    // a .finally() to the live promise so the mutex is released only when the
+    // promise actually settles.
     const tickFn = lifecycle
       ? () => lifecycle.track(mode === "repair" ? "recovery" : "heartbeat", {}, run)
       : run;
-    await raceWithTimeout(tickFn, DEFAULT_TICK_TIMEOUT_MS, () => {
+
+    let tickPromise: Promise<unknown> | undefined;
+    const wrappedTickFn = () => {
+      tickPromise = tickFn();
+      return tickPromise;
+    };
+
+    const raceResult = await raceWithTimeout(wrappedTickFn, DEFAULT_TICK_TIMEOUT_MS, () => {
       _ticksTimedOut++;
+      timedOut = true;
       logger.warn(`work_heartbeat ${mode} tick timed out after ${DEFAULT_TICK_TIMEOUT_MS}ms (total timeouts: ${_ticksTimedOut})`);
+      // Do NOT release mutex here — the tick promise is still running.
+      // Release it when the promise settles (see .finally() below).
+      if (tickPromise) {
+        tickPromise.finally(() => {
+          _tickRunning[mode] = false;
+          _anyTickRunning = false;
+        });
+      } else {
+        // Fallback: promise wasn't captured (shouldn't happen) — release now.
+        _tickRunning[mode] = false;
+        _anyTickRunning = false;
+      }
     });
+    void raceResult; // used only for logging; mutex lifecycle handled above/below
   } catch (err) {
     logger.error(`work_heartbeat ${mode} tick failed: ${err}`);
   } finally {
-    _tickRunning[mode] = false;
-    _anyTickRunning = false;
+    // Only release the mutex here for the non-timeout path.
+    // The timeout path attaches a .finally() to tickPromise instead.
+    if (!timedOut) {
+      _tickRunning[mode] = false;
+      _anyTickRunning = false;
+    }
   }
 }
 
