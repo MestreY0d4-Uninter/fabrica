@@ -143,7 +143,7 @@ export async function dispatchTask(
   // the same issue. Reusing the old session tends to preserve the prior
   // “already done” mindset and can create a no-op loop where the developer keeps
   // sending `work_finish(done)` without addressing the new feedback.
-  if (existingSessionKey && role === "developer" && isFeedbackState(project.workflow, fromLabel)) {
+  if (existingSessionKey && role === "developer" && isFeedbackState(resolvedConfig.workflow, fromLabel)) {
     await rc(
       ["openclaw", "gateway", "call", "sessions.delete", "--params", JSON.stringify({ key: existingSessionKey })],
       { timeoutMs: 10_000 },

@@ -144,6 +144,10 @@ describe("closeIssue invariant", () => {
   });
 
   it("refuses to close a PR-backed issue without a confirmed artifact of record", async () => {
+    // When the PR is closed (not merged) and no artifactOfRecord exists,
+    // the guard blocks the close. Note: if the live API confirms the PR
+    // as "merged", the guard now allows the close even without an
+    // artifactOfRecord (since API confirmation IS the proof of merge).
     const unsafeWorkflow = {
       ...DEFAULT_WORKFLOW,
       states: {
@@ -169,10 +173,11 @@ describe("closeIssue invariant", () => {
     });
 
     try {
-      h.provider.seedIssue({ iid: 33, title: "Merged but not recorded", labels: ["Testing"] });
+      h.provider.seedIssue({ iid: 33, title: "Closed but not recorded", labels: ["Testing"] });
+      // PR is closed (NOT merged) — so API does not confirm merge
       h.provider.setPrStatus(33, {
         number: 330,
-        state: "merged",
+        state: "closed",
         url: "https://example.com/pr/330",
         currentIssueMatch: true,
       });
@@ -181,7 +186,7 @@ describe("closeIssue invariant", () => {
       data.projects[h.project.slug]!.issueRuntime = {
         "33": {
           currentPrNumber: 330,
-          currentPrState: "merged",
+          currentPrState: "closed",
           currentPrUrl: "https://example.com/pr/330",
           currentPrIssueTarget: 33,
           lastHeadSha: "deadbeef",

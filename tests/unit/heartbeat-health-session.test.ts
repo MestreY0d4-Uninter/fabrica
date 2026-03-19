@@ -149,8 +149,9 @@ describe("checkWorkerHealth", () => {
   });
 
   it("sends nudge (not model_unresponsive) when idle is between 1× and 3× stall threshold", async () => {
-    // stallTimeoutMinutes = 1 → stall at 1 min, model_unresponsive at 3 min
-    // Session idle for 2 min → inside stall window but below model_unresponsive threshold
+    // stallTimeoutMinutes = 5 → stall at 5 min, model_unresponsive at 15 min (slot age based)
+    // Session idle for 6 min → inside stall window but below model_unresponsive threshold
+    // startTime = 10 min ago (past 5 min grace period, under 15 min model_unresponsive)
     h = await createTestHarness({
       workers: {
         developer: {
@@ -158,7 +159,7 @@ describe("checkWorkerHealth", () => {
           issueId: "42",
           sessionKey: "agent:main:subagent:test-project-developer-senior-ada",
           level: "senior",
-          startTime: new Date(Date.now() - 60 * 60_000).toISOString(),
+          startTime: new Date(Date.now() - 10 * 60_000).toISOString(),
         },
       },
     });
@@ -169,7 +170,7 @@ describe("checkWorkerHealth", () => {
         "agent:main:subagent:test-project-developer-senior-ada",
         {
           key: "agent:main:subagent:test-project-developer-senior-ada",
-          updatedAt: Date.now() - 2 * 60_000, // 2 min idle — stalled but < 3× threshold
+          updatedAt: Date.now() - 6 * 60_000, // 6 min idle — stalled but < 3× threshold
           percentUsed: 5,
           totalTokens: 100,
           contextTokens: 500,
@@ -186,7 +187,7 @@ describe("checkWorkerHealth", () => {
       provider: h.provider,
       sessions,
       staleWorkerHours: 999,
-      stallTimeoutMinutes: 1,
+      stallTimeoutMinutes: 5,
       runCommand: h.runCommand,
       agentId: "main",
     });
@@ -202,8 +203,9 @@ describe("checkWorkerHealth", () => {
   });
 
   it("nudges stalled sessions conservatively instead of requeueing on low context tokens", async () => {
-    // stallTimeoutMinutes: 10 → model_unresponsive threshold = 30 min
+    // stallTimeoutMinutes: 10 → model_unresponsive threshold = 30 min (slot age based)
     // Session idle 20 min → stalled (>10 min) but not model_unresponsive (<30 min) → nudge
+    // startTime = 20 min ago (slot age < 30 min model_unresponsive threshold)
     h = await createTestHarness({
       workers: {
         developer: {
@@ -211,7 +213,7 @@ describe("checkWorkerHealth", () => {
           issueId: "42",
           sessionKey: "agent:main:subagent:test-project-developer-senior-ada",
           level: "senior",
-          startTime: new Date(Date.now() - 60 * 60_000).toISOString(),
+          startTime: new Date(Date.now() - 20 * 60_000).toISOString(),
         },
       },
     });
