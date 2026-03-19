@@ -11,6 +11,8 @@ import { PrState, type PrSelector } from "../providers/provider.js";
 import {
   type Project,
   activateWorker,
+  deactivateWorker,
+  updateIssueRuntime,
   updateSlot,
   getRoleWorker,
   getIssueRuntime,
@@ -79,14 +81,17 @@ export type DispatchResult = {
  *
  * Flow:
  *   1. Resolve model, session key, build task message (setup — no side effects)
- *   2. Transition label (commitment point — issue leaves queue)
- *   3. Apply labels, send notification
- *   4. Ensure session (fire-and-forget) + send to agent
- *   5. Update worker state
- *   6. Audit
+ *   2. Ensure session exists (pre-commitment)
+ *   3. Record worker state (invisible to health check — slot exists before label)
+ *   4. Transition label (commitment point — issue leaves queue; slot already persisted)
+ *   5. Apply labels, send notification
+ *   6. Send to agent (fire-and-forget)
+ *   7. Audit
  *
  * If setup fails, the issue stays in its queue untouched.
- * On state update failure after dispatch: logs warning (session IS running).
+ * If label transition fails after worker state write, worker slot is rolled back.
+ * The write-then-label order prevents the C2 orphaned label race where health
+ * check sees an active label with no tracking slot and reverts the dispatch.
  */
 export async function dispatchTask(
   opts: DispatchOpts,
@@ -267,11 +272,40 @@ export async function dispatchTask(
     { slug: project.slug, issueId },
   );
 
-  // ── Commitment point — transition label (issue leaves queue) ────────
-  const labelResult = await resilientLabelTransition(provider, issueId, fromLabel, toLabel,
-    (msg) => auditLog(workspaceDir, "dispatch_warning", { step: "label_transition", issue: issueId, msg }).catch(() => {}),
-  );
+  // ── Step 4a: Record worker state FIRST (invisible to health check) ──
+  // Writing the slot before the label transition prevents the C2 race where
+  // scanOrphanedLabels() sees an active label with no tracking slot.
+  await recordWorkerState(workspaceDir, project.slug, role, slotIndex, {
+    issueId, level, sessionKey, sessionAction, fromLabel, name: botName,
+  });
+
+  // Record dispatchRequestedAt for fast recovery via dispatch_unconfirmed detection
+  await updateIssueRuntime(workspaceDir, project.slug, String(issueId), {
+    dispatchRequestedAt: new Date().toISOString(),
+    agentAcceptedAt: null,
+    firstWorkerActivityAt: null,
+  }).catch((err) => {
+    auditLog(workspaceDir, "dispatch_warning", { step: "record_dispatch_requested", issue: issueId, err: String(err) }).catch(() => {});
+  });
+
+  // ── Step 4b: Commitment point — transition label (slot now exists) ──
+  let labelResult;
+  try {
+    labelResult = await resilientLabelTransition(provider, issueId, fromLabel, toLabel,
+      (msg) => auditLog(workspaceDir, "dispatch_warning", { step: "label_transition", issue: issueId, msg }).catch(() => {}),
+    );
+  } catch (err) {
+    // Rollback: deactivate the worker slot since label transition failed
+    try {
+      await deactivateWorker(workspaceDir, project.slug, role, { level, slotIndex });
+    } catch { /* best effort rollback */ }
+    throw err;
+  }
   if (!labelResult.success) {
+    // Rollback: deactivate the worker slot since label transition failed
+    try {
+      await deactivateWorker(workspaceDir, project.slug, role, { level, slotIndex });
+    } catch { /* best effort rollback */ }
     throw new Error(`Label transition failed: ${fromLabel} → ${toLabel} for issue #${issueId}`);
   }
   if (labelResult.dualStateResolved) {
@@ -377,7 +411,7 @@ export async function dispatchTask(
     }).catch((auditErr: Error) => console.error("[fabrica] silent-catch:", auditErr.message));
   });
 
-  // Step 3: Send task to agent (fire-and-forget — session already confirmed above)
+  // Step 4c: Send task to agent (fire-and-forget — session already confirmed above)
   // Model is set on the session via sessions.patch (pre-commitment), not on the agent RPC —
   // the gateway's agent endpoint rejects unknown properties like 'model'.
   sendToAgent(sessionKey, taskMessage, {
@@ -389,29 +423,23 @@ export async function dispatchTask(
     runtime,
   });
 
-  // Step 5: Update worker state
-  try {
-    await recordWorkerState(workspaceDir, project.slug, role, slotIndex, {
-      issueId, level, sessionKey, sessionAction, fromLabel, name: botName,
-    });
-    await recordIssueLifecycle({
-      workspaceDir,
-      slug: project.slug,
-      issueId,
-      stage: "dispatch_requested",
-      sessionKey,
-      details: { role, level, slotIndex, sessionAction },
-    });
-  } catch (err) {
-    // Session is already dispatched — log warning but don't fail
-    await auditLog(workspaceDir, "dispatch", {
+  // Record lifecycle event (worker state already written in Step 4a)
+  await recordIssueLifecycle({
+    workspaceDir,
+    slug: project.slug,
+    issueId,
+    stage: "dispatch_requested",
+    sessionKey,
+    details: { role, level, slotIndex, sessionAction },
+  }).catch((err) => {
+    auditLog(workspaceDir, "dispatch_warning", {
       project: project.name, issue: issueId, role,
-      warning: "State update failed after successful dispatch",
+      warning: "Lifecycle event failed after successful dispatch",
       error: (err as Error).message, sessionKey,
-    });
-  }
+    }).catch(() => {});
+  });
 
-  // Step 6: Audit
+  // Step 5: Audit
   await auditDispatch(workspaceDir, {
     project: project.name, issueId, issueTitle,
     role, level, requestedModel: resolvedModel, resolvedModel, effectiveModel: model,

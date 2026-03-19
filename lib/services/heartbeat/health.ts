@@ -943,6 +943,25 @@ export async function scanOrphanedLabels(opts: {
     }
 
     if (!isTracked) {
+      // Grace period: skip orphan detection if any slot was recently activated.
+      // This prevents the C2 race where dispatch writes the worker state and
+      // then transitions the label — if this scan runs in between, the slot
+      // exists but may not yet have the matching issueId visible.
+      const ORPHAN_GRACE_MS = 30_000;
+      const now = Date.now();
+      let recentlyActivated = false;
+      for (const slots of Object.values(roleWorker.levels)) {
+        if (slots.some(slot => {
+          if (!slot.startTime) return false;
+          const age = now - new Date(slot.startTime).getTime();
+          return age < ORPHAN_GRACE_MS;
+        })) {
+          recentlyActivated = true;
+          break;
+        }
+      }
+      if (recentlyActivated) continue; // Skip — dispatch may still be in progress
+
       // Orphaned label: issue has active label but no slot tracking it.
       // Re-fetch the issue to guard against GitHub propagation delay:
       // session_dead may have already transitioned the label moments ago,
