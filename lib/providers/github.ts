@@ -906,7 +906,7 @@ export class GitHubProvider implements IssueProvider {
   async getPrDetails(issueId: number): Promise<PrDetails | null> {
     try {
       // Find the open PR for this issue via timeline (reuses existing infrastructure)
-      type RawPr = { number: number; headRefName: string; url: string; state: string; mergedAt: string | null };
+      type RawPr = { number: number; headRefName: string; url: string; state: string; mergedAt: string | null; title: string; body: string };
       let prs = await this.findPrsForIssue<RawPr>(
         issueId,
         "open",
@@ -922,9 +922,6 @@ export class GitHubProvider implements IssueProvider {
       if (!prs.length) return null;
 
       const pr = prs[0]!;
-      if (pr.state === "closed") {
-        prState = pr.mergedAt ? "merged" : "closed";
-      }
 
       // Fetch headSha, repositoryId, owner, and repo in one API call
       const raw = await this.gh([
