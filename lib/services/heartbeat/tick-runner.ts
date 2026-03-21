@@ -23,6 +23,7 @@ import {
   performTestSkipPass,
   performHoldEscapePass,
 } from "./passes.js";
+import { runPrDiscoveryPass } from "./pr-discovery.js";
 import { computeHealthScore } from "../../observability/health-score.js";
 import { shouldAlert, type AlertState } from "../../observability/alerting.js";
 import { withTelemetrySpan as withTickSpan } from "../../observability/tracer.js";
@@ -165,6 +166,18 @@ export async function tick(opts: {
             resolvedConfig,
             runtime,
           );
+
+          // PR Discovery pass: create FabricaRun records for active worker slots (polling-first)
+          await runPrDiscoveryPass({
+            workspaceDir,
+            projectSlug: slug,
+            project,
+            provider,
+            pluginConfig,
+            logger: opts.logger,
+          }).catch((err) => {
+            opts.logger.warn?.(`PR discovery pass failed for ${slug}: ${(err as Error).message}`);
+          });
 
           // Review pass: transition issues whose PR check condition is met
           result.totalReviewTransitions += await performReviewPass(
