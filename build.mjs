@@ -82,8 +82,15 @@ console.log("Bundled pino/thread-stream workers to dist/ (.cjs)");
 const genesisSourceRoot = path.resolve("..", "genesis");
 const packagedGenesisRoot = path.resolve("genesis");
 
+let genesisSourceExists = false;
 try {
   await fs.access(genesisSourceRoot);
+  genesisSourceExists = true;
+} catch {
+  // ../genesis/ does not exist — standalone repo
+}
+
+if (genesisSourceExists) {
   // Mono-repo context: parent genesis/ exists, sync it into the plugin
   await fs.rm(packagedGenesisRoot, { recursive: true, force: true });
   await fs.mkdir(packagedGenesisRoot, { recursive: true });
@@ -94,7 +101,6 @@ try {
     recursive: true,
   });
   console.log(`Copied genesis runtime assets to ${packagedGenesisRoot}`);
-} catch {
-  // Standalone repo: ../genesis/ does not exist, genesis/ is already committed
+} else {
   console.log("Standalone mode: genesis/ already present, skipping copy");
 }

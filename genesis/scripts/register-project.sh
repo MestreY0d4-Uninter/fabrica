@@ -55,8 +55,8 @@ if [[ -n "$REQUESTED_CHANNEL_ID" ]]; then
   TELEGRAM_CHAT="$REQUESTED_CHANNEL_ID"
 fi
 ALLOW_SHARED_CHANNELS="${GENESIS_ALLOW_SHARED_CHANNELS:-true}"
-CI_WORKFLOWS_REPO="${CI_WORKFLOWS_REPO:-MestreY0d4-Uninter/fabrica-automation}"
 ALLOW_SHARED_CHANNELS="${ALLOW_SHARED_CHANNELS,,}"
+CI_WORKFLOWS_REPO="${CI_WORKFLOWS_REPO:-MestreY0d4-Uninter/fabrica-automation}"
 OWNER_REPO="$(genesis_parse_owner_repo "$REPO_URL" || true)"
 if [[ -z "$OWNER_REPO" ]]; then
   echo "ERROR: Invalid GitHub repository reference: $REPO_URL" >&2
@@ -460,7 +460,7 @@ DEPEOF
 
   # Commit CI foundation if repo has git
   if [[ -d "$REPO_LOCAL/.git" ]]; then
-    (cd "$REPO_LOCAL" && git add .github/ && git commit -m "ci: add shared CI foundation (fabrica-automation)" --no-verify >>"$GENESIS_LOG" 2>&1 && git push origin main >>"$GENESIS_LOG" 2>&1) || true
+    (cd "$REPO_LOCAL" && git add .github/ && git commit -m "ci: add shared CI foundation" --no-verify >>"$GENESIS_LOG" 2>&1 && git push origin main >>"$GENESIS_LOG" 2>&1) || true
   fi
   echo "CI foundation set up" >&2
 else

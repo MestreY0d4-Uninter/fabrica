@@ -67,8 +67,8 @@ openclaw plugins install @mestreyoda/fabrica
 ### Via GitHub clone
 
 ```bash
-git clone https://github.com/MestreY0d4-Uninter/Fabrica.git ~/Fabrica
-openclaw plugins install -l ~/Fabrica/fabrica
+git clone https://github.com/MestreY0d4-Uninter/fabrica ~/fabrica
+openclaw plugins install -l ~/fabrica
 ```
 
 After installation, verify the plugin loaded correctly:
@@ -107,7 +107,7 @@ systemctl --user restart openclaw-gateway.service
 **3. Trigger a new project programmatically**:
 
 ```bash
-cd ~/Fabrica/fabrica  # GitHub clone install only
+cd ~/fabrica  # GitHub clone install only
 npx tsx scripts/genesis-trigger.ts "A CLI tool that counts words in a file" \
   --stack python-cli \
   --name my-word-counter \
@@ -233,7 +233,7 @@ curl -i -X POST http://127.0.0.1:18789/plugins/fabrica/github/webhook \
 In addition to Telegram DM bootstrap, the full pipeline can be triggered from a CLI script — no Telegram or running agent session required:
 
 ```bash
-cd ~/Fabrica/fabrica
+cd ~/fabrica
 
 npx tsx scripts/genesis-trigger.ts "A REST API that manages book reviews" \
   --stack node-api \
