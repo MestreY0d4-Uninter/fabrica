@@ -49,7 +49,8 @@ The heartbeat ticks every 60 seconds. On each tick, Fabrica alternates between a
 
 ## Requirements
 
-- [OpenClaw](https://openclaw.dev) runtime (gateway running on port 18789)
+- [OpenClaw](https://openclaw.dev) runtime >= 2026.3.13 (gateway running on port 18789)
+- Git (for repository operations and local development)
 - Node.js 20+ (for local development or programmatic genesis)
 - `gh` CLI authenticated to GitHub (required for issue and PR operations)
 - A GitHub organization or personal account where repositories will be created
