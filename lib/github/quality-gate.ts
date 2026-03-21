@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { FabricaRunStore } from "./event-store.js";
-import type { FabricaRun, GitHubEventRecord } from "./types.js";
+import type { FabricaRun, GitHubEventRecord, RepoIdentity } from "./types.js";
 import { getGitHubInstallationOctokit } from "./app-auth.js";
 import { withCorrelationContext } from "../observability/context.js";
 import { withTelemetrySpan } from "../observability/telemetry.js";
@@ -27,14 +27,7 @@ export type QualityGateSyncResult = {
   checkRunId?: number | null;
 };
 
-function resolveRepoIdentity(record: GitHubEventRecord): {
-  installationId: number;
-  owner: string;
-  repo: string;
-  headSha: string;
-  prUrl: string | null;
-  merged: boolean;
-} | null {
+function resolveRepoIdentity(record: GitHubEventRecord): RepoIdentity | null {
   const parsed = qualityGatePayloadSchema.safeParse(record.payload);
   if (!parsed.success) return null;
   const installationId = parsed.data.installation?.id ?? record.installationId ?? null;
@@ -45,6 +38,7 @@ function resolveRepoIdentity(record: GitHubEventRecord): {
   if (!installationId || !owner || !repo || !headSha) return null;
   return {
     installationId,
+    repositoryId: record.repositoryId ?? 0,
     owner,
     repo,
     headSha,
@@ -53,14 +47,16 @@ function resolveRepoIdentity(record: GitHubEventRecord): {
   };
 }
 
-function renderOutput(run: FabricaRun, record: GitHubEventRecord): {
+function renderOutput(run: FabricaRun, eventInfo?: { eventName?: string; action?: string | null }): {
   status: "queued" | "in_progress" | "completed";
   conclusion?: "success" | "failure" | "neutral" | "action_required";
   output: { title: string; summary: string };
 } {
   const summary = [
     `Run: ${run.runId}`,
-    `Event: ${record.eventName}${record.action ? `.${record.action}` : ""}`,
+    eventInfo?.eventName
+      ? `Event: ${eventInfo.eventName}${eventInfo.action ? `.${eventInfo.action}` : ""}`
+      : `Source: polling`,
     `PR: #${run.prNumber}`,
     `Head SHA: ${run.headSha}`,
     run.issueRuntimeId ? `Issue runtime: ${run.issueRuntimeId}` : null,
@@ -147,20 +143,23 @@ function renderOutput(run: FabricaRun, record: GitHubEventRecord): {
   }
 }
 
-export async function syncQualityGateForRun(params: {
+export async function syncQualityGate(params: {
   pluginConfig?: Record<string, unknown>;
-  eventRecord: GitHubEventRecord;
+  repoIdentity: RepoIdentity;
   run: FabricaRun;
   runStore: FabricaRunStore;
   logger?: { info?(...args: unknown[]): void; warn?(...args: unknown[]): void };
+  source?: "webhook" | "polling";
+  deliveryId?: string;
 }): Promise<QualityGateSyncResult> {
+  const { repoIdentity } = params;
   return withCorrelationContext(
     {
       runId: params.run.runId,
       issueId: params.run.issueRuntimeId ?? undefined,
       prNumber: params.run.prNumber,
       headSha: params.run.headSha,
-      deliveryId: params.eventRecord.deliveryId,
+      deliveryId: params.deliveryId,
       checkRunId: params.run.checkRunId ?? undefined,
       phase: "quality-gate",
     },
@@ -169,27 +168,25 @@ export async function syncQualityGateForRun(params: {
       issueId: params.run.issueRuntimeId ?? undefined,
       prNumber: params.run.prNumber,
       headSha: params.run.headSha,
-      deliveryId: params.eventRecord.deliveryId,
+      deliveryId: params.deliveryId,
       checkRunId: params.run.checkRunId ?? undefined,
       phase: "quality-gate",
     }, async () => {
-      const identity = resolveRepoIdentity(params.eventRecord);
-      if (!identity) {
-        return { attempted: false, skippedReason: "missing_repo_identity" };
-      }
-
-      const octokit = await getGitHubInstallationOctokit(params.pluginConfig, identity.installationId);
+      const octokit = await getGitHubInstallationOctokit(params.pluginConfig, repoIdentity.installationId);
       if (!octokit) {
         return { attempted: false, skippedReason: "github_app_unavailable" };
       }
 
-      const rendered = renderOutput(params.run, params.eventRecord);
+      const rendered = renderOutput(params.run, {
+        eventName: params.source === "polling" ? "poll" : params.source,
+      });
+
       if (params.run.checkRunId) {
         const response = await octokit.request(
           "PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}",
           {
-            owner: identity.owner,
-            repo: identity.repo,
+            owner: repoIdentity.owner,
+            repo: repoIdentity.repo,
             check_run_id: params.run.checkRunId,
             name: FABRICA_QUALITY_GATE_NAME,
             status: rendered.status,
@@ -207,15 +204,15 @@ export async function syncQualityGateForRun(params: {
       const response = await octokit.request(
         "POST /repos/{owner}/{repo}/check-runs",
         {
-          owner: identity.owner,
-          repo: identity.repo,
+          owner: repoIdentity.owner,
+          repo: repoIdentity.repo,
           name: FABRICA_QUALITY_GATE_NAME,
-          head_sha: identity.headSha,
+          head_sha: repoIdentity.headSha,
           status: rendered.status,
           conclusion: rendered.conclusion,
           completed_at: rendered.status === "completed" ? new Date().toISOString() : undefined,
           output: rendered.output,
-          details_url: identity.prUrl ?? undefined,
+          details_url: repoIdentity.prUrl ?? undefined,
         },
       );
       const nextRun = { ...params.run, checkRunId: response.data.id, updatedAt: new Date().toISOString() };
@@ -224,4 +221,26 @@ export async function syncQualityGateForRun(params: {
       return { attempted: true, checkRunId: response.data.id };
     }),
   );
+}
+
+export async function syncQualityGateForRun(params: {
+  pluginConfig?: Record<string, unknown>;
+  eventRecord: GitHubEventRecord;
+  run: FabricaRun;
+  runStore: FabricaRunStore;
+  logger?: { info?(...args: unknown[]): void; warn?(...args: unknown[]): void };
+}): Promise<QualityGateSyncResult> {
+  const identity = resolveRepoIdentity(params.eventRecord);
+  if (!identity) {
+    return { attempted: false, skippedReason: "missing_repo_identity" };
+  }
+  return syncQualityGate({
+    pluginConfig: params.pluginConfig,
+    repoIdentity: identity,
+    run: params.run,
+    runStore: params.runStore,
+    logger: params.logger,
+    source: "webhook",
+    deliveryId: params.eventRecord.deliveryId,
+  });
 }
