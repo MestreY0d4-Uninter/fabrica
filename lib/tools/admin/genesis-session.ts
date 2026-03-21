@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { safeComponent } from "../../utils/safe-path.js";
 import type {
   GenesisAnswers,
   GenesisAnswersJson,
@@ -161,6 +162,10 @@ function getSessionsDir(workspaceDir: string): string {
 }
 
 function getSessionFilePath(workspaceDir: string, sessionId: string): string {
+  safeComponent(sessionId); // Throws if sessionId contains /, \, .., or null bytes
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) {
+    throw new Error(`Invalid session ID format: ${sessionId}`);
+  }
   return join(getSessionsDir(workspaceDir), `${sessionId}.json`);
 }
 

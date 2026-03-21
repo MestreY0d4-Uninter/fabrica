@@ -18,6 +18,7 @@ import crypto from "node:crypto";
 import { DATA_DIR } from "../setup/migrate-layout.js";
 import type { IssueProvider } from "../providers/provider.js";
 import { log as auditLog } from "../audit.js";
+import { safePath, safeComponent } from "../utils/safe-path.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -129,6 +130,7 @@ export function extractIssueReferences(text: string): number[] {
 // ---------------------------------------------------------------------------
 
 function attachmentsDir(workspaceDir: string, projectSlug: string, issueId: number): string {
+  safeComponent(projectSlug); // Validate slug before using in path
   return path.join(workspaceDir, DATA_DIR, "attachments", projectSlug, String(issueId));
 }
 
@@ -213,7 +215,8 @@ export function getAttachmentPath(
   issueId: number,
   localPath: string,
 ): string {
-  return path.join(attachmentsDir(workspaceDir, projectSlug, issueId), localPath);
+  const baseDir = attachmentsDir(workspaceDir, projectSlug, issueId);
+  return safePath(baseDir, localPath);
 }
 
 // ---------------------------------------------------------------------------
