@@ -35,10 +35,11 @@ function resolveRepoIdentity(record: GitHubEventRecord): RepoIdentity | null {
   const repo = parsed.data.repository?.name ?? null;
   const headSha = parsed.data.pull_request?.head.sha ?? record.headSha ?? null;
 
-  if (!installationId || !owner || !repo || !headSha) return null;
+  const repositoryId = record.repositoryId ?? null;
+  if (!installationId || !owner || !repo || !headSha || !repositoryId) return null;
   return {
     installationId,
-    repositoryId: record.repositoryId ?? 0,
+    repositoryId,
     owner,
     repo,
     headSha,
@@ -177,9 +178,7 @@ export async function syncQualityGate(params: {
         return { attempted: false, skippedReason: "github_app_unavailable" };
       }
 
-      const rendered = renderOutput(params.run, {
-        eventName: params.source === "polling" ? "poll" : params.source,
-      });
+      const rendered = renderOutput(params.run, params.source === "polling" ? { eventName: "polling" } : undefined);
 
       if (params.run.checkRunId) {
         const response = await octokit.request(
