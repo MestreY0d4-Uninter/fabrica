@@ -39,6 +39,7 @@ vi.mock("../../lib/roles/model-fetcher.js", () => ({
 vi.mock("../../lib/projects/index.js", () => ({
   activateWorker: vi.fn(async () => {}),
   updateSlot: vi.fn(async () => {}),
+  updateIssueRuntime: vi.fn(async () => {}),
   getRoleWorker: vi.fn(() => ({ levels: {} })),
   getIssueRuntime: vi.fn(() => null),
   requireCanonicalPrSelector: vi.fn(() => ({ prNumber: 1 })),
