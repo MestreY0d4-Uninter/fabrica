@@ -39,7 +39,7 @@ The heartbeat ticks every 60 seconds. On each tick, Fabrica alternates between a
 ## Features
 
 - **Zero-intervention pipeline** — from idea to merged PR without manual steps
-- **Deterministic FSM** — every transition is explicit; states are `planning → todo → doing → toReview → toTest → done`
+- **Deterministic FSM** — every transition is explicit; states are `planning → todo → doing → toReview → toTest → done` (+ `refining`, `toImprove`, `rejected`)
 - **Pluggable AI workers** — each role (developer, reviewer, tester, architect) maps to a configurable model and level
 - **Polling-first GitHub integration** — no webhook infrastructure required; GitHub App is optional
 - **Telegram bootstrap** (optional) — describe a new project via DM; Fabrica asks clarifying questions and provisions the repo automatically
@@ -75,7 +75,7 @@ After installation, verify the plugin loaded correctly:
 
 ```bash
 openclaw plugins list
-openclaw fabrica doctor --json
+openclaw fabrica doctor
 ```
 
 ## Quick start
@@ -107,7 +107,7 @@ systemctl --user restart openclaw-gateway.service
 **3. Trigger a new project programmatically**:
 
 ```bash
-cd ~/Fabrica/fabrica
+cd ~/Fabrica/fabrica  # GitHub clone install only
 npx tsx scripts/genesis-trigger.ts "A CLI tool that counts words in a file" \
   --stack python-cli \
   --name my-word-counter \
@@ -247,7 +247,7 @@ The script runs the complete pipeline:
 1. **Discover phase** — receive → classify → interview → conduct-interview → generate-spec
 2. **Commit phase** — provision-repo → scaffold → register → create-task → triage
 
-Pre-set interview answers can be customized by editing the `answers` object inside the script. The Telegram DM flow is unaffected; both paths share the same underlying pipeline steps.
+Pre-set interview answers can be customized by passing `--answers <path-to-json-file>` to the script. The Telegram DM flow is unaffected; both paths share the same underlying pipeline steps.
 
 | Feature | Telegram DM | genesis-trigger.ts |
 |---|---|---|
@@ -279,7 +279,6 @@ Validate in OpenClaw:
 
 ```bash
 openclaw plugins list
-openclaw plugins doctor
 openclaw fabrica doctor security --json
 ```
 
