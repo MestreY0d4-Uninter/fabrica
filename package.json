@@ -1,10 +1,9 @@
 {
-  "name": "fabrica",
+  "name": "@mestreyoda/fabrica",
   "version": "0.1.0",
-  "description": "Plugin-raiz da Fabrica de Software. FSM, intake, dispatch, QA, security.",
+  "description": "Autonomous software engineering pipeline for OpenClaw. Turns ideas into deployed code via intake, dispatch, review, test, and merge.",
   "type": "module",
   "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "openclaw": {
     "extensions": [
       "./dist/index.js"
@@ -15,7 +14,10 @@
     "defaults/",
     "genesis/",
     "fabrica.manifest.json",
-    "openclaw.plugin.json"
+    "openclaw.plugin.json",
+    "ARCHITECTURE.md",
+    "README.md",
+    "LICENSE"
   ],
   "dependencies": {
     "@octokit/app": "^16.1.2",
@@ -33,13 +35,15 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:all": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build && npm test"
   },
   "peerDependencies": {
     "openclaw": "^2026.3.13"
   },
   "devDependencies": {
     "@types/node": "^25.2.3",
+    "@vitest/coverage-v8": "^4.1.0",
     "cockatiel": "^3.2.1",
     "commander": "^14.0.1",
     "esbuild": "^0.25.0",

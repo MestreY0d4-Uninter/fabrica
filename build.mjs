@@ -77,16 +77,24 @@ await Promise.all([
 ]);
 console.log("Bundled pino/thread-stream workers to dist/ (.cjs)");
 
+// Genesis runtime assets — copy from mono-repo parent if available.
+// In the standalone (published) repo, genesis/ is committed source and must not be touched.
 const genesisSourceRoot = path.resolve("..", "genesis");
 const packagedGenesisRoot = path.resolve("genesis");
 
-await fs.rm(packagedGenesisRoot, { recursive: true, force: true });
-await fs.mkdir(packagedGenesisRoot, { recursive: true });
-await fs.cp(path.join(genesisSourceRoot, "scripts"), path.join(packagedGenesisRoot, "scripts"), {
-  recursive: true,
-});
-await fs.cp(path.join(genesisSourceRoot, "configs"), path.join(packagedGenesisRoot, "configs"), {
-  recursive: true,
-});
-
-console.log(`Copied genesis runtime assets to ${packagedGenesisRoot}`);
+try {
+  await fs.access(genesisSourceRoot);
+  // Mono-repo context: parent genesis/ exists, sync it into the plugin
+  await fs.rm(packagedGenesisRoot, { recursive: true, force: true });
+  await fs.mkdir(packagedGenesisRoot, { recursive: true });
+  await fs.cp(path.join(genesisSourceRoot, "scripts"), path.join(packagedGenesisRoot, "scripts"), {
+    recursive: true,
+  });
+  await fs.cp(path.join(genesisSourceRoot, "configs"), path.join(packagedGenesisRoot, "configs"), {
+    recursive: true,
+  });
+  console.log(`Copied genesis runtime assets to ${packagedGenesisRoot}`);
+} catch {
+  // Standalone repo: ../genesis/ does not exist, genesis/ is already committed
+  console.log("Standalone mode: genesis/ already present, skipping copy");
+}
