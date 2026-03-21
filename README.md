@@ -279,7 +279,7 @@ Validate in OpenClaw:
 
 ```bash
 openclaw plugins list
-openclaw fabrica doctor security --json
+openclaw fabrica doctor security --json  # security audit
 ```
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for a detailed breakdown of the plugin internals, FSM design, and module structure.
