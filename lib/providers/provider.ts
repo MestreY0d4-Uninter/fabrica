@@ -4,6 +4,9 @@
  * Implementations: GitHub (gh CLI), GitLab (glab CLI).
  */
 
+import type { PrDetails } from "../github/types.js";
+export type { PrDetails };
+
 /**
  * StateLabel type — string for flexibility with custom workflows.
  */
@@ -153,6 +156,13 @@ export interface IssueProvider {
   reopenIssue(issueId: number): Promise<void>;
   getMergedMRUrl(issueId: number): Promise<string | null>;
   getPrStatus(issueId: number, selector?: PrSelector): Promise<PrStatus>;
+  /**
+   * Lightweight PR lookup for polling-based FabricaRun creation.
+   * Returns prNumber, headSha, repositoryId, owner/repo, and prState.
+   * Does NOT determine review state — use getPrStatus for that.
+   * Returns null if no PR exists for the issue or on API error.
+   */
+  getPrDetails(issueId: number): Promise<PrDetails | null>;
   findOpenPrForBranch(branchName: string): Promise<PrStatus | null>;
   mergePr(issueId: number, selector?: PrSelector): Promise<void>;
   getPrDiff(issueId: number, selector?: PrSelector): Promise<string | null>;

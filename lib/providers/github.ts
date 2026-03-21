@@ -37,6 +37,7 @@ import {
 } from "../github/config-credentials.js";
 import type { GitHubAppProfileConfig } from "../config/types.js";
 import { parseOwnerRepo } from "../intake/lib/repo-target.js";
+import type { PrDetails } from "../github/types.js";
 
 type GhIssue = {
   number: number;
@@ -650,7 +651,7 @@ export class GitHubProvider implements IssueProvider {
    * 2. The fallback path (gh pr list) provides ALL requested fields via the fields parameter.
    * If a caller requests a field the timeline API doesn't provide, the fallback ensures it.
    */
-  private async findPrsForIssue<T extends { title: string; body: string; headRefName?: string }>(
+  protected async findPrsForIssue<T extends { title: string; body: string; headRefName?: string }>(
     issueId: number,
     state: "open" | "merged" | "all",
     fields: string,
@@ -900,6 +901,54 @@ export class GitHubProvider implements IssueProvider {
       };
     }
     return { state: PrState.CLOSED, url: null };
+  }
+
+  async getPrDetails(issueId: number): Promise<PrDetails | null> {
+    try {
+      // Find the open PR for this issue via timeline (reuses existing infrastructure)
+      type RawPr = { number: number; headRefName: string; url: string; state: string; mergedAt: string | null };
+      let prs = await this.findPrsForIssue<RawPr>(
+        issueId,
+        "open",
+        "number,headRefName,url,state,mergedAt",
+      );
+      let prState: "open" | "merged" | "closed" = "open";
+
+      if (!prs.length) {
+        // Check recently merged PRs
+        prs = await this.findPrsForIssue<RawPr>(issueId, "merged", "number,headRefName,url,state,mergedAt");
+        if (prs.length) prState = "merged";
+      }
+      if (!prs.length) return null;
+
+      const pr = prs[0]!;
+      if (pr.state === "closed") {
+        prState = pr.mergedAt ? "merged" : "closed";
+      }
+
+      // Fetch headSha, repositoryId, owner, and repo in one API call
+      const raw = await this.gh([
+        "api",
+        `repos/:owner/:repo/pulls/${pr.number}`,
+        "--jq",
+        "{headSha: .head.sha, repositoryId: .head.repo.id, owner: .head.repo.owner.login, repo: .head.repo.name}",
+      ]);
+      const extra = JSON.parse(raw) as { headSha: string; repositoryId: number; owner: string; repo: string };
+      if (!extra.headSha || !extra.repositoryId || !extra.owner || !extra.repo) return null;
+
+      return {
+        prNumber: pr.number,
+        headSha: extra.headSha,
+        prState,
+        prUrl: pr.url ?? null,
+        sourceBranch: pr.headRefName,
+        repositoryId: extra.repositoryId,
+        owner: extra.owner,
+        repo: extra.repo,
+      };
+    } catch {
+      return null;
+    }
   }
 
   /**

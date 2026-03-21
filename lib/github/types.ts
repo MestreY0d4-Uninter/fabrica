@@ -58,3 +58,29 @@ export type GitHubEventMetadata = Pick<
   GitHubEventRecord,
   "installationId" | "repositoryId" | "prNumber" | "headSha"
 >;
+
+/** Lightweight PR info for polling-based FabricaRun creation. Does NOT include review state. */
+export type PrDetails = {
+  prNumber: number;
+  headSha: string;
+  prState: "open" | "closed" | "merged";
+  prUrl: string | null;
+  sourceBranch: string;
+  repositoryId: number;
+  owner: string;
+  repo: string;
+};
+
+/**
+ * Repo identity needed by the quality gate to create/update check runs.
+ * Includes repositoryId for FabricaRun dedup via findByPr().
+ */
+export type RepoIdentity = {
+  installationId: number;
+  repositoryId: number;
+  owner: string;
+  repo: string;
+  headSha: string;
+  prUrl?: string | null;
+  merged?: boolean;
+};

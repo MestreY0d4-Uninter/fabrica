@@ -707,6 +707,10 @@ export class GitLabProvider implements IssueProvider {
     }
   }
 
+  async getPrDetails(_issueId: number): Promise<import("../github/types.js").PrDetails | null> {
+    return null; // GitLab MRs do not use the FabricaRun quality gate system
+  }
+
   async healthCheck(): Promise<boolean> {
     try { await this.glab(["auth", "status"]); return true; } catch { return false; }
   }
