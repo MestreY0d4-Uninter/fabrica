@@ -2,7 +2,7 @@
  * projects/mutations.ts — State mutations for project worker slots.
  */
 import type { SlotState, RoleWorkerState, Project, ProjectsData, IssueRuntimeState } from "./types.js";
-import { acquireLock, releaseLock, readProjects, writeProjects, resolveProjectSlug, withProjectsMutation } from "./io.js";
+import { resolveProjectSlug, withProjectsMutation } from "./io.js";
 import { emptySlot, findFreeSlot, findSlotByIssue } from "./slots.js";
 
 /**
@@ -79,9 +79,7 @@ export async function activateWorker(
     name?: string;
   },
 ): Promise<ProjectsData> {
-  await acquireLock(workspaceDir);
-  try {
-    const data = await readProjects(workspaceDir);
+  const { data } = await withProjectsMutation(workspaceDir, (data) => {
     const slug = resolveProjectSlug(data, slugOrChannelId);
     if (!slug) {
       throw new Error(`Project not found for slug or channelId: ${slugOrChannelId}`);
@@ -110,11 +108,8 @@ export async function activateWorker(
     };
 
     project.workers[role] = rw;
-    await writeProjects(workspaceDir, data);
-    return data;
-  } finally {
-    await releaseLock(workspaceDir);
-  }
+  });
+  return data;
 }
 
 /**
@@ -129,9 +124,7 @@ export async function deactivateWorker(
   role: string,
   opts?: { level?: string; slotIndex?: number; issueId?: string },
 ): Promise<ProjectsData> {
-  await acquireLock(workspaceDir);
-  try {
-    const data = await readProjects(workspaceDir);
+  const { data } = await withProjectsMutation(workspaceDir, (data) => {
     const slug = resolveProjectSlug(data, slugOrChannelId);
     if (!slug) {
       throw new Error(`Project not found for slug or channelId: ${slugOrChannelId}`);
@@ -171,11 +164,8 @@ export async function deactivateWorker(
     }
 
     project.workers[role] = rw;
-    await writeProjects(workspaceDir, data);
-    return data;
-  } finally {
-    await releaseLock(workspaceDir);
-  }
+  });
+  return data;
 }
 
 export async function updateIssueRuntime(
@@ -184,9 +174,7 @@ export async function updateIssueRuntime(
   issueId: number | string,
   updates: Partial<IssueRuntimeState>,
 ): Promise<ProjectsData> {
-  await acquireLock(workspaceDir);
-  try {
-    const data = await readProjects(workspaceDir);
+  const { data } = await withProjectsMutation(workspaceDir, (data) => {
     const slug = resolveProjectSlug(data, slugOrChannelId);
     if (!slug) {
       throw new Error(`Project not found for slug or channelId: ${slugOrChannelId}`);
@@ -199,12 +187,8 @@ export async function updateIssueRuntime(
       ...(project.issueRuntime[key] ?? {}),
       ...updates,
     };
-
-    await writeProjects(workspaceDir, data);
-    return data;
-  } finally {
-    await releaseLock(workspaceDir);
-  }
+  });
+  return data;
 }
 
 export async function clearIssueRuntime(
@@ -212,9 +196,7 @@ export async function clearIssueRuntime(
   slugOrChannelId: string,
   issueId: number | string,
 ): Promise<ProjectsData> {
-  await acquireLock(workspaceDir);
-  try {
-    const data = await readProjects(workspaceDir);
+  const { data } = await withProjectsMutation(workspaceDir, (data) => {
     const slug = resolveProjectSlug(data, slugOrChannelId);
     if (!slug) {
       throw new Error(`Project not found for slug or channelId: ${slugOrChannelId}`);
@@ -224,10 +206,6 @@ export async function clearIssueRuntime(
     if (project.issueRuntime) {
       delete project.issueRuntime[String(issueId)];
     }
-
-    await writeProjects(workspaceDir, data);
-    return data;
-  } finally {
-    await releaseLock(workspaceDir);
-  }
+  });
+  return data;
 }

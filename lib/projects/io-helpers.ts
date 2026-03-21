@@ -20,7 +20,20 @@ export async function writeSafe(filePath: string, content: string): Promise<void
   } finally {
     await fd.close();
   }
-  await fs.rename(tmpPath, filePath);
+  try {
+    await fs.rename(tmpPath, filePath);
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EXDEV") {
+      // Cross-device: fallback to copy + unlink
+      await fs.copyFile(tmpPath, filePath);
+      await fs.unlink(tmpPath).catch(() => {});
+    } else {
+      // Cleanup tmp and re-throw
+      await fs.unlink(tmpPath).catch(() => {});
+      throw err;
+    }
+  }
 }
 
 export async function readJsonWithFallback(filePath: string): Promise<string> {

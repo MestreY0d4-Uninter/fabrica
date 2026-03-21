@@ -1,5 +1,5 @@
-import { readProjects } from "./io.js";
-import { getIssueRuntime, updateIssueRuntime } from "./mutations.js";
+import { readProjects, withProjectsMutation } from "./io.js";
+import { getIssueRuntime } from "./mutations.js";
 import type { IssueRuntimeState, Project, ProjectsData } from "./types.js";
 import type { PrSelector } from "../providers/provider.js";
 
@@ -85,26 +85,33 @@ export async function releaseCanonicalPrBinding(params: {
   reason: "retargeted" | "replaced";
   nextIssueTarget?: number | null;
 }): Promise<void> {
-  const runtime = (await readProjects(params.workspaceDir)).projects[params.slug]?.issueRuntime?.[String(params.issueId)];
-  if (!runtime || !isSamePr(runtime, params.identity)) return;
+  await withProjectsMutation(params.workspaceDir, (data) => {
+    const project = data.projects[params.slug];
+    if (!project) return;
+    const runtime = project.issueRuntime?.[String(params.issueId)];
+    if (!runtime || !isSamePr(runtime, params.identity)) return;
 
-  await updateIssueRuntime(params.workspaceDir, params.slug, params.issueId, {
-    currentPrNumber: null,
-    currentPrNodeId: null,
-    currentPrUrl: null,
-    currentPrState: null,
-    currentPrInstallationId: null,
-    currentPrRepositoryId: null,
-    currentPrHeadSha: params.identity.headSha ?? runtime.currentPrHeadSha ?? null,
-    currentPrSourceBranch: null,
-    currentPrIssueTarget: null,
-    lastRejectedPrNumber: params.identity.prNumber,
-    lastResolvedIssueTarget: params.nextIssueTarget ?? runtime.lastResolvedIssueTarget ?? null,
-    lastGitHubDeliveryId: params.deliveryId,
-    followUpPrRequired: params.reason === "retargeted" ? true : runtime.followUpPrRequired,
-    bindingSource: "repaired",
-    bindingConfidence: "low",
-    boundAt: new Date().toISOString(),
+    project.issueRuntime ??= {};
+    const key = String(params.issueId);
+    project.issueRuntime[key] = {
+      ...runtime,
+      currentPrNumber: null,
+      currentPrNodeId: null,
+      currentPrUrl: null,
+      currentPrState: null,
+      currentPrInstallationId: null,
+      currentPrRepositoryId: null,
+      currentPrHeadSha: params.identity.headSha ?? runtime.currentPrHeadSha ?? null,
+      currentPrSourceBranch: null,
+      currentPrIssueTarget: null,
+      lastRejectedPrNumber: params.identity.prNumber,
+      lastResolvedIssueTarget: params.nextIssueTarget ?? runtime.lastResolvedIssueTarget ?? null,
+      lastGitHubDeliveryId: params.deliveryId,
+      followUpPrRequired: params.reason === "retargeted" ? true : runtime.followUpPrRequired,
+      bindingSource: "repaired",
+      bindingConfidence: "low",
+      boundAt: new Date().toISOString(),
+    };
   });
 }
 
