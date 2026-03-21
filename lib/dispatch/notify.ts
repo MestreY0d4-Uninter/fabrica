@@ -469,12 +469,26 @@ export async function notify(
     runCommand?: RunCommand;
     /** Optional Telegram forum topic ID for per-topic routing */
     messageThreadId?: number;
+    /** Stored delivery target from outbox — skips re-resolution (used by retry path) */
+    deliveryTargetOverride?: {
+      channelId: string;
+      channel?: string;
+      accountId?: string;
+      messageThreadId?: number;
+    };
   },
 ): Promise<boolean> {
   if (opts.config?.[event.type] === false) return true;
 
   const message = buildMessage(event);
-  const target = opts.target ?? (opts.channelId
+  const target = opts.deliveryTargetOverride
+    ? {
+        channelId: opts.deliveryTargetOverride.channelId,
+        channel: opts.deliveryTargetOverride.channel ?? "telegram",
+        accountId: opts.deliveryTargetOverride.accountId,
+        messageThreadId: opts.deliveryTargetOverride.messageThreadId,
+      }
+    : opts.target ?? (opts.channelId
     ? {
         channelId: opts.channelId,
         channel: opts.channel ?? "telegram",
@@ -501,7 +515,12 @@ export async function notify(
     (event as any).issueId ?? 0,
     event.type,
   );
-  const isNew = await writeIntent(opts.workspaceDir, notifyKey, event as Record<string, unknown>).catch(() => true);
+  const isNew = await writeIntent(opts.workspaceDir, notifyKey, event as Record<string, unknown>, {
+    channelId: target.channelId,
+    channel: target.channel,
+    accountId: target.accountId,
+    messageThreadId: target.messageThreadId,
+  }).catch(() => false); // FIX: false means "skip on error, retry later"
   if (!isNew) {
     await auditLog(opts.workspaceDir, "notify_skip", {
       eventId,

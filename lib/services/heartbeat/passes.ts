@@ -113,12 +113,23 @@ export async function performHealthPass(
     for (const intent of pendingIntents) {
       if (intent.ts < staleThreshold) {
         try {
-          await notify(intent.data as any, {
-            workspaceDir,
-            config: notifyConfig,
-            runtime,
-            runCommand,
-          });
+          if (intent.deliveryTarget?.channelId) {
+            await notify(intent.data as any, {
+              workspaceDir,
+              config: notifyConfig,
+              runtime,
+              runCommand,
+              deliveryTargetOverride: intent.deliveryTarget,
+            });
+          } else {
+            // Legacy entries without deliveryTarget — best-effort
+            await notify(intent.data as any, {
+              workspaceDir,
+              config: notifyConfig,
+              runtime,
+              runCommand,
+            });
+          }
           await markDelivered(workspaceDir, intent.key).catch(() => {});
         } catch { /* best-effort */ }
       }

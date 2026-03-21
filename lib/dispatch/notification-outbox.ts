@@ -17,6 +17,12 @@ type OutboxEntry = {
   ts: number;
   status: "pending" | "delivered";
   data: Record<string, unknown>;
+  deliveryTarget?: {
+    channelId: string;
+    channel?: string;
+    accountId?: string;
+    messageThreadId?: number;
+  };
 };
 
 function outboxPath(workspaceDir: string): string {
@@ -74,12 +80,13 @@ export async function writeIntent(
   workspaceDir: string,
   key: string,
   data: Record<string, unknown>,
+  deliveryTarget?: OutboxEntry["deliveryTarget"],
 ): Promise<boolean> {
   const filePath = outboxPath(workspaceDir);
   const entries = await readEntries(filePath);
   if (entries.some((e) => e.key === key)) return false; // dedup
 
-  entries.push({ key, ts: Date.now(), status: "pending", data });
+  entries.push({ key, ts: Date.now(), status: "pending", data, deliveryTarget });
   await writeEntries(filePath, entries);
   return true;
 }
