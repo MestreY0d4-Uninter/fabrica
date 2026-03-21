@@ -14,6 +14,7 @@ import { DATA_DIR, migrateWorkspaceLayout } from "./migrate-layout.js";
 import { loadConfig } from "../config/index.js";
 import { getAllRoleIds } from "../roles/index.js";
 import type { ProjectsData } from "../projects/types.js";
+import { resolveGitHubWebhookSecret } from "../github/config-credentials.js";
 // ensureDefaultFiles is imported lazily to avoid triggering template loading
 // at import time (templates resolve paths relative to dist/, not lib/setup/).
 
@@ -101,6 +102,7 @@ export async function runDoctor(opts: DoctorOpts): Promise<DoctorResult> {
   // 10. Plugin config checks (optional — only when pluginConfig is provided)
   if (opts.pluginConfig) {
     checks.push(checkTelegramBootstrapConfig(opts.pluginConfig));
+    checks.push(checkGitHubWebhookMode(opts.pluginConfig));
   }
 
   // If fix requested, try to repair missing files by re-running ensureDefaultFiles
@@ -242,6 +244,24 @@ function checkTelegramBootstrapConfig(pluginConfig: Record<string, unknown>): Ch
     severity: "ok",
     message: `Telegram DM bootstrap configured (projectsForumChatId: ${telegram.projectsForumChatId})`,
   };
+}
+
+export function checkGitHubWebhookMode(
+  pluginConfig: Record<string, unknown> | undefined,
+): CheckResult {
+  const mode = (pluginConfig as any)?.providers?.github?.webhookMode ?? "optional";
+  const hasSecret = Boolean(resolveGitHubWebhookSecret(pluginConfig));
+
+  if (mode === "disabled") {
+    return { name: "github-webhook", severity: "ok", message: "Webhook disabled — polling-only mode" };
+  }
+  if (mode === "required" && !hasSecret) {
+    return { name: "github-webhook", severity: "error", message: "webhookMode is 'required' but no webhook secret is configured" };
+  }
+  if (mode === "optional" && !hasSecret) {
+    return { name: "github-webhook", severity: "ok", message: "Webhook not configured — running in polling-only mode (FabricaRun creation via heartbeat polling)" };
+  }
+  return { name: "github-webhook", severity: "ok", message: "Webhook configured" };
 }
 
 async function checkProjects(dataDir: string): Promise<CheckResult[]> {

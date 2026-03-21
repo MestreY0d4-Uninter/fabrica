@@ -13,6 +13,7 @@ type GitHubWebhookPluginConfig = {
     github?: {
       webhookPath?: string;
       webhookSecretEnv?: string;
+      webhookMode?: "required" | "optional" | "disabled";
     };
   };
 };
@@ -33,17 +34,37 @@ function getWebhookConfig(pluginConfig: Record<string, unknown> | undefined): {
   return ((pluginConfig as GitHubWebhookPluginConfig | undefined)?.providers?.github ?? {});
 }
 
+export function getWebhookMode(pluginConfig: Record<string, unknown> | undefined): "required" | "optional" | "disabled" {
+  return (pluginConfig as GitHubWebhookPluginConfig | undefined)?.providers?.github?.webhookMode ?? "optional";
+}
+
 export function registerGitHubWebhookRoute(api: OpenClawPluginApi, ctx: PluginContext): void {
   const logger = ctx.logger ?? api.logger;
   const routeLogger = "child" in logger ? logger.child({ phase: "github-route" }) : logger;
-  const { webhookPath = "/plugins/fabrica/github/webhook", webhookSecretEnv } = getWebhookConfig(ctx.pluginConfig);
-  if (!webhookSecretEnv && !resolveGitHubWebhookSecret(ctx.pluginConfig)) return;
 
+  // Check webhookMode first — "disabled" exits immediately
+  const mode = getWebhookMode(ctx.pluginConfig);
+  if (mode === "disabled") {
+    routeLogger.info?.("GitHub webhook route disabled by configuration (webhookMode: disabled)");
+    return;
+  }
+
+  const { webhookPath = "/plugins/fabrica/github/webhook", webhookSecretEnv } = getWebhookConfig(ctx.pluginConfig);
   const secret = resolveGitHubWebhookSecret(ctx.pluginConfig);
+
   if (!secret) {
+    if (mode === "required") {
+      // Throw to fail startup — operator explicitly requires webhook
+      throw new Error(
+        webhookSecretEnv
+          ? `GitHub webhook secret is required but unresolved (env ${webhookSecretEnv} not available)`
+          : "GitHub webhook secret is required but not configured (set webhookMode to 'optional' to allow polling-only)",
+      );
+    }
+    // mode === "optional" (default): log and return gracefully
     const message = webhookSecretEnv
       ? `GitHub webhook route not registered: webhook secret is unresolved (legacy env ${webhookSecretEnv} not available)`
-      : "GitHub webhook route not registered: webhook secret is not configured";
+      : "GitHub webhook route not registered: running in polling-only mode (set providers.github.webhookSecret to enable webhooks)";
     if (isGatewayServerProcess()) {
       routeLogger.warn?.(message);
     } else {

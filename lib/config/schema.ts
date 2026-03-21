@@ -103,6 +103,13 @@ const ProvidersConfigSchema = z.object({
     webhookSecret: z.string().optional(),
     webhookSecretPath: z.string().optional(),
     webhookSecretEnv: z.string().optional(),
+    /**
+     * Controls webhook route registration behavior.
+     * - "optional" (default): register if secret is configured, skip silently if not
+     * - "required": error on startup if secret is missing
+     * - "disabled": never register webhook route; polling-only mode
+     */
+    webhookMode: z.enum(["required", "optional", "disabled"]).optional(),
   }).optional(),
 }).optional();
 
