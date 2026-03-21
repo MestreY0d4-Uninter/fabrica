@@ -66,7 +66,7 @@ Important invariants:
 The supported local installation is path-based:
 
 ```bash
-openclaw plugins install -l /home/mateus/Fabrica/fabrica
+openclaw plugins install -l /path/to/fabrica
 ```
 
 That means:

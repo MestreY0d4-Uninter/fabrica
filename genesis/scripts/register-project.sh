@@ -55,6 +55,7 @@ if [[ -n "$REQUESTED_CHANNEL_ID" ]]; then
   TELEGRAM_CHAT="$REQUESTED_CHANNEL_ID"
 fi
 ALLOW_SHARED_CHANNELS="${GENESIS_ALLOW_SHARED_CHANNELS:-true}"
+CI_WORKFLOWS_REPO="${CI_WORKFLOWS_REPO:-MestreY0d4-Uninter/fabrica-automation}"
 ALLOW_SHARED_CHANNELS="${ALLOW_SHARED_CHANNELS,,}"
 OWNER_REPO="$(genesis_parse_owner_repo "$REPO_URL" || true)"
 if [[ -z "$OWNER_REPO" ]]; then
@@ -424,16 +425,16 @@ on:
 
 jobs:
   ci:
-    uses: MestreY0d4-Uninter/fabrica-automation/.github/workflows/ci-base.yml@main
+    uses: ${CI_WORKFLOWS_REPO}/.github/workflows/ci-base.yml@main
   security:
-    uses: MestreY0d4-Uninter/fabrica-automation/.github/workflows/security.yml@main
+    uses: ${CI_WORKFLOWS_REPO}/.github/workflows/security.yml@main
 CIEOF
 
   # Add contract pack if stack is known
   if [[ -n "$PACK_WORKFLOW" ]]; then
     cat >> "$WORKFLOWS_DIR/ci.yml" <<PACKEOF
   quality:
-    uses: MestreY0d4-Uninter/fabrica-automation/.github/workflows/${PACK_WORKFLOW}@main
+    uses: ${CI_WORKFLOWS_REPO}/.github/workflows/${PACK_WORKFLOW}@main
 PACKEOF
     echo "  Contract Pack: $PACK_WORKFLOW" >&2
   fi
