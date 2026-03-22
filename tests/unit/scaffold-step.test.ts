@@ -110,6 +110,23 @@ dev = ["pytest>=8.0.0"]
         if (cmd.endsWith("/.venv/bin/python")) {
           return { stdout: "", stderr: "", exitCode: 0 };
         }
+        if (cmd === "uv") {
+          if (args[0] === "--version") {
+            return { stdout: "uv 0.6.0\n", stderr: "", exitCode: 0 };
+          }
+          if (args[0] === "venv" && args[1] === ".venv") {
+            await fs.mkdir(path.join(repoLocal, ".venv", "bin"), { recursive: true });
+            await fs.writeFile(path.join(repoLocal, ".venv", "bin", "python"), "", "utf-8");
+            await fs.writeFile(path.join(repoLocal, ".venv", "bin", "ruff"), "", { mode: 0o755 });
+            return { stdout: "", stderr: "", exitCode: 0 };
+          }
+          if (args[0] === "venv") {
+            await fs.mkdir(path.join(args[1], "bin"), { recursive: true });
+            await fs.writeFile(path.join(args[1], "bin", "ruff"), "#!/bin/sh\n", { mode: 0o755 });
+            return { stdout: "", stderr: "", exitCode: 0 };
+          }
+          return { stdout: "", stderr: "", exitCode: 0 };
+        }
         throw new Error(`Unexpected bootstrap command: ${cmd} ${args.join(" ")}`);
       },
     };

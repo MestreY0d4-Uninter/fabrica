@@ -96,7 +96,7 @@ describe("test-env bootstrap", () => {
     expect(calls.some((call) => call.cmd === "npm" && call.args[0] === "install")).toBe(true);
   });
 
-  it("creates a project-local Python virtualenv and installs dev extras when uv is unavailable", async () => {
+  it("auto-installs uv and uses it for project venv when uv is initially missing", async () => {
     const repoPath = await makeTempRepo("fabrica-python-bootstrap-");
     await fs.writeFile(path.join(repoPath, "pyproject.toml"), `
 [project]
@@ -107,25 +107,31 @@ dev = ["pytest>=8.0.0"]
 `, "utf-8");
 
     const calls: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
-    const venvPython = path.join(repoPath, ".venv", "bin", "python");
+    let uvInstalled = false;
     const result = await ensureProjectTestEnvironment({
       repoPath,
       stack: "python-cli",
       mode: "scaffold",
       runCommand: async (cmd, args, opts) => {
         calls.push({ cmd, args, cwd: opts?.cwd });
-        if (cmd === "uv") {
+        // First uv --version check fails (uv not installed yet)
+        if (cmd === "uv" && args[0] === "--version" && !uvInstalled) {
           return { stdout: "", stderr: "missing", exitCode: 127 };
         }
-        if (cmd === "python3" && args[0] === "--version") {
-          return { stdout: "Python 3.11.0\n", stderr: "", exitCode: 0 };
-        }
-        if (cmd === "python3" && args[0] === "-m" && args[1] === "venv") {
-          await fs.mkdir(path.dirname(venvPython), { recursive: true });
-          await fs.writeFile(venvPython, "", "utf-8");
+        // Install script succeeds
+        if (cmd === "bash" && args[1]?.includes("astral.sh")) {
+          uvInstalled = true;
           return { stdout: "", stderr: "", exitCode: 0 };
         }
-        if (cmd === venvPython) {
+        // Second uv --version check succeeds (after install)
+        if (cmd === "uv" && args[0] === "--version" && uvInstalled) {
+          return { stdout: "uv 0.6.0\n", stderr: "", exitCode: 0 };
+        }
+        if (cmd === "uv" && args[0] === "venv") {
+          const target = args[1] === ".venv" ? path.join(repoPath, ".venv") : args[1];
+          await fs.mkdir(path.join(target, "bin"), { recursive: true });
+          await fs.writeFile(path.join(target, "bin", "python"), "", "utf-8");
+          await fs.writeFile(path.join(target, "bin", "ruff"), "", { mode: 0o755 });
           return { stdout: "", stderr: "", exitCode: 0 };
         }
         return { stdout: "", stderr: "", exitCode: 0 };
@@ -133,9 +139,9 @@ dev = ["pytest>=8.0.0"]
     });
 
     expect(result.ready).toBe(true);
-    expect(result.environmentPath).toBe(path.join(repoPath, ".venv"));
-    expect(calls.some((call) => call.cmd === "python3" && call.args.join(" ") === "-m venv .venv")).toBe(true);
-    expect(calls.some((call) => call.cmd === venvPython && call.args.join(" ") === "-m pip install -e .[dev]")).toBe(true);
+    expect(result.packageManager).toBe("uv");
+    expect(calls.some((c) => c.cmd === "bash" && c.args[1]?.includes("astral.sh"))).toBe(true);
+    expect(calls.some((c) => c.cmd === "uv" && c.args[0] === "venv")).toBe(true);
   });
 
   it("prefers uv for project-local Python bootstrap when available", async () => {
@@ -176,62 +182,25 @@ dev = ["pytest>=8.0.0"]
     expect(calls.some((call) => call.cmd === "uv" && call.args.join(" ") === "pip install --python .venv/bin/python -e .[dev]")).toBe(true);
   });
 
-  it("fails closed when uv.lock exists but uv is unavailable", async () => {
+  it("uses uv sync --locked when uv.lock exists", async () => {
     const repoPath = await makeTempRepo("fabrica-uv-lock-");
     await fs.writeFile(path.join(repoPath, "uv.lock"), "version = 1\n", "utf-8");
     await fs.writeFile(path.join(repoPath, "pyproject.toml"), "[project]\nname='x'\nversion='0.1.0'\n", "utf-8");
 
+    const calls: Array<{ cmd: string; args: string[] }> = [];
     const result = await ensureProjectTestEnvironment({
       repoPath,
       stack: "python-cli",
       mode: "qa",
-      runCommand: async (cmd) => {
-        if (cmd === "uv") return { stdout: "", stderr: "missing", exitCode: 127 };
-        if (cmd === "python3") return { stdout: "Python 3.11.0\n", stderr: "", exitCode: 0 };
-        return { stdout: "", stderr: "", exitCode: 0 };
-      },
-    });
-
-    expect(result.ready).toBe(false);
-    expect(result.reason).toBe("uv_lock_without_uv");
-  });
-
-  it("falls back to a repo-local virtualenv bootstrap when stdlib venv is unavailable and uv is missing", async () => {
-    const repoPath = await makeTempRepo("fabrica-python-fallback-");
-    await fs.writeFile(path.join(repoPath, "pyproject.toml"), `
-[project]
-name = "password-cli"
-version = "0.1.0"
-[project.optional-dependencies]
-dev = ["pytest>=8.0.0"]
-`, "utf-8");
-
-    const calls: Array<{ cmd: string; args: string[]; cwd?: string; env?: Record<string, string | undefined> }> = [];
-    const venvPython = path.join(repoPath, ".venv", "bin", "python");
-    const result = await ensureProjectTestEnvironment({
-      repoPath,
-      stack: "python-cli",
-      mode: "scaffold",
-      runCommand: async (cmd, args, opts) => {
-        calls.push({ cmd, args, cwd: opts?.cwd, env: opts?.env });
-        if (cmd === "uv") {
-          return { stdout: "", stderr: "missing", exitCode: 127 };
+      runCommand: async (cmd, args) => {
+        calls.push({ cmd, args });
+        if (cmd === "uv" && args[0] === "--version") {
+          return { stdout: "uv 0.6.0\n", stderr: "", exitCode: 0 };
         }
-        if (cmd === "python3" && args[0] === "--version") {
-          return { stdout: "Python 3.11.0\n", stderr: "", exitCode: 0 };
-        }
-        if (cmd === "python3" && args.join(" ") === "-m venv .venv") {
-          return { stdout: "", stderr: "ensurepip missing", exitCode: 1 };
-        }
-        if (cmd === "python3" && args.join(" ").startsWith("-m pip install --disable-pip-version-check --target")) {
-          return { stdout: "", stderr: "", exitCode: 0 };
-        }
-        if (cmd === "python3" && args.join(" ") === "-m virtualenv .venv") {
-          await fs.mkdir(path.dirname(venvPython), { recursive: true });
-          await fs.writeFile(venvPython, "", "utf-8");
-          return { stdout: "", stderr: "", exitCode: 0 };
-        }
-        if (cmd === venvPython) {
+        if (cmd === "uv" && args[0] === "venv") {
+          await fs.mkdir(path.join(repoPath, ".venv", "bin"), { recursive: true });
+          await fs.writeFile(path.join(repoPath, ".venv", "bin", "python"), "", "utf-8");
+          await fs.writeFile(path.join(repoPath, ".venv", "bin", "ruff"), "", { mode: 0o755 });
           return { stdout: "", stderr: "", exitCode: 0 };
         }
         return { stdout: "", stderr: "", exitCode: 0 };
@@ -239,10 +208,9 @@ dev = ["pytest>=8.0.0"]
     });
 
     expect(result.ready).toBe(true);
-    expect(calls.some((call) => call.cmd === "python3" && call.args.join(" ") === "-m virtualenv .venv")).toBe(true);
-    const fallbackCall = calls.find((call) => call.cmd === "python3" && call.args.join(" ") === "-m virtualenv .venv");
-    expect(fallbackCall?.env?.PYTHONPATH).toContain(path.join(repoPath, ".fabrica", "python-bootstrap"));
+    expect(calls.some((c) => c.cmd === "uv" && c.args.join(" ").includes("sync --locked"))).toBe(true);
   });
+
 });
 
 describe("getQaGateCommands", () => {
@@ -361,5 +329,51 @@ describe("ensurePythonToolchain", () => {
     const result = await ensurePythonToolchain(runCommand, tmpHome);
     expect(result).toBe(toolchainPath);
     expect(commandsRun.some(c => c.includes("uv venv"))).toBe(true);
+  });
+});
+
+describe("ensurePythonEnvironment integration", () => {
+  it("calls ensureUv before creating venv when uv is not available", async () => {
+    const repoPath = await makeTempRepo("fabrica-python-env-");
+    await fs.writeFile(path.join(repoPath, "pyproject.toml"), `[project]\nname = "test"\nversion = "0.1.0"\n`);
+
+    const commandsRun: string[] = [];
+    let uvInstalled = false;
+    const runCommand = async (cmd: string, args: string[], opts?: any) => {
+      commandsRun.push(`${cmd} ${args.join(" ")}`);
+      if (cmd === "uv" && args[0] === "--version" && !uvInstalled) {
+        return { stdout: "", stderr: "missing", exitCode: 127 };
+      }
+      if (cmd === "bash" && args[1]?.includes("astral.sh")) {
+        uvInstalled = true;
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+      if (cmd === "uv" && args[0] === "--version" && uvInstalled) {
+        return { stdout: "uv 0.6.0\n", stderr: "", exitCode: 0 };
+      }
+      if (cmd === "uv") {
+        if (args[0] === "venv") {
+          const target = args[1] === ".venv" ? path.join(repoPath, ".venv") : args[1];
+          await fs.mkdir(path.join(target, "bin"), { recursive: true });
+          await fs.writeFile(path.join(target, "bin", "python"), "#!/bin/sh\n", { mode: 0o755 });
+          await fs.writeFile(path.join(target, "bin", "ruff"), "#!/bin/sh\n", { mode: 0o755 });
+        }
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "uv 0.6.0", stderr: "", exitCode: 0 };
+    };
+
+    const result = await ensureProjectTestEnvironment({
+      repoPath,
+      stack: "python-cli",
+      mode: "scaffold",
+      runCommand,
+    });
+
+    expect(result.ready).toBe(true);
+    // ensureUv (--version check) should be called before venv creation
+    const versionIdx = commandsRun.findIndex(c => c.includes("uv --version"));
+    const venvIdx = commandsRun.findIndex(c => c.includes("uv venv .venv"));
+    expect(versionIdx).toBeLessThan(venvIdx);
   });
 });

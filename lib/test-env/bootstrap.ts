@@ -783,12 +783,6 @@ async function ensureNodeEnvironment(
   };
 }
 
-async function resolvePythonInterpreter(runCommand: RunCommand): Promise<string | null> {
-  if (await toolExists(runCommand, "python3")) return "python3";
-  if (await toolExists(runCommand, "python")) return "python";
-  return null;
-}
-
 async function ensurePythonEnvironment(
   repoPath: string,
   stack: CanonicalStack,
@@ -806,8 +800,8 @@ async function ensurePythonEnvironment(
       skipped: true,
       stack,
       family: "python",
-      toolchain: "python",
-      packageManager: "pip",
+      toolchain: "uv",
+      packageManager: "uv",
       lockfile: await pathExists(path.join(repoPath, "uv.lock")) ? "uv.lock" : null,
       environmentPath: venvPath,
       commandsRun,
@@ -815,10 +809,12 @@ async function ensurePythonEnvironment(
     };
   }
 
+  // Ensure uv is available (auto-install if needed)
+  await ensureUv(runCommand);
+
   const uvLock = await pathExists(path.join(repoPath, "uv.lock"));
   const pyproject = await pathExists(path.join(repoPath, "pyproject.toml"));
   const requirements = await pathExists(path.join(repoPath, "requirements.txt"));
-  const hasUv = await toolExists(runCommand, "uv");
 
   if (!uvLock && !pyproject && !requirements) {
     return {
@@ -836,22 +832,10 @@ async function ensurePythonEnvironment(
     };
   }
 
+  // Ensure shared toolchain exists (only for real Python projects)
+  await ensurePythonToolchain(runCommand);
+
   if (uvLock) {
-    if (!hasUv) {
-      return {
-        ready: false,
-        skipped: false,
-        stack,
-        family: "python",
-        toolchain: "python",
-        packageManager: "uv",
-        lockfile: "uv.lock",
-        environmentPath: null,
-        commandsRun,
-        fingerprint,
-        reason: "uv_lock_without_uv",
-      };
-    }
     await runAndAssert(runCommand, repoPath, commandsRun, {
       cmd: "uv",
       args: ["sync", "--locked"],
@@ -863,7 +847,7 @@ async function ensurePythonEnvironment(
       skipped: false,
       stack,
       family: "python",
-      toolchain: "python",
+      toolchain: "uv",
       packageManager: "uv",
       lockfile: "uv.lock",
       environmentPath: venvPath,
@@ -872,110 +856,35 @@ async function ensurePythonEnvironment(
     };
   }
 
-  if (hasUv) {
-    await runAndAssert(runCommand, repoPath, commandsRun, {
-      cmd: "uv",
-      args: ["venv", ".venv"],
-      reason: "create project-local virtualenv with uv",
-    });
-    if (requirements) {
-      await runAndAssert(runCommand, repoPath, commandsRun, {
-        cmd: "uv",
-        args: ["pip", "install", "--python", ".venv/bin/python", "-r", "requirements.txt"],
-        reason: "install requirements.txt dependencies with uv",
-      });
-    }
-    if (pyproject) {
-      const hasDevExtra = await hasPyprojectDevExtra(repoPath);
-      await runAndAssert(runCommand, repoPath, commandsRun, {
-        cmd: "uv",
-        args: ["pip", "install", "--python", ".venv/bin/python", "-e", hasDevExtra ? ".[dev]" : "."],
-        reason: hasDevExtra ? "install editable project with dev extras via uv" : "install editable project via uv",
-      });
-    }
-    if (fingerprint) await writeBootstrapFingerprint(repoPath, fingerprint);
-    return {
-      ready: true,
-      skipped: false,
-      stack,
-      family: "python",
-      toolchain: "python",
-      packageManager: "uv",
-      lockfile: null,
-      environmentPath: venvPath,
-      commandsRun,
-      fingerprint,
-    };
-  }
-
-  const pythonInterpreter = await resolvePythonInterpreter(runCommand);
-  if (!pythonInterpreter) {
-    return {
-      ready: false,
-      skipped: false,
-      stack,
-      family: "python",
-      toolchain: "python",
-      packageManager: "pip",
-      lockfile: null,
-      environmentPath: null,
-      commandsRun,
-      fingerprint,
-      reason: "python_not_available",
-    };
-  }
-
+  // uv is guaranteed available after ensureUv() — use it unconditionally
   await runAndAssert(runCommand, repoPath, commandsRun, {
-    cmd: pythonInterpreter,
-    args: ["-m", "venv", ".venv"],
-    reason: "create project-local virtualenv",
-  }).catch(async () => {
-    const bootstrapDir = path.join(repoPath, BOOTSTRAP_STATE_DIR, "python-bootstrap");
-    await runAndAssert(runCommand, repoPath, commandsRun, {
-      cmd: pythonInterpreter,
-      args: ["-m", "pip", "install", "--disable-pip-version-check", "--target", bootstrapDir, "virtualenv>=20.26.0"],
-      reason: "install local virtualenv fallback",
-    });
-    await runAndAssert(runCommand, repoPath, commandsRun, {
-      cmd: pythonInterpreter,
-      args: ["-m", "virtualenv", ".venv"],
-      env: {
-        PYTHONPATH: `${bootstrapDir}${process.env.PYTHONPATH ? `:${process.env.PYTHONPATH}` : ""}`,
-      },
-      reason: "create project-local virtualenv with fallback",
-    });
+    cmd: "uv",
+    args: ["venv", ".venv"],
+    reason: "create project-local virtualenv with uv",
   });
-  await runAndAssert(runCommand, repoPath, commandsRun, {
-    cmd: venvPython,
-    args: ["-m", "pip", "install", "--upgrade", "pip"],
-    reason: "upgrade pip in project-local virtualenv",
-  });
-
   if (requirements) {
     await runAndAssert(runCommand, repoPath, commandsRun, {
-      cmd: venvPython,
-      args: ["-m", "pip", "install", "-r", "requirements.txt"],
-      reason: "install requirements.txt dependencies",
+      cmd: "uv",
+      args: ["pip", "install", "--python", ".venv/bin/python", "-r", "requirements.txt"],
+      reason: "install requirements.txt dependencies with uv",
     });
   }
-
   if (pyproject) {
     const hasDevExtra = await hasPyprojectDevExtra(repoPath);
     await runAndAssert(runCommand, repoPath, commandsRun, {
-      cmd: venvPython,
-      args: ["-m", "pip", "install", "-e", hasDevExtra ? ".[dev]" : "."],
-      reason: hasDevExtra ? "install editable project with dev extras" : "install editable project",
+      cmd: "uv",
+      args: ["pip", "install", "--python", ".venv/bin/python", "-e", hasDevExtra ? ".[dev]" : "."],
+      reason: hasDevExtra ? "install editable project with dev extras via uv" : "install editable project via uv",
     });
   }
-
   if (fingerprint) await writeBootstrapFingerprint(repoPath, fingerprint);
   return {
     ready: true,
     skipped: false,
     stack,
     family: "python",
-    toolchain: "python",
-    packageManager: "pip",
+    toolchain: "uv",
+    packageManager: "uv",
     lockfile: null,
     environmentPath: venvPath,
     commandsRun,
