@@ -464,6 +464,62 @@ export async function ensureUv(runCommand: RunCommand, log?: (msg: string) => vo
   }
 }
 
+export const PYTHON_TOOLCHAIN_PACKAGES = ["ruff", "mypy", "pip-audit"];
+const TOOLCHAIN_DIR = ".openclaw/toolchains/python";
+const TOOLCHAIN_FINGERPRINT_FILE = "toolchain.sha256";
+
+function toolchainFingerprint(): string {
+  return createHash("sha256").update(PYTHON_TOOLCHAIN_PACKAGES.join(",")).digest("hex");
+}
+
+export async function ensurePythonToolchain(
+  runCommand: RunCommand,
+  homeDir?: string,
+): Promise<string> {
+  const home = homeDir ?? process.env.HOME ?? "/tmp";
+  const toolchainPath = path.join(home, TOOLCHAIN_DIR);
+  const ruffPath = path.join(toolchainPath, "bin", "ruff");
+  const fingerprintPath = path.join(toolchainPath, TOOLCHAIN_FINGERPRINT_FILE);
+
+  const expectedFp = toolchainFingerprint();
+
+  // Check if already provisioned with matching fingerprint
+  if (await pathExists(ruffPath)) {
+    try {
+      const currentFp = (await fs.readFile(fingerprintPath, "utf-8")).trim();
+      if (currentFp === expectedFp) {
+        return toolchainPath;
+      }
+    } catch {
+      // fingerprint missing — rebuild
+    }
+    // Fingerprint mismatch or missing — teardown and recreate
+    await fs.rm(toolchainPath, { recursive: true, force: true });
+  }
+
+  // Create toolchain venv
+  await fs.mkdir(path.dirname(toolchainPath), { recursive: true });
+  const venvResult = await runCommand("uv", ["venv", toolchainPath], { timeout: 60_000 });
+  if (venvResult.exitCode !== 0) {
+    throw new Error(`Failed to create toolchain venv: ${venvResult.stderr}`);
+  }
+
+  // Install tools
+  const installResult = await runCommand("uv", [
+    "pip", "install",
+    "-p", path.join(toolchainPath, "bin", "python"),
+    ...PYTHON_TOOLCHAIN_PACKAGES,
+  ], { timeout: 120_000 });
+  if (installResult.exitCode !== 0) {
+    throw new Error(`Failed to install toolchain packages: ${installResult.stderr}`);
+  }
+
+  // Write fingerprint
+  await fs.writeFile(fingerprintPath, expectedFp, "utf-8");
+
+  return toolchainPath;
+}
+
 async function hasPyprojectDevExtra(repoPath: string): Promise<boolean> {
   const pyprojectPath = path.join(repoPath, "pyproject.toml");
   if (!await pathExists(pyprojectPath)) return false;

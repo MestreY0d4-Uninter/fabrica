@@ -1,13 +1,16 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ensureProjectTestEnvironment,
+  ensurePythonToolchain,
   ensureUv,
   getQaGateCommands,
   getSupportedGreenfieldStacks,
   supportsGreenfieldScaffold,
+  PYTHON_TOOLCHAIN_PACKAGES,
 } from "../../lib/test-env/bootstrap.js";
 
 const tempDirs: string[] = [];
@@ -289,5 +292,74 @@ describe("ensureUv", () => {
       return { stdout: "", stderr: "network error", exitCode: 1 };
     };
     await expect(ensureUv(runCommand)).rejects.toThrow(/uv/i);
+  });
+});
+
+describe("ensurePythonToolchain", () => {
+  it("creates toolchain venv and installs tools when missing", async () => {
+    const tmpHome = await makeTempRepo("fabrica-toolchain-");
+    const toolchainPath = path.join(tmpHome, ".openclaw", "toolchains", "python");
+    const commandsRun: string[] = [];
+
+    const runCommand = async (cmd: string, args: string[]) => {
+      commandsRun.push(`${cmd} ${args.join(" ")}`);
+      if (cmd === "uv" && args[0] === "venv") {
+        await fs.mkdir(path.join(args[1], "bin"), { recursive: true });
+        await fs.writeFile(path.join(args[1], "bin", "ruff"), "#!/bin/sh\n", { mode: 0o755 });
+        await fs.writeFile(path.join(args[1], "bin", "mypy"), "#!/bin/sh\n", { mode: 0o755 });
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    };
+
+    const result = await ensurePythonToolchain(runCommand, tmpHome);
+    expect(result).toBe(toolchainPath);
+    expect(commandsRun.some(c => c.includes("uv venv"))).toBe(true);
+    expect(commandsRun.some(c => c.includes("ruff") && c.includes("mypy") && c.includes("pip-audit"))).toBe(true);
+  });
+
+  it("skips creation when toolchain exists with matching fingerprint", async () => {
+    const tmpHome = await makeTempRepo("fabrica-toolchain-cached-");
+    const toolchainPath = path.join(tmpHome, ".openclaw", "toolchains", "python");
+    await fs.mkdir(path.join(toolchainPath, "bin"), { recursive: true });
+    await fs.writeFile(path.join(toolchainPath, "bin", "ruff"), "#!/bin/sh\n", { mode: 0o755 });
+
+    // Write matching fingerprint
+    const hash = createHash("sha256").update(PYTHON_TOOLCHAIN_PACKAGES.join(",")).digest("hex");
+    await fs.writeFile(path.join(toolchainPath, "toolchain.sha256"), hash);
+
+    const commandsRun: string[] = [];
+    const runCommand = async (cmd: string, args: string[]) => {
+      commandsRun.push(`${cmd} ${args.join(" ")}`);
+      return { stdout: "", stderr: "", exitCode: 0 };
+    };
+
+    const result = await ensurePythonToolchain(runCommand, tmpHome);
+    expect(result).toBe(toolchainPath);
+    // No uv commands should have been run
+    expect(commandsRun.filter(c => c.startsWith("uv"))).toHaveLength(0);
+  });
+
+  it("rebuilds when fingerprint mismatches", async () => {
+    const tmpHome = await makeTempRepo("fabrica-toolchain-stale-");
+    const toolchainPath = path.join(tmpHome, ".openclaw", "toolchains", "python");
+    await fs.mkdir(path.join(toolchainPath, "bin"), { recursive: true });
+    await fs.writeFile(path.join(toolchainPath, "bin", "ruff"), "#!/bin/sh\n", { mode: 0o755 });
+    await fs.writeFile(path.join(toolchainPath, "toolchain.sha256"), "old-hash");
+
+    const commandsRun: string[] = [];
+    const runCommand = async (cmd: string, args: string[]) => {
+      commandsRun.push(`${cmd} ${args.join(" ")}`);
+      if (cmd === "uv" && args[0] === "venv") {
+        await fs.mkdir(path.join(args[1], "bin"), { recursive: true });
+        await fs.writeFile(path.join(args[1], "bin", "ruff"), "#!/bin/sh\n", { mode: 0o755 });
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    };
+
+    const result = await ensurePythonToolchain(runCommand, tmpHome);
+    expect(result).toBe(toolchainPath);
+    expect(commandsRun.some(c => c.includes("uv venv"))).toBe(true);
   });
 });
