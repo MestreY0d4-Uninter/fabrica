@@ -13,6 +13,8 @@ import {
 import { ensureProjectTestEnvironment, supportsGreenfieldScaffold } from "../../test-env/bootstrap.js";
 import { generateQaContract } from "../../quality/qa-contracts.js";
 
+const PYTHON_STACKS = new Set(["python-cli", "fastapi", "flask", "django"]);
+
 export const scaffoldStep: PipelineStep = {
   name: "scaffold",
 
@@ -57,7 +59,8 @@ export const scaffoldStep: PipelineStep = {
             : `Scaffold bootstrap completed (${bootstrap.packageManager})`,
         );
         // Overwrite qa.sh with TypeScript-generated content (replaces shell placeholder)
-        if (payload.spec) {
+        // Only for Python stacks — Node/Go/Java stacks use shell-generated qa.sh as-is
+        if (scaffold.stack && PYTHON_STACKS.has(scaffold.stack) && payload.spec) {
           try {
             const contract = generateQaContract({
               spec: payload.spec,
