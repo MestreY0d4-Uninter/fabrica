@@ -38,7 +38,7 @@ export function sanitizeRepoName(raw: string): string {
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/[._-]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 80)
+    .slice(0, 40)
     .replace(/-+$/g, "");
 }
 
@@ -88,6 +88,7 @@ export function deriveRepoName(
   return deriveRepoNameFromCandidates([
     { value: explicitRepoName, source: "metadata.repo_url" },
     { value: payload.metadata.project_name, source: "metadata.project_name" },
+    { value: payload.spec_data?.project_slug, source: "spec_data.project_slug" },
     { value: payload.project_map?.project_slug, source: "project_map.project_slug" },
     { value: payload.project_map?.project, source: "project_map.project" },
     { value: payload.spec?.title, source: "spec.title" },

@@ -50,7 +50,7 @@ export type TelegramBootstrapSession = {
   error?: string | null;
 };
 
-const SESSION_TTL_MS = 2 * 60_000;
+const SESSION_TTL_MS = 10 * 60_000;
 
 function sessionsDir(workspaceDir: string): string {
   return path.join(workspaceDir, DATA_DIR, "bootstrap-sessions");

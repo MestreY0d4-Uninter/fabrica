@@ -145,9 +145,9 @@ function parseClarificationResponse(text: string, session: TelegramBootstrapSess
 
 function buildClarificationMessage(parsed: BootstrapRequest, pendingClarification?: "stack" | "stack_and_name"): string {
   if (pendingClarification === "stack_and_name" || (!parsed.stackHint && !parsed.projectName)) {
-    return `Que ideia bacana! Para criar o projeto, qual stack você quer usar? Por exemplo: Python, Node.js, Go, Java...`;
+    return `Beleza! Só preciso de duas coisas pra criar:\n\n1. Qual stack? (Python, Node.js, Go, Java...)\n2. Quer dar um nome pro projeto? Se não, eu invento um.`;
   }
-  return `Qual stack você quer usar para esse projeto? Por exemplo: Python, Node.js, Go, Java...`;
+  return `Qual stack você quer usar? (Python, Node.js, Go, Java...)`;
 }
 
 function buildFollowUpClarification(session: TelegramBootstrapSession): string {

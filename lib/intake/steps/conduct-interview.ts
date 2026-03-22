@@ -64,30 +64,34 @@ export const conductInterviewStep: PipelineStep = {
         .map(([key, value]) => `- ${key}: ${value}`)
         .join("\n");
 
-      const prompt = `You are a software specification expert. Based on this project idea, answer the interview questions to produce a structured specification.
+      const prompt = `You are a pragmatic senior engineer scoping a small project from a brief user request. Your job is to derive a tight, actionable specification — NOT to ask more questions.
 
-Idea: ${payload.raw_idea}
-Classification: ${type}
+User request: "${payload.raw_idea}"
+Type: ${type}
 
-Questions:
-${questionsText}
+Context from earlier steps:
+${answersText || "(none)"}
 
-Existing answers:
-${answersText || "(none provided yet)"}
+Produce a concise JSON spec. The title should be a SHORT name (3-5 words, suitable as a repo name). Keep scope minimal — only what the user explicitly asked for.
 
 Return ONLY valid JSON (no markdown fences):
 {
-  "title": "<concise project title, max 120 chars>",
-  "objective": "<clear objective statement>",
-  "scope_v1": ["<scope item 1>", "<scope item 2>"],
+  "project_slug": "<kebab-case repo name, 2-4 words, e.g. email-validator-cli>",
+  "title": "<short project name, 3-5 words, max 60 chars>",
+  "objective": "<1-2 sentence objective>",
+  "scope_v1": ["<concrete deliverable 1>", "<concrete deliverable 2>"],
   "out_of_scope": ["<item>"],
-  "acceptance_criteria": ["<specific, domain-aware AC 1>", "<AC 2>"],
+  "acceptance_criteria": ["<specific, testable AC 1>", "<AC 2>"],
   "definition_of_done": ["Code reviewed and merged", "Tests pass", "QA contract passes"],
   "constraints": "<constraints or 'None specified'>",
   "risks": ["<risk 1>"]
 }
 
-IMPORTANT: Acceptance criteria must be domain-specific, not generic.`;
+Rules:
+- Title must be a short name like "email-validator-cli" or "task-tracker-api", NOT a full sentence.
+- Acceptance criteria must be domain-specific and testable.
+- Do NOT invent features the user didn't ask for.
+- Keep it lean — a CLI that validates emails doesn't need auth, profiles, or config files.`;
 
       const result = await withLlmRetry(() => ctx.runCommand(resolveOpenClawCli({
         homeDir: ctx.homeDir,

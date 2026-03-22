@@ -92,6 +92,7 @@ export type Interview = {
 // ---------------------------------------------------------------------------
 
 export type SpecData = {
+  project_slug?: string;
   title: string;
   objective: string;
   scope_v1: string[];
