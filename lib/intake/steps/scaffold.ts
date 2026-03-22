@@ -2,6 +2,8 @@
  * Step 7: Scaffold greenfield project.
  * The plan is resolved in TS; the shell only executes host-level repo/bootstrap work.
  */
+import fsNode from "node:fs/promises";
+import path from "node:path";
 import type { PipelineStep, GenesisPayload } from "../types.js";
 import {
   buildScaffoldPlan,
@@ -9,6 +11,7 @@ import {
   parseScaffoldOutput,
 } from "../lib/scaffold-service.js";
 import { ensureProjectTestEnvironment, supportsGreenfieldScaffold } from "../../test-env/bootstrap.js";
+import { generateQaContract } from "../../quality/qa-contracts.js";
 
 export const scaffoldStep: PipelineStep = {
   name: "scaffold",
@@ -53,6 +56,21 @@ export const scaffoldStep: PipelineStep = {
             ? `Scaffold bootstrap already current (${bootstrap.packageManager})`
             : `Scaffold bootstrap completed (${bootstrap.packageManager})`,
         );
+        // Overwrite qa.sh with TypeScript-generated content (replaces shell placeholder)
+        if (payload.spec) {
+          try {
+            const contract = generateQaContract({
+              spec: payload.spec,
+              stack: scaffold.stack,
+              acceptanceCriteria: payload.spec.acceptance_criteria,
+            });
+            const qaPath = path.join(scaffold.repo_local, "scripts", "qa.sh");
+            await fsNode.mkdir(path.dirname(qaPath), { recursive: true });
+            await fsNode.writeFile(qaPath, contract.script_content, { mode: 0o755 });
+          } catch (err) {
+            ctx.log(`Warning: could not write qa.sh: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
       }
       return {
         ...result.plannedPayload,
