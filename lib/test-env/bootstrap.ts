@@ -406,6 +406,64 @@ async function runAndAssert(
   }
 }
 
+const UV_INSTALL_URL = "https://astral.sh/uv/install.sh";
+
+export async function ensureUv(runCommand: RunCommand, log?: (msg: string) => void): Promise<string> {
+  const emit = log ?? (() => {});
+
+  // Check if uv is already available (use --version, consistent with toolExists pattern)
+  const check = await runCommand("uv", ["--version"], { timeout: 10_000 }).catch(() => ({
+    stdout: "",
+    stderr: "",
+    exitCode: 1,
+  }));
+
+  if (check.exitCode === 0) {
+    emit(`[test-env] uv already available: ${check.stdout.trim()}`);
+    return "uv"; // uv is in PATH
+  }
+
+  // Try installing via official script
+  emit("[test-env] uv not found — installing via official script...");
+  const install = await runCommand("bash", [
+    "-c",
+    `curl -LsSf ${UV_INSTALL_URL} | sh`,
+  ], { timeout: 120_000 }).catch(() => ({ stdout: "", stderr: "", exitCode: 1 }));
+
+  if (install.exitCode !== 0) {
+    throw new Error(
+      `Failed to install uv. Install manually: curl -LsSf ${UV_INSTALL_URL} | sh\n` +
+      `Details: ${(install.stderr || install.stdout || "unknown error").trim()}`,
+    );
+  }
+
+  // Verify uv is now available (install.sh puts it in ~/.local/bin which should be in PATH)
+  const verify = await runCommand("uv", ["--version"], { timeout: 10_000 }).catch(() => ({
+    stdout: "",
+    stderr: "",
+    exitCode: 1,
+  }));
+
+  if (verify.exitCode === 0) {
+    emit(`[test-env] uv installed successfully: ${verify.stdout.trim()}`);
+    return "uv";
+  }
+
+  // If not in PATH, return absolute path
+  const home = process.env.HOME ?? "";
+  const fallbackPath = path.join(home, ".local", "bin", "uv");
+  try {
+    await fs.access(fallbackPath);
+    emit(`[test-env] uv installed at fallback path: ${fallbackPath}`);
+    return fallbackPath;
+  } catch {
+    throw new Error(
+      `uv installed but not found. Expected at: ${fallbackPath}\n` +
+      `Install manually: curl -LsSf ${UV_INSTALL_URL} | sh`,
+    );
+  }
+}
+
 async function hasPyprojectDevExtra(repoPath: string): Promise<boolean> {
   const pyprojectPath = path.join(repoPath, "pyproject.toml");
   if (!await pathExists(pyprojectPath)) return false;

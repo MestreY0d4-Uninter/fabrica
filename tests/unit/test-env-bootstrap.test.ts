@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ensureProjectTestEnvironment,
+  ensureUv,
   getQaGateCommands,
   getSupportedGreenfieldStacks,
   supportsGreenfieldScaffold,
@@ -245,5 +246,48 @@ describe("getQaGateCommands", () => {
   it("returns stack-aware Node gate commands", () => {
     expect(getQaGateCommands("nextjs").lint).toBe("next lint");
     expect(getQaGateCommands("node-cli").lint).toBe("npm run lint");
+  });
+});
+
+describe("ensureUv", () => {
+  it("returns uv path when uv is already available", async () => {
+    const runCommand = async (cmd: string, args: string[]) => {
+      if (cmd === "uv" && args[0] === "--version") {
+        return { stdout: "uv 0.6.0\n", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 1 };
+    };
+    const result = await ensureUv(runCommand);
+    expect(result).toBe("uv");
+  });
+
+  it("installs uv when not found and returns path", async () => {
+    const commandsRun: string[] = [];
+    let installed = false;
+    const runCommand = async (cmd: string, args: string[]) => {
+      commandsRun.push(`${cmd} ${args.join(" ")}`);
+      if (cmd === "uv" && args[0] === "--version" && !installed) {
+        return { stdout: "", stderr: "missing", exitCode: 127 };
+      }
+      if (cmd === "bash") {
+        installed = true;
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+      if (cmd === "uv" && args[0] === "--version" && installed) {
+        return { stdout: "uv 0.6.0\n", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    };
+    const result = await ensureUv(runCommand);
+    expect(result).toBe("uv");
+    expect(commandsRun.some(c => c.includes("astral.sh/uv/install.sh"))).toBe(true);
+  });
+
+  it("throws when uv install fails", async () => {
+    const runCommand = async (cmd: string, args: string[]) => {
+      if (cmd === "uv") return { stdout: "", stderr: "missing", exitCode: 127 };
+      return { stdout: "", stderr: "network error", exitCode: 1 };
+    };
+    await expect(ensureUv(runCommand)).rejects.toThrow(/uv/i);
   });
 });
