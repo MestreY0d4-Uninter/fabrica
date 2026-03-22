@@ -163,7 +163,7 @@ describe("telegram bootstrap hook", () => {
       { channelId: "telegram", conversationId: "6951571380" },
     );
 
-    expect(mockRunPipeline).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
     expect(mockRunPipeline.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
       raw_idea: expect.stringContaining("Uma CLI para gerar senhas."),
       metadata: expect.objectContaining({
@@ -174,7 +174,7 @@ describe("telegram bootstrap hook", () => {
         repo_url: null,
       }),
     }));
-    expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
     expect(mockProjectTick).toHaveBeenCalledTimes(1);
     expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("-1003709213169");
     expect(sendMessageTelegram.mock.calls[0]?.[2]).toEqual(expect.objectContaining({
@@ -217,6 +217,9 @@ describe("telegram bootstrap hook", () => {
       { content: completeContent, metadata: {} },
       { channelId: "telegram", conversationId: "6951571380" },
     );
+    // Wait for first pipeline to complete and write "completed" status to session file
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
 
     // Second identical message — same request hash, status is "completed" → deduplicated
     await handler?.(
@@ -264,6 +267,8 @@ describe("telegram bootstrap hook", () => {
       },
       { channelId: "telegram", conversationId: "6951571380" },
     );
+    // Wait for first pipeline to complete before sending different request
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
 
     await handler?.(
       {
@@ -278,8 +283,7 @@ describe("telegram bootstrap hook", () => {
       },
       { channelId: "telegram", conversationId: "6951571380" },
     );
-
-    expect(mockRunPipeline).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(2), { timeout: 2000 });
   });
 
   it("fails closed when pipeline succeeds without topic routing", async () => {
@@ -313,8 +317,7 @@ describe("telegram bootstrap hook", () => {
       },
       { channelId: "telegram", conversationId: "6951571380" },
     );
-
-    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2000 });
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("faltou a associacao obrigatoria com um topico Telegram");
     expect(mockProjectTick).not.toHaveBeenCalled();
   });
@@ -350,8 +353,7 @@ describe("telegram bootstrap hook", () => {
       },
       { channelId: "telegram", conversationId: "6951571380" },
     );
-
-    expect(mockRunPipeline).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
     expect(mockRunPipeline.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
       raw_idea: "Uma CLI em Python que gere senhas aleatorias no terminal.",
       metadata: expect.objectContaining({
@@ -393,8 +395,7 @@ describe("telegram bootstrap hook", () => {
       },
       { channelId: "telegram", conversationId: "6951571380" },
     );
-
-    expect(mockRunPipeline).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
     expect(mockRunPipeline.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
       metadata: expect.objectContaining({
         project_name: "demo-node-cli",
@@ -435,8 +436,7 @@ describe("telegram bootstrap hook", () => {
       },
       { channelId: "telegram", conversationId: "6951571380" },
     );
-
-    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2000 });
     expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("faltou a associacao obrigatoria com um topico Telegram");
   });

@@ -474,9 +474,13 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       };
       ctx.logger.info(`[telegram-bootstrap] clarification resolved: stack=${mergedRequest.stackHint}, idea="${mergedRequest.rawIdea}" (conversation: ${conversationId})`);
       // Continue with merged request — fall through with pre-populated data
-      await continueBootstrap(ctx, conversationId, workspaceDir, mergedRequest, existingSession.sourceRoute ?? {
+      // Fire-and-forget: session suppression is already in place (suppressUntil set above).
+      // Awaiting the full pipeline in the event handler blocks all Telegram message processing.
+      continueBootstrap(ctx, conversationId, workspaceDir, mergedRequest, existingSession.sourceRoute ?? {
         channel: "telegram",
         channelId: conversationId,
+      }).catch((err) => {
+        logBootstrapWarning(ctx, `[telegram-bootstrap] unhandled pipeline error: ${err instanceof Error ? err.message : String(err)}`);
       });
       return;
     }
@@ -499,9 +503,17 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
         ctx.logger.info(`[telegram-bootstrap] duplicate completed DM ignored for conversation ${conversationId}`);
         return;
       }
-      if (sessionForHash.status !== "failed") {
+      // Allow restart if pipeline is stuck in "received" with an expired suppress window.
+      // This happens when the gateway restarts mid-pipeline (session never reached "failed").
+      const isExpiredReceived =
+        sessionForHash.status === "received" &&
+        Date.parse(sessionForHash.suppressUntil) < Date.now();
+      if (sessionForHash.status !== "failed" && !isExpiredReceived) {
         ctx.logger.info(`[telegram-bootstrap] duplicate in-flight DM ignored for conversation ${conversationId}`);
         return;
+      }
+      if (isExpiredReceived) {
+        ctx.logger.info(`[telegram-bootstrap] stale received session (expired) — restarting pipeline for conversation ${conversationId}`);
       }
     }
 
@@ -529,9 +541,13 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       return;
     }
 
-    await continueBootstrap(ctx, conversationId, workspaceDir, incomingRequest, {
+    // Fire-and-forget: session suppression is already in place (suppressUntil set above).
+    // Awaiting the full pipeline in the event handler blocks all Telegram message processing.
+    continueBootstrap(ctx, conversationId, workspaceDir, incomingRequest, {
       channel: "telegram",
       channelId: conversationId,
+    }).catch((err) => {
+      logBootstrapWarning(ctx, `[telegram-bootstrap] unhandled pipeline error: ${err instanceof Error ? err.message : String(err)}`);
     });
   });
 }

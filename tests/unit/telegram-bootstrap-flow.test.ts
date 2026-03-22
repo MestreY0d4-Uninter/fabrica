@@ -128,7 +128,7 @@ describe("telegram bootstrap clarification flow", () => {
     );
 
     // Pipeline should be called with the original rawIdea
-    expect(mockRunPipeline).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
     const pipelinePayload = mockRunPipeline.mock.calls[0]?.[0];
     expect(pipelinePayload.raw_idea).toContain("CLI de tarefas");
     // Stack should be resolved to python-cli
@@ -187,7 +187,7 @@ describe("telegram bootstrap clarification flow", () => {
       { channelId: "telegram", conversationId: CONVERSATION_ID },
     );
 
-    expect(mockRunPipeline).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
     const pipelinePayload = mockRunPipeline.mock.calls[0]?.[0];
     expect(pipelinePayload.metadata.stack_hint).toBe("node-cli");
     // original idea preserved
@@ -240,7 +240,7 @@ describe("telegram bootstrap clarification flow", () => {
     // Since session is expired, the new message is a bootstrap candidate that should proceed
     // (either to clarification for the new request, or directly to pipeline if stack is present)
     // In this case, Stack is provided so it should go to pipeline
-    expect(mockRunPipeline).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
     const pipelinePayload = mockRunPipeline.mock.calls[0]?.[0];
     // The pipeline gets the NEW idea, not the old one
     expect(pipelinePayload.raw_idea).toContain("outra ideia");
