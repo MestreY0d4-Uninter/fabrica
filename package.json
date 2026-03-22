@@ -39,6 +39,14 @@
     "test:watch": "vitest",
     "prepublishOnly": "npm run build && npm test"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MestreY0d4-Uninter/fabrica.git"
+  },
+  "homepage": "https://github.com/MestreY0d4-Uninter/fabrica#readme",
+  "bugs": {
+    "url": "https://github.com/MestreY0d4-Uninter/fabrica/issues"
+  },
   "peerDependencies": {
     "openclaw": "^2026.3.13"
   },
