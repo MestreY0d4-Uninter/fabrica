@@ -45,6 +45,16 @@ await esbuild.build({
 
 console.log(`Built dist/index.js (${pkg.name}@${pkg.version})`);
 
+// Copy intake config JSON files to configs/ (loaded at runtime via createRequire).
+// In the bundle, import.meta.url resolves to dist/index.js, so ../configs/ = <package_root>/configs/.
+await fs.mkdir(path.resolve("configs"), { recursive: true });
+const intakeConfigsDir = path.resolve("lib/intake/configs");
+const intakeConfigFiles = (await fs.readdir(intakeConfigsDir)).filter(f => f.endsWith(".json"));
+await Promise.all(
+  intakeConfigFiles.map(f => fs.copyFile(path.join(intakeConfigsDir, f), path.resolve("configs", f)))
+);
+console.log(`Copied ${intakeConfigFiles.length} intake config files to configs/`);
+
 // Clean up stale worker files from previous builds.
 await fs.rm(path.resolve("dist/worker.js"), { force: true });
 await fs.rm(path.resolve("dist/lib/worker.js"), { force: true });

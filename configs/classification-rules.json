@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "default_type": "feature",
+  "confidence_threshold": 0.6,
+  "types": {
+    "bugfix": {
+      "keywords": ["bug", "fix", "erro", "error", "crash", "broken", "quebrado", "falha", "fail", "exception", "not working", "nao funciona", "não funciona", "regression", "regressão"],
+      "patterns": ["(?i)\\b(fix|corrig|resolv|repair|patch)\\b", "(?i)\\b(bug|erro|falha|crash|quebr)\\b"],
+      "weight": 1.2
+    },
+    "feature": {
+      "keywords": ["add", "create", "new", "implement", "build", "fazer", "criar", "adicionar", "novo", "nova", "implementar", "construir", "develop", "desenvolver", "want", "quero", "need", "preciso"],
+      "patterns": ["(?i)\\b(add|creat|implement|build|desenvolv|faz)\\b", "(?i)\\b(nov[oa]|new)\\b"],
+      "weight": 1.0
+    },
+    "refactor": {
+      "keywords": ["refactor", "refatorar", "cleanup", "clean up", "reorganize", "reorganizar", "simplify", "simplificar", "extract", "extrair", "rename", "renomear", "move", "mover", "split", "dividir", "merge", "consolidar"],
+      "patterns": ["(?i)\\b(refactor|refator|cleanup|reorganiz|simplif)\\b", "(?i)\\b(extract|split|merg|consolid)\\b"],
+      "weight": 0.9
+    },
+    "research": {
+      "keywords": ["research", "pesquisar", "investigate", "investigar", "explore", "explorar", "evaluate", "avaliar", "compare", "comparar", "spike", "poc", "proof of concept", "prova de conceito", "prototype", "protótipo", "study", "estudar"],
+      "patterns": ["(?i)\\b(research|pesquis|investigat|explor|avaliar|compar)\\b", "(?i)\\b(spike|poc|proof.of.concept|prova.de.conceito|protot)\\b"],
+      "weight": 0.8
+    },
+    "infra": {
+      "keywords": ["deploy", "ci", "cd", "pipeline", "docker", "kubernetes", "k8s", "terraform", "ansible", "monitoring", "monitoramento", "logging", "infrastructure", "infraestrutura", "devops", "server", "servidor", "database", "banco de dados", "migration", "migração", "config", "configuração", "env", "environment", "ambiente"],
+      "patterns": ["(?i)\\b(deploy|docker|k8s|kubernetes|terraform|ansible|ci.?cd)\\b", "(?i)\\b(infra|devops|pipeline|migration|migra[çc])\\b"],
+      "weight": 0.9
+    }
+  }
+}
