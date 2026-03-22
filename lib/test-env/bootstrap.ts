@@ -268,10 +268,14 @@ if [ ! -x ".venv/bin/python" ]; then
   echo "[qa] .venv not found — creating..."
   command -v uv >/dev/null 2>&1 || export PATH="$HOME/.local/bin:$PATH"
   uv venv .venv
-  if python3 -c "import tomllib; t=tomllib.load(open('pyproject.toml','rb')); t['project']['optional-dependencies']['dev']" 2>/dev/null; then
-    uv pip install -e '.[dev]' --python .venv/bin/python
-  else
-    uv pip install -e . --python .venv/bin/python
+  if [ -f "pyproject.toml" ]; then
+    if python3 -c "import tomllib; t=tomllib.load(open('pyproject.toml','rb')); t['project']['optional-dependencies']['dev']" 2>/dev/null; then
+      uv pip install -e '.[dev]' --python .venv/bin/python
+    else
+      uv pip install -e . --python .venv/bin/python
+    fi
+  elif [ -f "requirements.txt" ]; then
+    uv pip install -r requirements.txt --python .venv/bin/python
   fi
 fi
 export PATH=".venv/bin:$PATH"

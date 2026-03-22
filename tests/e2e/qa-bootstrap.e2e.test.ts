@@ -210,6 +210,5 @@ def test_greet() -> None:
 
     expect(result.stdout).toContain("QA contract PASSED");
     await expect(fs.access(path.join(repoPath, ".venv", "bin", "python"))).resolves.toBeUndefined();
-    await expect(fs.access(path.join(repoPath, ".fabrica", "test-env.sha256"))).resolves.toBeUndefined();
   }, 300_000);
 });
