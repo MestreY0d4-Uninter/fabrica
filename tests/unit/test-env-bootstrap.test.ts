@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  buildQaBootstrapPrelude,
   ensureProjectTestEnvironment,
   ensurePythonToolchain,
   ensureUv,
@@ -329,6 +330,39 @@ describe("ensurePythonToolchain", () => {
     const result = await ensurePythonToolchain(runCommand, tmpHome);
     expect(result).toBe(toolchainPath);
     expect(commandsRun.some(c => c.includes("uv venv"))).toBe(true);
+  });
+});
+
+describe("buildQaBootstrapPrelude", () => {
+  it("Python prelude includes TOOLCHAIN and .venv in PATH", () => {
+    const prelude = buildQaBootstrapPrelude("python-cli");
+    expect(prelude).toContain('TOOLCHAIN="$HOME/.openclaw/toolchains/python"');
+    expect(prelude).toContain('export PATH="$TOOLCHAIN/bin:$PATH"');
+    expect(prelude).toContain('export PATH=".venv/bin:$PATH"');
+    // Should NOT reference old qa-venv
+    expect(prelude).not.toContain("qa-venv");
+  });
+
+  it("Python prelude has self-healing uv install fallback", () => {
+    const prelude = buildQaBootstrapPrelude("python-cli");
+    expect(prelude).toContain("astral.sh/uv/install.sh");
+    expect(prelude).toContain("uv venv");
+    expect(prelude).toContain("ruff");
+    expect(prelude).toContain("mypy");
+    expect(prelude).toContain("pip-audit");
+  });
+
+  it("Python prelude detects pyproject dev extras properly", () => {
+    const prelude = buildQaBootstrapPrelude("flask");
+    expect(prelude).toContain("tomllib");
+    expect(prelude).toContain("optional-dependencies");
+    expect(prelude).toContain("uv pip install -e");
+  });
+
+  it("Node prelude is unchanged", () => {
+    const prelude = buildQaBootstrapPrelude("node-cli");
+    expect(prelude).not.toContain("TOOLCHAIN");
+    expect(prelude).toContain("node_modules");
   });
 });
 

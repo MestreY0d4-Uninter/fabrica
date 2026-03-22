@@ -249,89 +249,32 @@ export PATH="$ROOT_DIR/node_modules/.bin:$PATH"
 
 function buildPythonBootstrapPrelude(): string {
   return `${buildCommonScriptPrelude()}
-PYTHON_FILES=()
-for candidate in pyproject.toml requirements.txt uv.lock; do
-  if [[ -f "$candidate" ]]; then
-    PYTHON_FILES+=("$candidate")
-  fi
-done
 
-if [[ \${#PYTHON_FILES[@]} -eq 0 ]]; then
-  echo "Missing pyproject.toml/requirements.txt for Python QA bootstrap" >&2
-  exit 2
+# --- Shared toolchain (ruff, mypy, pip-audit) ---
+TOOLCHAIN="$HOME/.openclaw/toolchains/python"
+if [ ! -x "$TOOLCHAIN/bin/ruff" ]; then
+  echo "[qa] Toolchain not found — provisioning..."
+  command -v uv >/dev/null 2>&1 || {
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+  }
+  uv venv "$TOOLCHAIN"
+  uv pip install -p "$TOOLCHAIN/bin/python" ${PYTHON_TOOLCHAIN_PACKAGES.join(" ")}
 fi
+export PATH="$TOOLCHAIN/bin:$PATH"
 
-BOOTSTRAP_FINGERPRINT="$(hash_files "\${PYTHON_FILES[@]}")"
-VENV_DIR="$ROOT_DIR/.venv"
-
-create_python_venv() {
-  if command -v python3 >/dev/null 2>&1; then
-    PYTHON_BIN="python3"
-  elif command -v python >/dev/null 2>&1; then
-    PYTHON_BIN="python"
+# --- Project venv (runtime deps + pytest) ---
+if [ ! -x ".venv/bin/python" ]; then
+  echo "[qa] .venv not found — creating..."
+  command -v uv >/dev/null 2>&1 || export PATH="$HOME/.local/bin:$PATH"
+  uv venv .venv
+  if python3 -c "import tomllib; t=tomllib.load(open('pyproject.toml','rb')); t['project']['optional-dependencies']['dev']" 2>/dev/null; then
+    uv pip install -e '.[dev]' --python .venv/bin/python
   else
-    echo "Python interpreter not found for QA bootstrap" >&2
-    exit 2
+    uv pip install -e . --python .venv/bin/python
   fi
-
-  if "$PYTHON_BIN" -m venv "$VENV_DIR"; then
-    return 0
-  fi
-
-  if ! "$PYTHON_BIN" -m pip --version >/dev/null 2>&1; then
-    echo "Python venv bootstrap failed and pip is unavailable for virtualenv fallback" >&2
-    exit 2
-  fi
-
-  PY_BOOT_DIR="$ROOT_DIR/${BOOTSTRAP_STATE_DIR}/python-bootstrap"
-  mkdir -p "$PY_BOOT_DIR"
-  "$PYTHON_BIN" -m pip install --disable-pip-version-check --target "$PY_BOOT_DIR" "virtualenv>=20.26.0"
-  PYTHONPATH="$PY_BOOT_DIR\${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m virtualenv "$VENV_DIR"
-}
-
-if [[ -x "$VENV_DIR/bin/python" && -f "$STATE_FILE" ]] && [[ "$(cat "$STATE_FILE")" == "$BOOTSTRAP_FINGERPRINT" ]]; then
-  echo "Python test environment already prepared"
-else
-  if [[ -f uv.lock ]]; then
-    require_cmd uv "uv.lock detected but uv is not installed"
-    uv sync --locked
-  elif command -v uv >/dev/null 2>&1; then
-    uv venv .venv
-
-    if [[ -f requirements.txt ]]; then
-      uv pip install --python .venv/bin/python -r requirements.txt
-    fi
-
-    if [[ -f pyproject.toml ]]; then
-      if grep -Eq '^[[:space:]]*dev[[:space:]]*=' pyproject.toml; then
-        uv pip install --python .venv/bin/python -e '.[dev]'
-      else
-        uv pip install --python .venv/bin/python -e .
-      fi
-    fi
-  else
-    create_python_venv
-    "$VENV_DIR/bin/python" -m pip install --upgrade pip
-
-    if [[ -f requirements.txt ]]; then
-      "$VENV_DIR/bin/python" -m pip install -r requirements.txt
-    fi
-
-    if [[ -f pyproject.toml ]]; then
-      if grep -Eq '^[[:space:]]*dev[[:space:]]*=' pyproject.toml; then
-        "$VENV_DIR/bin/python" -m pip install -e '.[dev]'
-      else
-        "$VENV_DIR/bin/python" -m pip install -e .
-      fi
-    fi
-  fi
-
-  printf '%s' "$BOOTSTRAP_FINGERPRINT" > "$STATE_FILE"
 fi
-
-if [[ -d "$VENV_DIR/bin" ]]; then
-  export PATH="$VENV_DIR/bin:$PATH"
-fi
+export PATH=".venv/bin:$PATH"
 `;
 }
 
