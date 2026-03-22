@@ -273,4 +273,16 @@ describe("doctor — fix mode", () => {
     // ensureDefaultFiles should have recreated AGENTS.md
     expect(result.fixed).toBeGreaterThanOrEqual(0);
   });
+
+  it("fixes all errors in a single --fix pass on empty workspace", async () => {
+    // Empty workspace — simulates fresh install (no data dir, no files)
+    const result = await runDoctor({ workspacePath: tmpDir, fix: true });
+
+    // All fixable checks should be resolved in one pass
+    expect(result.errors).toBe(0);
+    expect(result.fixed).toBeGreaterThan(0);
+    // Verify the fixed checks are now OK
+    const stillBroken = result.checks.filter(c => c.severity === "error");
+    expect(stillBroken).toEqual([]);
+  });
 });

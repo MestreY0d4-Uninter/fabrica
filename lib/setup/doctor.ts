@@ -113,17 +113,29 @@ export async function runDoctor(opts: DoctorOpts): Promise<DoctorResult> {
       try {
         const { ensureDefaultFiles } = await import("./workspace.js");
         await ensureDefaultFiles(workspacePath);
-        // Re-check what got fixed
+        // Re-check all failed checks (files, dirs, and config)
         for (const check of checks) {
-          if (check.severity === "error" && check.name.startsWith("file:")) {
+          if (check.severity !== "error") continue;
+          let recheckOk = false;
+          if (check.name.startsWith("file:")) {
             const recheckPath = check.name.replace("file:", "");
+            try { await fs.access(recheckPath); recheckOk = true; } catch { /* still missing */ }
+          } else if (check.name.startsWith("dir:")) {
+            const recheckPath = check.name.replace("dir:", "");
             try {
-              await fs.access(recheckPath);
-              check.fixed = true;
-              check.severity = "ok";
-              check.message += " (fixed)";
-              fixed++;
+              const stat = await fs.stat(recheckPath);
+              recheckOk = stat.isDirectory();
             } catch { /* still missing */ }
+          } else if (check.name === "yaml:workflow") {
+            recheckOk = (await checkWorkflowYaml(dataDir)).severity === "ok";
+          } else if (check.name === "json:projects") {
+            recheckOk = (await checkProjectsJson(dataDir)).severity === "ok";
+          }
+          if (recheckOk) {
+            check.fixed = true;
+            check.severity = "ok";
+            check.message += " (fixed)";
+            fixed++;
           }
         }
       } catch { /* ensureDefaultFiles failed */ }
