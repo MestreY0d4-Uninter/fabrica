@@ -759,14 +759,14 @@ export class GitHubProvider implements IssueProvider {
 
   async listIssuesByLabel(label: StateLabel): Promise<Issue[]> {
     try {
-      const raw = await this.gh(["issue", "list", "--label", label, "--state", "open", "--json", "number,title,body,labels,state,url"]);
+      const raw = await this.gh(["issue", "list", "--label", label, "--state", "open", "-L", "200", "--json", "number,title,body,labels,state,url"]);
       return (JSON.parse(raw) as GhIssue[]).map(toIssue);
     } catch { return []; }
   }
 
   async listIssues(opts?: { label?: string; state?: "open" | "closed" | "all" }): Promise<Issue[]> {
     try {
-      const args = ["issue", "list", "--state", opts?.state ?? "open", "--json", "number,title,body,labels,state,url"];
+      const args = ["issue", "list", "--state", opts?.state ?? "open", "-L", "200", "--json", "number,title,body,labels,state,url"];
       if (opts?.label) args.push("--label", opts.label);
       const raw = await this.gh(args);
       return (JSON.parse(raw) as GhIssue[]).map(toIssue);
