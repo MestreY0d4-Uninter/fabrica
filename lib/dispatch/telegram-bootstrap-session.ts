@@ -52,6 +52,7 @@ export type TelegramBootstrapSession = {
 };
 
 const SESSION_TTL_MS = 10 * 60_000;
+const CLASSIFYING_TTL_MS = 15_000; // 15s — matches LLM timeout
 
 function sessionsDir(workspaceDir: string): string {
   return path.join(workspaceDir, DATA_DIR, "bootstrap-sessions");
@@ -98,8 +99,9 @@ export function buildBootstrapRequestHash(input: {
   return buildBootstrapRequestFingerprint(input);
 }
 
-function nextSuppressUntil(): string {
-  return new Date(Date.now() + SESSION_TTL_MS).toISOString();
+function nextSuppressUntil(status?: TelegramBootstrapStatus): string {
+  const ttl = status === "classifying" ? CLASSIFYING_TTL_MS : SESSION_TTL_MS;
+  return new Date(Date.now() + ttl).toISOString();
 }
 
 export async function readTelegramBootstrapSession(
@@ -203,7 +205,7 @@ export async function upsertTelegramBootstrapSession(
       : existing?.orphanedArtifacts ?? null,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
-    suppressUntil: nextSuppressUntil(),
+    suppressUntil: nextSuppressUntil(input.status),
     error: input.error ?? null,
   };
   await writeTelegramBootstrapSession(workspaceDir, session);

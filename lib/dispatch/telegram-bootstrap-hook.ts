@@ -625,10 +625,15 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       return;
     }
 
-    // Check for existing clarifying session BEFORE isBootstrapCandidate()
+    // Layer 1: Active clarifying OR classifying session?
     const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
     // If the clarifying session has expired, treat any new bootstrap candidate as a fresh request
     const sessionIsExpired = existingSession != null && Date.parse(existingSession.suppressUntil) < Date.now();
+    if (existingSession && !sessionIsExpired && existingSession.status === "classifying") {
+      // LLM classification is in progress — suppress duplicate messages
+      ctx.logger.info(`[telegram-bootstrap] LLM classification in progress for ${conversationId}, ignoring concurrent message`);
+      return;
+    }
     if (existingSession?.status === "clarifying" && !sessionIsExpired) {
       const clarResult = parseClarificationResponse(content, existingSession);
       if (!clarResult.recognized) {
@@ -698,6 +703,9 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       const isExpiredReceived =
         sessionForHash.status === "received" &&
         Date.parse(sessionForHash.suppressUntil) < Date.now();
+      // Note: unlike Layer 3, this guard intentionally does NOT exclude "classifying" status.
+      // If a "classifying" session has a matching hash and is still active, Layer 2 is correctly
+      // blocked — this avoids double-firing during the LLM classification window.
       if (sessionForHash.status !== "failed" && !isExpiredReceived) {
         ctx.logger.info(`[telegram-bootstrap] duplicate in-flight DM ignored for conversation ${conversationId}`);
         return;
