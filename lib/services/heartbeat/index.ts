@@ -22,6 +22,8 @@ import { HEARTBEAT_DEFAULTS, resolveHeartbeatConfig } from "./config.js";
 import type { HeartbeatConfig } from "./config.js";
 import { processPendingGitHubEventsForWorkspace } from "../../github/process-events.js";
 import { getLifecycleService } from "../../machines/lifecycle-service.js";
+import { raceWithTimeout } from "../../utils/async.js";
+export { raceWithTimeout } from "../../utils/async.js";
 
 export { HEARTBEAT_DEFAULTS };
 import { tick, type TickMode } from "./tick-runner.js";
@@ -78,34 +80,6 @@ export function registerHeartbeatService(api: OpenClawPluginApi, pluginCtx: Plug
       }
     },
   });
-}
-
-// ---------------------------------------------------------------------------
-// Timeout utility (F1-2)
-// ---------------------------------------------------------------------------
-
-/**
- * Race a promise against a timeout. Returns "timeout" if the timeout fires first.
- * Exported for testability (F1-2).
- */
-export async function raceWithTimeout<T>(
-  fn: () => Promise<T>,
-  timeoutMs: number,
-  onTimeout: () => void,
-): Promise<T | "timeout"> {
-  let timer: ReturnType<typeof setTimeout>;
-  const timeoutPromise = new Promise<"timeout">((resolve) => {
-    timer = setTimeout(() => {
-      onTimeout();
-      resolve("timeout");
-    }, timeoutMs);
-  });
-  try {
-    const result = await Promise.race([fn(), timeoutPromise]);
-    return result;
-  } finally {
-    clearTimeout(timer!);
-  }
 }
 
 const DEFAULT_TICK_TIMEOUT_MS = 50_000;
