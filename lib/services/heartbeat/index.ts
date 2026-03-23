@@ -173,9 +173,12 @@ async function runHeartbeatTick(
           _anyTickRunning = false;
         });
       } else {
-        // tickPromise is undefined — this should never happen in single-threaded JS
-        // but if it does, log and let the finally() on runHeartbeatTick handle cleanup
-        logger.error("tick_mutex: tickPromise undefined in timeout handler — this is a bug");
+        // tickPromise is undefined — safety release to prevent permanent deadlock.
+        // The finally() block at the end skips release when timedOut=true, so we must
+        // release here to avoid permanently locking the heartbeat.
+        logger.error("tick_mutex: tickPromise undefined in timeout handler — forcing mutex release");
+        _tickRunning[mode] = false;
+        _anyTickRunning = false;
       }
     });
     void raceResult; // used only for logging; mutex lifecycle handled above/below
