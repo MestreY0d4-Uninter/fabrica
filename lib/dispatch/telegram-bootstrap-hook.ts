@@ -8,6 +8,9 @@ import { readFabricaTelegramConfig } from "../telegram/config.js";
 import { readProjects } from "../projects/index.js";
 import { discoverAgents } from "../services/heartbeat/agent-discovery.js";
 import { projectTick } from "../services/tick.js";
+import { resolveOpenClawCli } from "../intake/lib/runtime-paths.js";
+import { extractJsonFromStdout } from "../intake/lib/extract-json.js";
+import { z } from "zod";
 import {
   buildBootstrapRequestHash,
   readTelegramBootstrapSession,
@@ -100,7 +103,73 @@ function isAmbiguousCandidate(text: string): boolean {
   return softwareCue;
 }
 
-export { isAmbiguousCandidate as _testIsAmbiguousCandidate };
+type DmIntentClassification = {
+  intent: "create_project" | "other";
+  confidence: number;
+  stackHint?: string | null;
+  projectSlug?: string | null;
+};
+
+const DmIntentSchema = z.object({
+  intent: z.enum(["create_project", "other"]),
+  confidence: z.number().min(0).max(1),
+  stackHint: z.string().nullable().optional(),
+  projectSlug: z.string().nullable().optional(),
+});
+
+const CLASSIFY_PROMPT_TEMPLATE = `Classify this Telegram DM. Is the user asking to create/build a new software project, or is it something else (question, greeting, status check)?
+
+Message: "$CONTENT"
+
+Return ONLY valid JSON:
+{"intent": "create_project" | "other", "confidence": 0.0-1.0, "stackHint": "<detected stack or null>", "projectSlug": "<suggested slug or null>"}
+
+Examples:
+- "Cria uma CLI Python que valida CPF" → {"intent":"create_project","confidence":0.95,"stackHint":"python-cli","projectSlug":"validador-cpf-cli"}
+- "Build me a REST API for tasks" → {"intent":"create_project","confidence":0.9,"stackHint":"fastapi","projectSlug":"task-api"}
+- "How's the project going?" → {"intent":"other","confidence":0.95,"stackHint":null,"projectSlug":null}
+- "Oi, tudo bem?" → {"intent":"other","confidence":0.99,"stackHint":null,"projectSlug":null}
+- "Me faz um app que converte temperaturas" → {"intent":"create_project","confidence":0.9,"stackHint":null,"projectSlug":"conversor-temperaturas"}`;
+
+async function classifyDmIntent(
+  ctx: PluginContext,
+  content: string,
+  workspaceDir: string,
+): Promise<DmIntentClassification | null> {
+  try {
+    const truncated = content.slice(0, MAX_CLASSIFY_LENGTH);
+    const prompt = CLASSIFY_PROMPT_TEMPLATE.replace("$CONTENT", truncated.replace(/"/g, '\\"'));
+    const cliPath = resolveOpenClawCli({ homeDir: homedir(), workspaceDir });
+    const sessionId = `dm-classify-${Date.now()}`;
+
+    const result = await ctx.runCommand(
+      [cliPath, "agent", "--local", "-m", prompt, "--session-id", sessionId, "--json"],
+      { timeoutMs: 15_000 },
+    );
+
+    const stdout = result.stdout ?? "";
+    if (!stdout.trim()) return null;
+
+    const parsed = extractJsonFromStdout(stdout);
+    if (!parsed) return null;
+
+    // The LLM response wraps in { payloads: [{ text: "..." }] }
+    const text = parsed?.payloads?.[0]?.text;
+    const jsonStr = text
+      ? text.replace(/^```(json)?/gm, "").replace(/```$/gm, "").trim()
+      : JSON.stringify(parsed);
+
+    const intentData = JSON.parse(jsonStr);
+    const validated = DmIntentSchema.safeParse(intentData);
+    if (!validated.success) return null;
+
+    return validated.data;
+  } catch {
+    return null;
+  }
+}
+
+export { isAmbiguousCandidate as _testIsAmbiguousCandidate, classifyDmIntent as _testClassifyDmIntent };
 
 function isBootstrapCandidate(text: string): boolean {
   const lower = text.toLowerCase();

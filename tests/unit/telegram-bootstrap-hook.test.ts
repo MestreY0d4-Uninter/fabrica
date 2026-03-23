@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate } from "../../lib/dispatch/telegram-bootstrap-hook.js";
+import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate, _testClassifyDmIntent as classifyDmIntent } from "../../lib/dispatch/telegram-bootstrap-hook.js";
 import {
   upsertTelegramBootstrapSession,
   readTelegramBootstrapSession,
@@ -523,5 +523,146 @@ describe("isAmbiguousCandidate", () => {
     expect(isAmbiguousCandidate("need a tool for data processing")).toBe(true);
     expect(isAmbiguousCandidate("build me a system for tracking")).toBe(true);
     expect(isAmbiguousCandidate("quero um programa de contabilidade")).toBe(true);
+  });
+});
+
+describe("classifyDmIntent", () => {
+  const ctx = {
+    pluginConfig: {
+      telegram: {
+        bootstrapDmEnabled: true,
+        projectsForumChatId: "-1003709213169",
+      },
+    },
+    config: {
+      agents: {
+        defaults: {
+          workspace: "/tmp/workspace",
+        },
+      },
+    },
+    logger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+    },
+    runtime: {
+      channel: {
+        telegram: {
+          sendMessageTelegram: vi.fn(async () => undefined),
+        },
+      },
+    },
+    runCommand: vi.fn(async () => ({ stdout: "", stderr: "", code: 0 })),
+  } as any;
+
+  it("returns create_project classification for a valid LLM response", async () => {
+    const mockCtx = {
+      ...ctx,
+      runCommand: vi.fn(async () => ({
+        stdout: JSON.stringify({
+          payloads: [{
+            text: '{"intent":"create_project","confidence":0.95,"stackHint":"python-cli","projectSlug":"cpf-validator"}',
+          }],
+        }),
+        stderr: "",
+        code: 0,
+      })),
+    };
+
+    const result = await classifyDmIntent(mockCtx as any, "Cria uma CLI Python que valida CPF", "/tmp/workspace");
+    expect(result).toEqual({
+      intent: "create_project",
+      confidence: 0.95,
+      stackHint: "python-cli",
+      projectSlug: "cpf-validator",
+    });
+  });
+
+  it("returns other classification for non-project messages", async () => {
+    const mockCtx = {
+      ...ctx,
+      runCommand: vi.fn(async () => ({
+        stdout: JSON.stringify({
+          payloads: [{
+            text: '{"intent":"other","confidence":0.99,"stackHint":null,"projectSlug":null}',
+          }],
+        }),
+        stderr: "",
+        code: 0,
+      })),
+    };
+
+    const result = await classifyDmIntent(mockCtx as any, "Oi, tudo bem?", "/tmp/workspace");
+    expect(result).toEqual({
+      intent: "other",
+      confidence: 0.99,
+      stackHint: null,
+      projectSlug: null,
+    });
+  });
+
+  it("returns null when LLM throws (timeout/error)", async () => {
+    const mockCtx = {
+      ...ctx,
+      runCommand: vi.fn(async () => { throw new Error("timeout"); }),
+    };
+
+    const result = await classifyDmIntent(mockCtx as any, "Build me a tool", "/tmp/workspace");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when LLM returns invalid JSON", async () => {
+    const mockCtx = {
+      ...ctx,
+      runCommand: vi.fn(async () => ({
+        stdout: "not json at all",
+        stderr: "",
+        code: 0,
+      })),
+    };
+
+    const result = await classifyDmIntent(mockCtx as any, "Build me a tool", "/tmp/workspace");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when LLM response fails Zod validation", async () => {
+    const mockCtx = {
+      ...ctx,
+      runCommand: vi.fn(async () => ({
+        stdout: JSON.stringify({
+          payloads: [{
+            text: '{"intent":"maybe","confidence":"high"}',
+          }],
+        }),
+        stderr: "",
+        code: 0,
+      })),
+    };
+
+    const result = await classifyDmIntent(mockCtx as any, "Build me a tool", "/tmp/workspace");
+    expect(result).toBeNull();
+  });
+
+  it("returns low-confidence classification without filtering (caller decides threshold)", async () => {
+    const mockCtx = {
+      ...ctx,
+      runCommand: vi.fn(async () => ({
+        stdout: JSON.stringify({
+          payloads: [{
+            text: '{"intent":"create_project","confidence":0.5,"stackHint":null,"projectSlug":null}',
+          }],
+        }),
+        stderr: "",
+        code: 0,
+      })),
+    };
+
+    const result = await classifyDmIntent(mockCtx as any, "I need something for tasks", "/tmp/workspace");
+    expect(result).toEqual({
+      intent: "create_project",
+      confidence: 0.5,
+      stackHint: null,
+      projectSlug: null,
+    });
   });
 });
