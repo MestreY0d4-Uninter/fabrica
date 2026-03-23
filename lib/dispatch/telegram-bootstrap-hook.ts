@@ -432,7 +432,22 @@ async function continueBootstrap(
   }
 
   const projectName = request.projectName ?? undefined;
-  const stackHint = request.stackHint!;
+  const stackHint = request.stackHint;
+  if (!stackHint) {
+    // stackHint missing after clarification — redirect to stack clarification.
+    const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
+    const lang: BootstrapLanguage = existingSession?.language ?? "pt";
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId,
+      rawIdea: request.rawIdea,
+      projectName: request.projectName,
+      status: "clarifying",
+      pendingClarification: "stack",
+      language: lang,
+    });
+    await sendTelegramText(ctx, conversationId, buildClarificationMessage(request, "stack", lang));
+    return;
+  }
 
   const candidateSlug = inferProjectSlug(projectName ?? request.rawIdea);
   if (candidateSlug) {
