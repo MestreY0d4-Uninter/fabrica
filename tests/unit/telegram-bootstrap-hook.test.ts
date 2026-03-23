@@ -106,10 +106,11 @@ describe("telegram bootstrap hook", () => {
     );
 
     expect(mockRunPipeline).not.toHaveBeenCalled();
-    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    // ack sent first, then clarification question
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
     expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
-    // Conversational clarification message — not a form
-    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("stack");
+    // Conversational clarification message — not a form (second call)
+    expect(String(sendMessageTelegram.mock.calls[1]?.[1])).toContain("stack");
   });
 
   it("suppresses the generic agent prompt when a bootstrap session is active", async () => {

@@ -707,6 +707,9 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       }
     }
 
+    // Immediate ack — user knows message was received before pipeline starts
+    await sendTelegramText(ctx, conversationId, "Recebi! Vou analisar e começar a montar o projeto...");
+
     const session = await upsertTelegramBootstrapSession(workspaceDir, {
       conversationId,
       ...incomingRequest,
@@ -730,9 +733,6 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       await sendTelegramText(ctx, conversationId, buildClarificationMessage(parsed, pendingClarification));
       return;
     }
-
-    // Immediate ack — user knows message was received before pipeline starts
-    await sendTelegramText(ctx, conversationId, "Recebi! Vou analisar e começar a montar o projeto...");
 
     // Fire-and-forget: session suppression is already in place (suppressUntil set above).
     // Awaiting the full pipeline in the event handler blocks all Telegram message processing.

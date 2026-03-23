@@ -115,9 +115,10 @@ describe("telegram bootstrap clarification flow", () => {
     );
 
     expect(mockRunPipeline).not.toHaveBeenCalled();
-    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
-    // Clarification was asked
-    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("stack");
+    // ack sent first, then clarification question
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
+    // Clarification was asked (second call)
+    expect(String(sendMessageTelegram.mock.calls[1]?.[1])).toContain("stack");
 
     sendMessageTelegram.mockClear();
 
@@ -142,7 +143,8 @@ describe("telegram bootstrap clarification flow", () => {
       { channelId: "telegram", conversationId: CONVERSATION_ID },
     );
 
-    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    // ack sent first, then clarification question
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
     sendMessageTelegram.mockClear();
 
     // Step 2: user sends an irrelevant message
@@ -178,7 +180,8 @@ describe("telegram bootstrap clarification flow", () => {
       { channelId: "telegram", conversationId: CONVERSATION_ID },
     );
 
-    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    // ack sent first, then clarification question
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
     sendMessageTelegram.mockClear();
 
     // Step 2: structured clarification response
@@ -212,7 +215,8 @@ describe("telegram bootstrap clarification flow", () => {
       { channelId: "telegram", conversationId: CONVERSATION_ID },
     );
 
-    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    // ack sent first, then clarification question
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
     sendMessageTelegram.mockClear();
 
     // Simulate session expiry: overwrite the session file with a past suppressUntil
