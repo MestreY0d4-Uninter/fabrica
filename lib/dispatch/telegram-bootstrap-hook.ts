@@ -94,7 +94,7 @@ function parseBootstrapRequest(text: string): BootstrapRequest {
 function isBootstrapCandidate(text: string): boolean {
   const lower = text.toLowerCase();
   if (/^\s*(project name|nome do projeto|repository url|repo url|stack)\s*:/im.test(text)) return true;
-  const createCue = /\b(crie|criar|create|register|registre|novo projeto|new project)\b/.test(lower);
+  const createCue = /\b(crie|cria|criar|create|register|registre|construa|desenvolva|novo projeto|new project)\b/.test(lower);
   const softwareCue = /\b(projeto|project|cli|api|app|aplicativo|servi[cç]o|library|biblioteca|repo|reposit[oó]rio)\b/.test(lower);
   return createCue && softwareCue;
 }
