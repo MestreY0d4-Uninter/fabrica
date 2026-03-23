@@ -658,7 +658,24 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       return;
     }
 
-    if (!isBootstrapCandidate(content)) return;
+    if (!isBootstrapCandidate(content)) {
+      // Layer 3: LLM for ambiguous cases (fire-and-forget)
+      if (isAmbiguousCandidate(content)) {
+        // Create session with "classifying" status to suppress agent response for this turn
+        await upsertTelegramBootstrapSession(workspaceDir, {
+          conversationId,
+          rawIdea: content,
+          sourceRoute: { channel: "telegram", channelId: conversationId },
+          status: "classifying",
+        });
+
+        // Fire-and-forget: LLM classify + bootstrap runs detached from event handler
+        classifyAndBootstrap(ctx, workspaceDir, conversationId, content).catch((err) => {
+          logBootstrapWarning(ctx, `[telegram-bootstrap] LLM classify error: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      }
+      return;
+    }
 
     const parsed = parseBootstrapRequest(content);
 
@@ -713,6 +730,9 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       await sendTelegramText(ctx, conversationId, buildClarificationMessage(parsed, pendingClarification));
       return;
     }
+
+    // Immediate ack — user knows message was received before pipeline starts
+    await sendTelegramText(ctx, conversationId, "Recebi! Vou analisar e começar a montar o projeto...");
 
     // Fire-and-forget: session suppression is already in place (suppressUntil set above).
     // Awaiting the full pipeline in the event handler blocks all Telegram message processing.

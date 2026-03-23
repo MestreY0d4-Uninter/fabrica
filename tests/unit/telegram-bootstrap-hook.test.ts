@@ -181,14 +181,15 @@ describe("telegram bootstrap hook", () => {
         repo_url: null,
       }),
     }));
-    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    // 3 sends: ack (calls[0]), topic kickoff (calls[1]), DM ack (calls[2])
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(3), { timeout: 2000 });
     expect(mockProjectTick).toHaveBeenCalledTimes(1);
-    expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("-1003709213169");
-    expect(sendMessageTelegram.mock.calls[0]?.[2]).toEqual(expect.objectContaining({
+    expect(sendMessageTelegram.mock.calls[1]?.[0]).toBe("-1003709213169");
+    expect(sendMessageTelegram.mock.calls[1]?.[2]).toEqual(expect.objectContaining({
       messageThreadId: 777,
     }));
-    expect(sendMessageTelegram.mock.calls[1]?.[0]).toBe("6951571380");
-    expect(String(sendMessageTelegram.mock.calls[1]?.[1])).toContain("Projeto \"demo-cli\" registrado.");
+    expect(sendMessageTelegram.mock.calls[2]?.[0]).toBe("6951571380");
+    expect(String(sendMessageTelegram.mock.calls[2]?.[1])).toContain("Projeto \"demo-cli\" registrado.");
   });
 
   it("ignores duplicate in-flight bootstrap requests with the same full request fingerprint", async () => {
@@ -226,7 +227,8 @@ describe("telegram bootstrap hook", () => {
     );
     // Wait for first pipeline to complete and write "completed" status to session file
     await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
-    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    // 3 sends: ack, topic kickoff, DM ack
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(3), { timeout: 2000 });
 
     // Second identical message — same request hash, status is "completed" → deduplicated
     await handler?.(
@@ -236,8 +238,8 @@ describe("telegram bootstrap hook", () => {
 
     // Pipeline called exactly once; second message was deduplicated
     expect(mockRunPipeline).toHaveBeenCalledTimes(1);
-    // 2 sends from the first call (topic kickoff + DM ack); none from the second
-    expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
+    // 3 sends from the first call (ack + topic kickoff + DM ack); none from the second
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(3);
   });
 
   it("reprocesses a completed DM when the full request changes even if the idea stays the same", async () => {
@@ -291,6 +293,8 @@ describe("telegram bootstrap hook", () => {
       { channelId: "telegram", conversationId: "6951571380" },
     );
     await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    // Drain both fire-and-forget pipelines: 3 sends each (ack + topic kickoff + DM ack) = 6 total
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(6), { timeout: 2000 });
   });
 
   it("fails closed when pipeline succeeds without topic routing", async () => {
@@ -324,8 +328,9 @@ describe("telegram bootstrap hook", () => {
       },
       { channelId: "telegram", conversationId: "6951571380" },
     );
-    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2000 });
-    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("faltou a associacao obrigatoria com um topico Telegram");
+    // 2 sends: ack (calls[0]), then error message (calls[1])
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    expect(String(sendMessageTelegram.mock.calls[1]?.[1])).toContain("faltou a associacao obrigatoria com um topico Telegram");
     expect(mockProjectTick).not.toHaveBeenCalled();
   });
 
@@ -368,6 +373,9 @@ describe("telegram bootstrap hook", () => {
         stack_hint: "python-cli",
       }),
     }));
+    // Drain fire-and-forget pipeline to prevent mock pollution in subsequent tests.
+    // 3 sends: ack (calls[0]), topic kickoff (calls[1]), DM ack (calls[2])
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(3), { timeout: 2000 });
   });
 
   it("detects node-cli from natural TypeScript CLI language instead of falling back to express", async () => {
@@ -409,6 +417,9 @@ describe("telegram bootstrap hook", () => {
         stack_hint: "node-cli",
       }),
     }));
+    // Drain fire-and-forget pipeline to prevent mock pollution in subsequent tests.
+    // 3 sends: ack (calls[0]), topic kickoff (calls[1]), DM ack (calls[2])
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(3), { timeout: 2000 });
   });
 
   it("fails closed when the pipeline returns success without a project topic", async () => {
@@ -443,9 +454,10 @@ describe("telegram bootstrap hook", () => {
       },
       { channelId: "telegram", conversationId: "6951571380" },
     );
-    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2000 });
-    expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
-    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("faltou a associacao obrigatoria com um topico Telegram");
+    // 2 sends: ack (calls[0]), then error message (calls[1])
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    expect(sendMessageTelegram.mock.calls[1]?.[0]).toBe("6951571380");
+    expect(String(sendMessageTelegram.mock.calls[1]?.[1])).toContain("faltou a associacao obrigatoria com um topico Telegram");
   });
 });
 
