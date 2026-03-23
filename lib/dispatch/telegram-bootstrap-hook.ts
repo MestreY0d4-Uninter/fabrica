@@ -197,7 +197,7 @@ async function classifyDmIntent(
   }
 }
 
-export { isAmbiguousCandidate as _testIsAmbiguousCandidate, classifyDmIntent as _testClassifyDmIntent };
+export { isAmbiguousCandidate as _testIsAmbiguousCandidate, classifyDmIntent as _testClassifyDmIntent, buildTopicDeepLink as _testBuildTopicDeepLink };
 
 function isBootstrapCandidate(text: string): boolean {
   const lower = text.toLowerCase();
@@ -264,6 +264,11 @@ function buildFollowUpClarification(session: TelegramBootstrapSession): string {
   return lang === "en"
     ? "Can you give me more details about what you want to build?"
     : "Pode me dar mais detalhes sobre o que você quer construir?";
+}
+
+function buildTopicDeepLink(chatId: string, topicId: number): string {
+  const stripped = chatId.replace(/^-100/, "");
+  return `https://t.me/c/${stripped}/${topicId}`;
 }
 
 function buildDmAck(projectName: string, topicLink: string, language: BootstrapLanguage = "pt"): string {
@@ -576,7 +581,7 @@ async function continueBootstrap(
         logBootstrapWarning(ctx, `[telegram-bootstrap] immediate projectTick failed: ${error instanceof Error ? error.message : String(error)}`);
       });
     }
-    await sendTelegramText(ctx, conversationId, buildDmAck(resolvedProjectName, `${projectChannelId}:${messageThreadId}`));
+    await sendTelegramText(ctx, conversationId, buildDmAck(resolvedProjectName, buildTopicDeepLink(String(projectChannelId), messageThreadId)));
     await upsertTelegramBootstrapSession(workspaceDir, {
       conversationId,
       ...incomingRequest,

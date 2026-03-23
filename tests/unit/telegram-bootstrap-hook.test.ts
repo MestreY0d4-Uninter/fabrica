@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate, _testClassifyDmIntent as classifyDmIntent } from "../../lib/dispatch/telegram-bootstrap-hook.js";
+import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate, _testClassifyDmIntent as classifyDmIntent, _testBuildTopicDeepLink as buildTopicDeepLink } from "../../lib/dispatch/telegram-bootstrap-hook.js";
 import {
   upsertTelegramBootstrapSession,
   readTelegramBootstrapSession,
@@ -192,7 +192,7 @@ describe("telegram bootstrap hook", () => {
       messageThreadId: 777,
     }));
     expect(sendMessageTelegram.mock.calls[2]?.[0]).toBe("6951571380");
-    expect(String(sendMessageTelegram.mock.calls[2]?.[1])).toContain("Projeto \"demo-cli\" registrado.");
+    expect(String(sendMessageTelegram.mock.calls[2]?.[1])).toContain("https://t.me/c/3709213169/777");
   });
 
   it("ignores duplicate in-flight bootstrap requests with the same full request fingerprint", async () => {
@@ -1144,6 +1144,20 @@ describe("Layer 3: LLM classification via message_received", () => {
     expect(ctx.runCommand).not.toHaveBeenCalled();
     expect(mockRunPipeline).not.toHaveBeenCalled();
     expect(sendMessageTelegram).not.toHaveBeenCalled();
+  });
+});
+
+describe("buildTopicDeepLink", () => {
+  it("strips -100 prefix and builds deep link", () => {
+    expect(buildTopicDeepLink("-1003709213169", 925)).toBe("https://t.me/c/3709213169/925");
+  });
+
+  it("strips -100 prefix for different chat ID", () => {
+    expect(buildTopicDeepLink("-1001234567890", 42)).toBe("https://t.me/c/1234567890/42");
+  });
+
+  it("handles chat ID without -100 prefix gracefully", () => {
+    expect(buildTopicDeepLink("9876543210", 7)).toBe("https://t.me/c/9876543210/7");
   });
 });
 
