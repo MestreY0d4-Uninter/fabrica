@@ -619,10 +619,17 @@ async function continueBootstrap(
 
 export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: PluginContext): void {
   api.on("before_prompt_build", async (_event, eventCtx) => {
-    const hookCtx = eventCtx as { channelId?: string; conversationId?: string | null };
+    const hookCtx = eventCtx as { channelId?: string; sessionKey?: string };
     if (hookCtx.channelId !== "telegram") return {};
-    const conversationId = String(hookCtx.conversationId ?? "").trim();
-    if (!conversationId || conversationId.includes(":topic:") || conversationId.startsWith("-")) return {};
+    // before_prompt_build receives PluginHookAgentContext which does NOT have conversationId.
+    // Extract the Telegram chat ID from sessionKey (format: "agent:main:telegram:slash:<chatId>").
+    // Group topics use "agent:main:telegram:group:<groupId>:topic:<topicId>" — skip those.
+    const sessionKey = hookCtx.sessionKey ?? "";
+    if (sessionKey.includes(":topic:") || sessionKey.includes(":group:")) return {};
+    const sessionKeyParts = sessionKey.split(":");
+    const chatId = sessionKeyParts.length >= 5 ? sessionKeyParts[sessionKeyParts.length - 1] : "";
+    const conversationId = chatId ? `telegram:${chatId}` : "";
+    if (!conversationId) return {};
 
     const workspaceDir = resolveWorkspaceDir(ctx.config as Record<string, unknown>);
     if (!workspaceDir) return {};
@@ -644,11 +651,17 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
   // the "Reply with NO_REPLY" instruction, so this hook guarantees nothing is sent.
   // sendTelegramText() uses ctx.runtime.channel.telegram.sendMessageTelegram() directly,
   // bypassing the agent message pipeline — this hook will NOT cancel our own messages.
-  api.on("message_sending", async (_event, eventCtx) => {
-    const hookCtx = eventCtx as { channelId?: string; conversationId?: string | null };
+  api.on("message_sending", async (event, eventCtx) => {
+    const hookCtx = eventCtx as { channelId?: string };
     if (hookCtx.channelId !== "telegram") return;
-    const conversationId = String(hookCtx.conversationId ?? "").trim();
-    if (!conversationId || conversationId.includes(":topic:") || conversationId.startsWith("-")) return;
+    // message_sending receives PluginHookMessageContext which does NOT populate conversationId.
+    // Use event.to (the outbound Telegram chat ID) to derive the conversationId.
+    const sendEvent = event as { to?: string; content?: string; metadata?: Record<string, unknown> };
+    const rawTo = String(sendEvent.to ?? "").trim();
+    if (!rawTo || rawTo.startsWith("-")) return;
+    // event.to is a bare chat ID (e.g. "6951571380") — convert to session key format
+    const conversationId = rawTo.includes(":") ? rawTo : `telegram:${rawTo}`;
+    if (conversationId.includes(":topic:")) return;
 
     const workspaceDir = resolveWorkspaceDir(ctx.config as Record<string, unknown>);
     if (!workspaceDir) return;

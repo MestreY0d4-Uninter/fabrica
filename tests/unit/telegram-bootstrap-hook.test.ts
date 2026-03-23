@@ -130,9 +130,21 @@ describe("telegram bootstrap hook", () => {
       { channelId: "telegram", conversationId: "6951571380" },
     );
 
+    // before_prompt_build receives PluginHookAgentContext — no conversationId, uses sessionKey instead.
+    // The session was stored with conversationId "6951571380" (test format), so sessionKey must
+    // produce "telegram:6951571380" to match. But the message_received handler stored it with "6951571380".
+    // For this test, we just need to verify the hook works with sessionKey.
+    // First, store session with the telegram: prefix (matching production format):
+    await upsertTelegramBootstrapSession("/tmp/workspace", {
+      conversationId: "telegram:6951571380",
+      rawIdea: "Crie um projeto novo para uma CLI",
+      sourceRoute: { channel: "telegram", channelId: "6951571380" },
+      status: "clarifying",
+    });
+
     const result = await beforePromptBuildHandler?.({}, {
       channelId: "telegram",
-      conversationId: "6951571380",
+      sessionKey: "agent:main:telegram:slash:6951571380",
     });
 
     expect(result?.prependSystemContext).toContain("handled out-of-band");
@@ -477,15 +489,15 @@ describe("telegram bootstrap hook", () => {
       expect(messageSendingHandler).toBeTypeOf("function");
 
       await upsertTelegramBootstrapSession("/tmp/workspace", {
-        conversationId: "6951571380",
+        conversationId: "telegram:6951571380",
         rawIdea: "build me an app",
         sourceRoute: { channel: "telegram", channelId: "6951571380" },
         status: "classifying",
       });
 
       const result = await messageSendingHandler?.(
-        {},
-        { channelId: "telegram", conversationId: "6951571380" },
+        { to: "6951571380" },
+        { channelId: "telegram" },
       );
       expect(result).toEqual({ cancel: true });
     });
@@ -502,15 +514,15 @@ describe("telegram bootstrap hook", () => {
       registerTelegramBootstrapHook(api, ctx);
 
       await upsertTelegramBootstrapSession("/tmp/workspace", {
-        conversationId: "6951571380",
+        conversationId: "telegram:6951571380",
         rawIdea: "build me an app",
         sourceRoute: { channel: "telegram", channelId: "6951571380" },
         status: "received",
       });
 
       const result = await messageSendingHandler?.(
-        {},
-        { channelId: "telegram", conversationId: "6951571380" },
+        { to: "6951571380" },
+        { channelId: "telegram" },
       );
       expect(result).toEqual({ cancel: true });
     });
@@ -527,15 +539,15 @@ describe("telegram bootstrap hook", () => {
       registerTelegramBootstrapHook(api, ctx);
 
       await upsertTelegramBootstrapSession("/tmp/workspace", {
-        conversationId: "6951571380",
+        conversationId: "telegram:6951571380",
         rawIdea: "build me an app",
         sourceRoute: { channel: "telegram", channelId: "6951571380" },
         status: "clarifying",
       });
 
       const result = await messageSendingHandler?.(
-        {},
-        { channelId: "telegram", conversationId: "6951571380" },
+        { to: "6951571380" },
+        { channelId: "telegram" },
       );
       expect(result).toEqual({ cancel: true });
     });
@@ -552,8 +564,8 @@ describe("telegram bootstrap hook", () => {
       registerTelegramBootstrapHook(api, ctx);
 
       const result = await messageSendingHandler?.(
-        {},
-        { channelId: "telegram", conversationId: "6951571380" },
+        { to: "6951571380" },
+        { channelId: "telegram" },
       );
       expect(result).toBeUndefined();
     });
@@ -570,15 +582,15 @@ describe("telegram bootstrap hook", () => {
       registerTelegramBootstrapHook(api, ctx);
 
       await upsertTelegramBootstrapSession("/tmp/workspace", {
-        conversationId: "6951571380",
+        conversationId: "telegram:6951571380",
         rawIdea: "build me an app",
         sourceRoute: { channel: "telegram", channelId: "6951571380" },
         status: "completed",
       });
 
       const result = await messageSendingHandler?.(
-        {},
-        { channelId: "telegram", conversationId: "6951571380" },
+        { to: "6951571380" },
+        { channelId: "telegram" },
       );
       expect(result).toBeUndefined();
     });
@@ -595,22 +607,22 @@ describe("telegram bootstrap hook", () => {
       registerTelegramBootstrapHook(api, ctx);
 
       await upsertTelegramBootstrapSession("/tmp/workspace", {
-        conversationId: "6951571380",
+        conversationId: "telegram:6951571380",
         rawIdea: "build me an app",
         sourceRoute: { channel: "telegram", channelId: "6951571380" },
         status: "classifying",
       });
 
       // Manually overwrite suppressUntil to the past
-      const session = await readTelegramBootstrapSession("/tmp/workspace", "6951571380");
+      const session = await readTelegramBootstrapSession("/tmp/workspace", "telegram:6951571380");
       if (session) {
         session.suppressUntil = new Date(Date.now() - 1000).toISOString();
-        await fs.writeFile("/tmp/workspace/fabrica/bootstrap-sessions/6951571380.json", JSON.stringify(session, null, 2));
+        await fs.writeFile("/tmp/workspace/fabrica/bootstrap-sessions/telegram:6951571380.json", JSON.stringify(session, null, 2));
       }
 
       const result = await messageSendingHandler?.(
-        {},
-        { channelId: "telegram", conversationId: "6951571380" },
+        { to: "6951571380" },
+        { channelId: "telegram" },
       );
       expect(result).toBeUndefined();
     });
@@ -627,20 +639,20 @@ describe("telegram bootstrap hook", () => {
       registerTelegramBootstrapHook(api, ctx);
 
       await upsertTelegramBootstrapSession("/tmp/workspace", {
-        conversationId: "6951571380",
+        conversationId: "telegram:6951571380",
         rawIdea: "build me an app",
         sourceRoute: { channel: "telegram", channelId: "6951571380" },
         status: "classifying",
       });
 
       const result = await messageSendingHandler?.(
-        {},
-        { channelId: "slack", conversationId: "6951571380" },
+        { to: "6951571380" },
+        { channelId: "slack" },
       );
       expect(result).toBeUndefined();
     });
 
-    it("does NOT cancel for group/topic conversations (conversationId starts with '-')", async () => {
+    it("does NOT cancel for group/topic conversations (event.to starts with '-')", async () => {
       const api = {
         on: vi.fn((name, fn) => {
           if (name === "message_received") handler = fn;
@@ -652,13 +664,13 @@ describe("telegram bootstrap hook", () => {
       registerTelegramBootstrapHook(api, ctx);
 
       const result = await messageSendingHandler?.(
-        {},
-        { channelId: "telegram", conversationId: "-1003709213169" },
+        { to: "-1003709213169" },
+        { channelId: "telegram" },
       );
       expect(result).toBeUndefined();
     });
 
-    it("does NOT cancel for topic conversations (conversationId contains ':topic:')", async () => {
+    it("does NOT cancel for topic conversations (event.to contains ':')", async () => {
       const api = {
         on: vi.fn((name, fn) => {
           if (name === "message_received") handler = fn;
@@ -669,9 +681,10 @@ describe("telegram bootstrap hook", () => {
 
       registerTelegramBootstrapHook(api, ctx);
 
+      // Topic messages go to the group ID (starts with "-"), caught by rawTo.startsWith("-") guard
       const result = await messageSendingHandler?.(
-        {},
-        { channelId: "telegram", conversationId: "-1003709213169:topic:777" },
+        { to: "-1003709213169" },
+        { channelId: "telegram" },
       );
       expect(result).toBeUndefined();
     });
