@@ -45,21 +45,8 @@ export const scaffoldStep: PipelineStep = {
           mode: "scaffold",
           runCommand: ctx.runCommand,
         });
-        if (!bootstrap.ready) {
-          ctx.log(`Scaffold bootstrap failed: ${bootstrap.reason ?? "unknown reason"}`);
-          return {
-            ...result.plannedPayload,
-            step: "scaffold",
-            scaffold: { created: false, reason: bootstrap.reason ?? "bootstrap_failed" },
-          };
-        }
-        ctx.log(
-          bootstrap.skipped
-            ? `Scaffold bootstrap already current (${bootstrap.packageManager})`
-            : `Scaffold bootstrap completed (${bootstrap.packageManager})`,
-        );
-        // Overwrite qa.sh with TypeScript-generated content (replaces shell placeholder)
-        // Only for Python stacks — Node/Go/Java stacks use shell-generated qa.sh as-is
+        // Overwrite qa.sh UNCONDITIONALLY — TypeScript version has self-provisioning prelude
+        // that works even if bootstrap failed. Must run BEFORE the early return below.
         if (scaffold.stack && PYTHON_STACKS.has(scaffold.stack) && payload.spec) {
           try {
             const contract = generateQaContract({
@@ -74,6 +61,19 @@ export const scaffoldStep: PipelineStep = {
             ctx.log(`Warning: could not write qa.sh: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
+        if (!bootstrap.ready) {
+          ctx.log(`Scaffold bootstrap failed: ${bootstrap.reason ?? "unknown reason"}`);
+          return {
+            ...result.plannedPayload,
+            step: "scaffold",
+            scaffold: { created: false, reason: bootstrap.reason ?? "bootstrap_failed" },
+          };
+        }
+        ctx.log(
+          bootstrap.skipped
+            ? `Scaffold bootstrap already current (${bootstrap.packageManager})`
+            : `Scaffold bootstrap completed (${bootstrap.packageManager})`,
+        );
       }
       return {
         ...result.plannedPayload,
