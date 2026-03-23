@@ -1147,6 +1147,155 @@ describe("Layer 3: LLM classification via message_received", () => {
   });
 });
 
+describe("Layer 2 language heuristic", () => {
+  let handler: ((event: any, eventCtx: any) => Promise<void>) | undefined;
+  const sendMessageTelegram = vi.fn(async () => undefined);
+
+  const ctx = {
+    pluginConfig: {
+      telegram: {
+        bootstrapDmEnabled: true,
+        projectsForumChatId: "-1003709213169",
+      },
+    },
+    config: {
+      agents: {
+        defaults: {
+          workspace: "/tmp/workspace",
+        },
+      },
+    },
+    logger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+    },
+    runtime: {
+      channel: {
+        telegram: {
+          sendMessageTelegram,
+        },
+      },
+    },
+    runCommand: vi.fn(async () => ({ stdout: "", stderr: "", code: 0 })),
+  } as any;
+
+  beforeEach(async () => {
+    handler = undefined;
+    sendMessageTelegram.mockClear();
+    mockRunPipeline.mockReset();
+    mockReadProjects.mockReset();
+    mockProjectTick.mockReset();
+    mockDiscoverAgents.mockReset();
+    mockReadProjects.mockResolvedValue({ projects: {} });
+    mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: "/tmp/workspace" }]);
+    mockProjectTick.mockResolvedValue({ pickups: [], skipped: [] });
+    await fs.rm("/tmp/workspace/fabrica/bootstrap-sessions", { recursive: true, force: true });
+  });
+
+  it("sends Portuguese ack for PT createCue (crie)", async () => {
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    // Mock pipeline so fire-and-forget does not leave dangling async
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: { metadata: { channel_id: "-1003709213169", message_thread_id: 900, project_slug: "novo-projeto-cli" } },
+    });
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    // "Crie um novo projeto cli python" — has createCue "crie" (PT) + softwareCue "cli" + "projeto"
+    // detectStackHint matches "cli python" → python-cli, so pipeline fires (no clarification)
+    await handler?.(
+      { content: "Crie um novo projeto cli python", metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    // First call is the ack (synchronous before fire-and-forget)
+    expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Recebi!");
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).not.toContain("Got it!");
+  });
+
+  it("sends English ack for EN createCue (create)", async () => {
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: { metadata: { channel_id: "-1003709213169", message_thread_id: 901, project_slug: "new-project-cli" } },
+    });
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    // "Create a new project cli python" — has createCue "create" (EN) + softwareCue "cli" + "project"
+    await handler?.(
+      { content: "Create a new project cli python", metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Got it!");
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).not.toContain("Recebi!");
+  });
+
+  it("sends Portuguese ack for 'novo projeto' createCue", async () => {
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: { metadata: { channel_id: "-1003709213169", message_thread_id: 902, project_slug: "novo-projeto-cli" } },
+    });
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    // "novo projeto cli python" — has createCue "novo projeto" (PT) + softwareCue "cli"
+    await handler?.(
+      { content: "novo projeto cli python", metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Recebi!");
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).not.toContain("Got it!");
+  });
+
+  it("sends English ack for 'new project' createCue", async () => {
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: { metadata: { channel_id: "-1003709213169", message_thread_id: 903, project_slug: "new-project-cli" } },
+    });
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    // "new project cli python" — has createCue "new project" (EN) + softwareCue "cli"
+    await handler?.(
+      { content: "new project cli python", metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Got it!");
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).not.toContain("Recebi!");
+  });
+});
+
 describe("buildTopicDeepLink", () => {
   it("strips -100 prefix and builds deep link", () => {
     expect(buildTopicDeepLink("-1003709213169", 925)).toBe("https://t.me/c/3709213169/925");

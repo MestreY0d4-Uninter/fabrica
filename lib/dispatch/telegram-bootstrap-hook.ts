@@ -381,6 +381,7 @@ async function classifyAndBootstrap(
     sourceRoute,
     sourceChannel: "telegram",
     status: "received",
+    language,
   });
 
   // If no stack hint, enter clarification flow (same as Layer 2)
@@ -392,6 +393,7 @@ async function classifyAndBootstrap(
       sourceRoute: session.sourceRoute,
       status: "clarifying",
       pendingClarification,
+      language,
     });
     await sendTelegramText(ctx, conversationId, buildClarificationMessage(parsed, pendingClarification, language));
     return;
@@ -581,7 +583,8 @@ async function continueBootstrap(
         logBootstrapWarning(ctx, `[telegram-bootstrap] immediate projectTick failed: ${error instanceof Error ? error.message : String(error)}`);
       });
     }
-    await sendTelegramText(ctx, conversationId, buildDmAck(resolvedProjectName, buildTopicDeepLink(String(projectChannelId), messageThreadId)));
+    const sessionLang: BootstrapLanguage = currentSession?.language ?? "pt";
+    await sendTelegramText(ctx, conversationId, buildDmAck(resolvedProjectName, buildTopicDeepLink(String(projectChannelId), messageThreadId), sessionLang));
     await upsertTelegramBootstrapSession(workspaceDir, {
       conversationId,
       ...incomingRequest,
@@ -773,8 +776,12 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       }
     }
 
+    // Layer 2 language heuristic: detect from the matched createCue
+    const language: BootstrapLanguage = /\b(cria|crie|criar|construa|desenvolva|registre|novo projeto)\b/i.test(content)
+      ? "pt" : "en";
+
     // Immediate ack — user knows message was received before pipeline starts
-    await sendTelegramText(ctx, conversationId, "Recebi! Vou analisar e começar a montar o projeto...");
+    await sendTelegramText(ctx, conversationId, BOOTSTRAP_MESSAGES.ack[language]);
 
     const session = await upsertTelegramBootstrapSession(workspaceDir, {
       conversationId,
@@ -785,6 +792,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       },
       sourceChannel: "telegram",
       status: "received",
+      language,
     });
 
     if (!parsed.stackHint) {
@@ -795,8 +803,9 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
         sourceRoute: session.sourceRoute,
         status: "clarifying",
         pendingClarification,
+        language,
       });
-      await sendTelegramText(ctx, conversationId, buildClarificationMessage(parsed, pendingClarification));
+      await sendTelegramText(ctx, conversationId, buildClarificationMessage(parsed, pendingClarification, language));
       return;
     }
 
