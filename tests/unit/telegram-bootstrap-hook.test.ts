@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { registerTelegramBootstrapHook } from "../../lib/dispatch/telegram-bootstrap-hook.js";
+import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate } from "../../lib/dispatch/telegram-bootstrap-hook.js";
 import {
   upsertTelegramBootstrapSession,
   readTelegramBootstrapSession,
@@ -487,5 +487,41 @@ describe("telegram bootstrap session — classifying status", () => {
     const result = await readTelegramBootstrapSession(workspaceDir, "123456");
     expect(result).not.toBeNull();
     expect(result!.status).toBe("classifying");
+  });
+});
+
+describe("isAmbiguousCandidate", () => {
+  it("returns false for messages <= 20 chars even with softwareCue", () => {
+    // "uma cli legal aaaaaa" = exactly 20 chars (has softwareCue "cli")
+    expect(isAmbiguousCandidate("uma cli legal aaaaaa")).toBe(false);
+  });
+
+  it("returns true for messages > 20 chars with softwareCue", () => {
+    expect(isAmbiguousCandidate("uma cli legal aaaaaaa")).toBe(true); // 21 chars
+  });
+
+  it("returns false for messages > 500 chars even with softwareCue", () => {
+    const longMsg = "preciso de um sistema " + "a".repeat(480);
+    expect(longMsg.length).toBeGreaterThan(500);
+    expect(isAmbiguousCandidate(longMsg)).toBe(false);
+  });
+
+  it("returns true for messages at exactly 500 chars with softwareCue", () => {
+    const msg = "preciso de um sistema " + "a".repeat(478);
+    expect(msg.length).toBe(500);
+    expect(isAmbiguousCandidate(msg)).toBe(true);
+  });
+
+  it("returns false for messages without any softwareCue regardless of length", () => {
+    expect(isAmbiguousCandidate("oi tudo bem como voce esta hoje?")).toBe(false);
+  });
+
+  it("detects expanded software cues: tool, ferramenta, sistema, bot, script, programa", () => {
+    expect(isAmbiguousCandidate("preciso de uma ferramenta pra isso")).toBe(true);
+    expect(isAmbiguousCandidate("me faz um bot que responde msgs")).toBe(true);
+    expect(isAmbiguousCandidate("quero um script de automacao")).toBe(true);
+    expect(isAmbiguousCandidate("need a tool for data processing")).toBe(true);
+    expect(isAmbiguousCandidate("build me a system for tracking")).toBe(true);
+    expect(isAmbiguousCandidate("quero um programa de contabilidade")).toBe(true);
   });
 });

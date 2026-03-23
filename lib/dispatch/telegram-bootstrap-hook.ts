@@ -91,6 +91,17 @@ function parseBootstrapRequest(text: string): BootstrapRequest {
   };
 }
 
+const MAX_CLASSIFY_LENGTH = 500;
+
+function isAmbiguousCandidate(text: string): boolean {
+  const lower = text.toLowerCase();
+  if (lower.length <= 20 || lower.length > MAX_CLASSIFY_LENGTH) return false;
+  const softwareCue = /\b(projeto|project|cli|api|app|aplicativo|servi[cç]o|library|biblioteca|repo|reposit[oó]rio|tool|ferramenta|sistema|system|bot|script|programa|program)\b/.test(lower);
+  return softwareCue;
+}
+
+export { isAmbiguousCandidate as _testIsAmbiguousCandidate };
+
 function isBootstrapCandidate(text: string): boolean {
   const lower = text.toLowerCase();
   if (/^\s*(project name|nome do projeto|repository url|repo url|stack)\s*:/im.test(text)) return true;
