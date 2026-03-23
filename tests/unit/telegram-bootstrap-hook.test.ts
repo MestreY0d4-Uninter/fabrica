@@ -43,6 +43,7 @@ vi.mock("../../lib/services/heartbeat/agent-discovery.js", () => ({
 describe("telegram bootstrap hook", () => {
   let handler: ((event: any, eventCtx: any) => Promise<void>) | undefined;
   let beforePromptBuildHandler: ((event: any, eventCtx: any) => Promise<any>) | undefined;
+  let messageSendingHandler: ((event: any, eventCtx: any) => Promise<any>) | undefined;
   const sendMessageTelegram = vi.fn(async () => undefined);
 
   const ctx = {
@@ -76,6 +77,7 @@ describe("telegram bootstrap hook", () => {
   beforeEach(async () => {
     handler = undefined;
     beforePromptBuildHandler = undefined;
+    messageSendingHandler = undefined;
     sendMessageTelegram.mockClear();
     mockRunPipeline.mockReset();
     mockReadProjects.mockReset();
@@ -459,6 +461,220 @@ describe("telegram bootstrap hook", () => {
     await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
     expect(sendMessageTelegram.mock.calls[1]?.[0]).toBe("6951571380");
     expect(String(sendMessageTelegram.mock.calls[1]?.[1])).toContain("faltou a associacao obrigatoria com um topico Telegram");
+  });
+
+  describe("message_sending hook — hard-suppress", () => {
+    it("returns { cancel: true } when session status is 'classifying'", async () => {
+      const api = {
+        on: vi.fn((name, fn) => {
+          if (name === "message_received") handler = fn;
+          if (name === "before_prompt_build") beforePromptBuildHandler = fn;
+          if (name === "message_sending") messageSendingHandler = fn;
+        }),
+      } as unknown as OpenClawPluginApi;
+
+      registerTelegramBootstrapHook(api, ctx);
+      expect(messageSendingHandler).toBeTypeOf("function");
+
+      await upsertTelegramBootstrapSession("/tmp/workspace", {
+        conversationId: "6951571380",
+        rawIdea: "build me an app",
+        sourceRoute: { channel: "telegram", channelId: "6951571380" },
+        status: "classifying",
+      });
+
+      const result = await messageSendingHandler?.(
+        {},
+        { channelId: "telegram", conversationId: "6951571380" },
+      );
+      expect(result).toEqual({ cancel: true });
+    });
+
+    it("returns { cancel: true } when session status is 'received' (active, not expired)", async () => {
+      const api = {
+        on: vi.fn((name, fn) => {
+          if (name === "message_received") handler = fn;
+          if (name === "before_prompt_build") beforePromptBuildHandler = fn;
+          if (name === "message_sending") messageSendingHandler = fn;
+        }),
+      } as unknown as OpenClawPluginApi;
+
+      registerTelegramBootstrapHook(api, ctx);
+
+      await upsertTelegramBootstrapSession("/tmp/workspace", {
+        conversationId: "6951571380",
+        rawIdea: "build me an app",
+        sourceRoute: { channel: "telegram", channelId: "6951571380" },
+        status: "received",
+      });
+
+      const result = await messageSendingHandler?.(
+        {},
+        { channelId: "telegram", conversationId: "6951571380" },
+      );
+      expect(result).toEqual({ cancel: true });
+    });
+
+    it("returns { cancel: true } when session status is 'clarifying'", async () => {
+      const api = {
+        on: vi.fn((name, fn) => {
+          if (name === "message_received") handler = fn;
+          if (name === "before_prompt_build") beforePromptBuildHandler = fn;
+          if (name === "message_sending") messageSendingHandler = fn;
+        }),
+      } as unknown as OpenClawPluginApi;
+
+      registerTelegramBootstrapHook(api, ctx);
+
+      await upsertTelegramBootstrapSession("/tmp/workspace", {
+        conversationId: "6951571380",
+        rawIdea: "build me an app",
+        sourceRoute: { channel: "telegram", channelId: "6951571380" },
+        status: "clarifying",
+      });
+
+      const result = await messageSendingHandler?.(
+        {},
+        { channelId: "telegram", conversationId: "6951571380" },
+      );
+      expect(result).toEqual({ cancel: true });
+    });
+
+    it("does NOT cancel (returns undefined) when no session exists", async () => {
+      const api = {
+        on: vi.fn((name, fn) => {
+          if (name === "message_received") handler = fn;
+          if (name === "before_prompt_build") beforePromptBuildHandler = fn;
+          if (name === "message_sending") messageSendingHandler = fn;
+        }),
+      } as unknown as OpenClawPluginApi;
+
+      registerTelegramBootstrapHook(api, ctx);
+
+      const result = await messageSendingHandler?.(
+        {},
+        { channelId: "telegram", conversationId: "6951571380" },
+      );
+      expect(result).toBeUndefined();
+    });
+
+    it("does NOT cancel when session status is 'completed'", async () => {
+      const api = {
+        on: vi.fn((name, fn) => {
+          if (name === "message_received") handler = fn;
+          if (name === "before_prompt_build") beforePromptBuildHandler = fn;
+          if (name === "message_sending") messageSendingHandler = fn;
+        }),
+      } as unknown as OpenClawPluginApi;
+
+      registerTelegramBootstrapHook(api, ctx);
+
+      await upsertTelegramBootstrapSession("/tmp/workspace", {
+        conversationId: "6951571380",
+        rawIdea: "build me an app",
+        sourceRoute: { channel: "telegram", channelId: "6951571380" },
+        status: "completed",
+      });
+
+      const result = await messageSendingHandler?.(
+        {},
+        { channelId: "telegram", conversationId: "6951571380" },
+      );
+      expect(result).toBeUndefined();
+    });
+
+    it("does NOT cancel when session is expired (suppressUntil in the past)", async () => {
+      const api = {
+        on: vi.fn((name, fn) => {
+          if (name === "message_received") handler = fn;
+          if (name === "before_prompt_build") beforePromptBuildHandler = fn;
+          if (name === "message_sending") messageSendingHandler = fn;
+        }),
+      } as unknown as OpenClawPluginApi;
+
+      registerTelegramBootstrapHook(api, ctx);
+
+      await upsertTelegramBootstrapSession("/tmp/workspace", {
+        conversationId: "6951571380",
+        rawIdea: "build me an app",
+        sourceRoute: { channel: "telegram", channelId: "6951571380" },
+        status: "classifying",
+      });
+
+      // Manually overwrite suppressUntil to the past
+      const session = await readTelegramBootstrapSession("/tmp/workspace", "6951571380");
+      if (session) {
+        session.suppressUntil = new Date(Date.now() - 1000).toISOString();
+        await fs.writeFile("/tmp/workspace/fabrica/bootstrap-sessions/6951571380.json", JSON.stringify(session, null, 2));
+      }
+
+      const result = await messageSendingHandler?.(
+        {},
+        { channelId: "telegram", conversationId: "6951571380" },
+      );
+      expect(result).toBeUndefined();
+    });
+
+    it("does NOT cancel for non-telegram channels", async () => {
+      const api = {
+        on: vi.fn((name, fn) => {
+          if (name === "message_received") handler = fn;
+          if (name === "before_prompt_build") beforePromptBuildHandler = fn;
+          if (name === "message_sending") messageSendingHandler = fn;
+        }),
+      } as unknown as OpenClawPluginApi;
+
+      registerTelegramBootstrapHook(api, ctx);
+
+      await upsertTelegramBootstrapSession("/tmp/workspace", {
+        conversationId: "6951571380",
+        rawIdea: "build me an app",
+        sourceRoute: { channel: "telegram", channelId: "6951571380" },
+        status: "classifying",
+      });
+
+      const result = await messageSendingHandler?.(
+        {},
+        { channelId: "slack", conversationId: "6951571380" },
+      );
+      expect(result).toBeUndefined();
+    });
+
+    it("does NOT cancel for group/topic conversations (conversationId starts with '-')", async () => {
+      const api = {
+        on: vi.fn((name, fn) => {
+          if (name === "message_received") handler = fn;
+          if (name === "before_prompt_build") beforePromptBuildHandler = fn;
+          if (name === "message_sending") messageSendingHandler = fn;
+        }),
+      } as unknown as OpenClawPluginApi;
+
+      registerTelegramBootstrapHook(api, ctx);
+
+      const result = await messageSendingHandler?.(
+        {},
+        { channelId: "telegram", conversationId: "-1003709213169" },
+      );
+      expect(result).toBeUndefined();
+    });
+
+    it("does NOT cancel for topic conversations (conversationId contains ':topic:')", async () => {
+      const api = {
+        on: vi.fn((name, fn) => {
+          if (name === "message_received") handler = fn;
+          if (name === "before_prompt_build") beforePromptBuildHandler = fn;
+          if (name === "message_sending") messageSendingHandler = fn;
+        }),
+      } as unknown as OpenClawPluginApi;
+
+      registerTelegramBootstrapHook(api, ctx);
+
+      const result = await messageSendingHandler?.(
+        {},
+        { channelId: "telegram", conversationId: "-1003709213169:topic:777" },
+      );
+      expect(result).toBeUndefined();
+    });
   });
 });
 

@@ -605,6 +605,33 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
     };
   });
 
+  // Hard-suppress: cancel agent-originated messages during active bootstrap sessions.
+  // Complements the soft-suppress in before_prompt_build — the LLM sometimes ignores
+  // the "Reply with NO_REPLY" instruction, so this hook guarantees nothing is sent.
+  // sendTelegramText() uses ctx.runtime.channel.telegram.sendMessageTelegram() directly,
+  // bypassing the agent message pipeline — this hook will NOT cancel our own messages.
+  api.on("message_sending", async (_event, eventCtx) => {
+    const hookCtx = eventCtx as { channelId?: string; conversationId?: string | null };
+    if (hookCtx.channelId !== "telegram") return;
+    const conversationId = String(hookCtx.conversationId ?? "").trim();
+    if (!conversationId || conversationId.includes(":topic:") || conversationId.startsWith("-")) return;
+
+    const workspaceDir = resolveWorkspaceDir(ctx.config as Record<string, unknown>);
+    if (!workspaceDir) return;
+
+    const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
+    // Only suppress for active (non-terminal) sessions. Completed/failed sessions
+    // should not block subsequent agent responses.
+    if (
+      session &&
+      session.status !== "completed" &&
+      session.status !== "failed" &&
+      shouldSuppressTelegramBootstrapReply(session)
+    ) {
+      return { cancel: true };
+    }
+  });
+
   api.on("message_received", async (event, eventCtx) => {
     if (eventCtx.channelId !== "telegram") return;
     const telegramConfig = readFabricaTelegramConfig(ctx.pluginConfig);
