@@ -19,6 +19,9 @@ import {
   upsertTelegramBootstrapSession,
   type TelegramBootstrapSession,
 } from "./telegram-bootstrap-session.js";
+import { raceWithTimeout } from "../utils/async.js";
+
+const BOOTSTRAP_TIMEOUT_MS = 5 * 60_000; // 5 minutes
 
 type BootstrapRequest = {
   rawIdea: string;
@@ -400,8 +403,36 @@ async function classifyAndBootstrap(
   }
 
   // Fire-and-forget pipeline
-  continueBootstrap(ctx, conversationId, workspaceDir, incomingRequest, sourceRoute).catch((err) => {
-    logBootstrapWarning(ctx, `[telegram-bootstrap] unhandled pipeline error (LLM path): ${err instanceof Error ? err.message : String(err)}`);
+  bootstrapWithTimeout(ctx, conversationId, workspaceDir, incomingRequest, sourceRoute);
+}
+
+function bootstrapWithTimeout(
+  ctx: PluginContext,
+  conversationId: string,
+  workspaceDir: string,
+  request: {
+    rawIdea: string;
+    projectName?: string | null;
+    stackHint?: string | null;
+    repoUrl?: string | null;
+    repoPath?: string | null;
+  },
+  sourceRoute: TelegramBootstrapRoute,
+): void {
+  raceWithTimeout(
+    () => continueBootstrap(ctx, conversationId, workspaceDir, request, sourceRoute),
+    BOOTSTRAP_TIMEOUT_MS,
+    () => {
+      ctx.logger.warn({ conversationId }, "Bootstrap pipeline timed out after 5 minutes");
+      upsertTelegramBootstrapSession(workspaceDir, {
+        conversationId,
+        rawIdea: request.rawIdea,
+        status: "failed",
+        error: "Pipeline timeout (5min)",
+      }).catch(() => {});
+    },
+  ).catch((err) => {
+    logBootstrapWarning(ctx, `[telegram-bootstrap] pipeline error: ${err instanceof Error ? err.message : String(err)}`);
   });
 }
 
@@ -743,11 +774,9 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       // Continue with merged request — fall through with pre-populated data
       // Fire-and-forget: session suppression is already in place (suppressUntil set above).
       // Awaiting the full pipeline in the event handler blocks all Telegram message processing.
-      continueBootstrap(ctx, conversationId, workspaceDir, mergedRequest, existingSession.sourceRoute ?? {
+      bootstrapWithTimeout(ctx, conversationId, workspaceDir, mergedRequest, existingSession.sourceRoute ?? {
         channel: "telegram",
         channelId: conversationId,
-      }).catch((err) => {
-        logBootstrapWarning(ctx, `[telegram-bootstrap] unhandled pipeline error: ${err instanceof Error ? err.message : String(err)}`);
       });
       return;
     }
@@ -839,11 +868,9 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
 
     // Fire-and-forget: session suppression is already in place (suppressUntil set above).
     // Awaiting the full pipeline in the event handler blocks all Telegram message processing.
-    continueBootstrap(ctx, conversationId, workspaceDir, incomingRequest, {
+    bootstrapWithTimeout(ctx, conversationId, workspaceDir, incomingRequest, {
       channel: "telegram",
       channelId: conversationId,
-    }).catch((err) => {
-      logBootstrapWarning(ctx, `[telegram-bootstrap] unhandled pipeline error: ${err instanceof Error ? err.message : String(err)}`);
     });
   });
 }
