@@ -1146,3 +1146,149 @@ describe("Layer 3: LLM classification via message_received", () => {
     expect(sendMessageTelegram).not.toHaveBeenCalled();
   });
 });
+
+describe("bilingual bootstrap messages", () => {
+  let handler: ((msg: any, meta: any) => Promise<void>) | undefined;
+  const sendMessageTelegram = vi.fn(async () => undefined);
+
+  const ctx = {
+    pluginConfig: {
+      telegram: {
+        bootstrapDmEnabled: true,
+        projectsForumChatId: "-1003709213169",
+      },
+    },
+    config: {
+      agents: {
+        defaults: {
+          workspace: "/tmp/workspace",
+        },
+      },
+    },
+    logger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+    },
+    runtime: {
+      channel: {
+        telegram: {
+          sendMessageTelegram,
+        },
+      },
+    },
+    runCommand: vi.fn(async () => ({ stdout: "", stderr: "", code: 0 })),
+  } as any;
+
+  beforeEach(async () => {
+    handler = undefined;
+    sendMessageTelegram.mockClear();
+    ctx.runCommand.mockClear();
+    ctx.runCommand.mockResolvedValue({ stdout: "", stderr: "", code: 0 });
+    mockRunPipeline.mockReset();
+    mockReadProjects.mockReset();
+    mockProjectTick.mockReset();
+    mockDiscoverAgents.mockReset();
+    mockReadProjects.mockResolvedValue({ projects: {} });
+    mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: "/tmp/workspace" }]);
+    mockProjectTick.mockResolvedValue({ pickups: [], skipped: [] });
+    await fs.rm("/tmp/workspace/fabrica/bootstrap-sessions", { recursive: true, force: true });
+  });
+
+  it("sends English ack when LLM detects language=en", async () => {
+    const api = {
+      on: vi.fn((name: string, fn: any) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    ctx.runCommand.mockImplementation(async (args: string[]) => {
+      const argsStr = args.join(" ");
+      if (argsStr.includes("agent") && argsStr.includes("--local") && argsStr.includes("--json")) {
+        return {
+          stdout: JSON.stringify({
+            payloads: [{
+              text: '{"intent":"create_project","confidence":0.92,"stackHint":"python-cli","projectSlug":"cpf-validator","language":"en"}',
+            }],
+          }),
+          stderr: "",
+          code: 0,
+        };
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    });
+
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 999,
+          project_slug: "cpf-validator",
+        },
+      },
+    });
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    // Ambiguous message: has softwareCue "tool" but no createCue
+    await handler?.(
+      { content: "I need a Python tool that validates CPF numbers", metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    // Wait for fire-and-forget classify + ack
+    await vi.waitFor(
+      () => expect(sendMessageTelegram).toHaveBeenCalledWith(
+        "6951571380",
+        expect.stringContaining("Got it!"),
+        expect.anything(),
+      ),
+      { timeout: 5000 },
+    );
+  });
+
+  it("sends English clarification when LLM returns language=en without stackHint", async () => {
+    const api = {
+      on: vi.fn((name: string, fn: any) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    ctx.runCommand.mockImplementation(async (args: string[]) => {
+      const argsStr = args.join(" ");
+      if (argsStr.includes("agent") && argsStr.includes("--local") && argsStr.includes("--json")) {
+        return {
+          stdout: JSON.stringify({
+            payloads: [{
+              text: '{"intent":"create_project","confidence":0.88,"stackHint":null,"projectSlug":"my-tool","language":"en"}',
+            }],
+          }),
+          stderr: "",
+          code: 0,
+        };
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    });
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    // Ambiguous message: has softwareCue "tool" but no createCue, no stack
+    await handler?.(
+      { content: "I need a tool for data validation and reporting", metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    // Wait for ack + clarification messages
+    await vi.waitFor(
+      () => expect(sendMessageTelegram).toHaveBeenCalledTimes(2),
+      { timeout: 5000 },
+    );
+
+    // First call: English ack
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Got it!");
+    // Second call: English clarification asking for stack
+    expect(String(sendMessageTelegram.mock.calls[1]?.[1])).toMatch(/stack|which/i);
+    expect(String(sendMessageTelegram.mock.calls[1]?.[1])).not.toContain("Qual stack");
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+  });
+});

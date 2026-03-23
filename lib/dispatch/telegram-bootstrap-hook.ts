@@ -35,6 +35,31 @@ type TelegramBootstrapRoute = {
   accountId?: string | null;
 };
 
+type BootstrapLanguage = "pt" | "en";
+
+const BOOTSTRAP_MESSAGES = {
+  ack: {
+    pt: "Recebi! Vou analisar e começar a montar o projeto...",
+    en: "Got it! I'll analyze your request and start setting up the project...",
+  },
+  clarifyStack: {
+    pt: "Qual stack você quer usar? (Python, Node.js, Go, Java...)",
+    en: "Which stack do you want to use? (Python, Node.js, Go, Java...)",
+  },
+  clarifyBoth: {
+    pt: "Beleza! Só preciso de duas coisas pra criar:\n\n1. Qual stack? (Python, Node.js, Go, Java...)\n2. Quer dar um nome pro projeto? Se não, eu invento um.",
+    en: "Great! I just need two things:\n\n1. Which stack? (Python, Node.js, Go, Java...)\n2. Want to name the project? If not, I'll pick one.",
+  },
+  clarifyStackFollowUp: {
+    pt: "Não consegui identificar a stack. Pode me dizer qual linguagem/framework você quer usar? Ex: Python, Node.js, Go, Java...",
+    en: "Couldn't identify the stack. Can you tell me which language/framework you'd like to use? e.g., Python, Node.js, Go, Java...",
+  },
+  registered: {
+    pt: (name: string, link: string) => `Projeto "${name}" registrado.\nVou continuar o fluxo em ${link}`,
+    en: (name: string, link: string) => `Project "${name}" registered.\nI'll continue the flow at ${link}`,
+  },
+} as const;
+
 function inferProjectSlug(text: string): string | undefined {
   const slug = text
     .toLowerCase()
@@ -226,25 +251,23 @@ function parseClarificationResponse(text: string, session: TelegramBootstrapSess
   return { recognized: false };
 }
 
-function buildClarificationMessage(parsed: BootstrapRequest, pendingClarification?: "stack" | "stack_and_name"): string {
+function buildClarificationMessage(parsed: BootstrapRequest, pendingClarification?: "stack" | "stack_and_name", language: BootstrapLanguage = "pt"): string {
   if (pendingClarification === "stack_and_name" || (!parsed.stackHint && !parsed.projectName)) {
-    return `Beleza! Só preciso de duas coisas pra criar:\n\n1. Qual stack? (Python, Node.js, Go, Java...)\n2. Quer dar um nome pro projeto? Se não, eu invento um.`;
+    return BOOTSTRAP_MESSAGES.clarifyBoth[language];
   }
-  return `Qual stack você quer usar? (Python, Node.js, Go, Java...)`;
+  return BOOTSTRAP_MESSAGES.clarifyStack[language];
 }
 
 function buildFollowUpClarification(session: TelegramBootstrapSession): string {
-  if (!session.stackHint) {
-    return `Não consegui identificar a stack. Pode me dizer qual linguagem/framework você quer usar? Ex: Python, Node.js, Go, Java...`;
-  }
-  return `Pode me dar mais detalhes sobre o que você quer construir?`;
+  const lang: BootstrapLanguage = session.language ?? "pt";
+  if (!session.stackHint) return BOOTSTRAP_MESSAGES.clarifyStackFollowUp[lang];
+  return lang === "en"
+    ? "Can you give me more details about what you want to build?"
+    : "Pode me dar mais detalhes sobre o que você quer construir?";
 }
 
-function buildDmAck(projectName: string, topicName: string): string {
-  return [
-    `Projeto "${projectName}" registrado.`,
-    `Vou continuar o fluxo no tópico "${topicName}" do grupo de projetos.`,
-  ].join("\n");
+function buildDmAck(projectName: string, topicLink: string, language: BootstrapLanguage = "pt"): string {
+  return BOOTSTRAP_MESSAGES.registered[language](projectName, topicLink);
 }
 
 function buildTopicKickoff(projectName: string, idea: string): string {
@@ -307,7 +330,8 @@ async function classifyAndBootstrap(
   }
 
   // LLM says create_project with high confidence — send ack
-  await sendTelegramText(ctx, conversationId, "Recebi! Vou analisar e começar a montar o projeto...");
+  const language: BootstrapLanguage = classification.language ?? "pt";
+  await sendTelegramText(ctx, conversationId, BOOTSTRAP_MESSAGES.ack[language]);
 
   // Parse the original content with existing regex parser, then merge LLM enrichment
   const parsed = parseBootstrapRequest(content);
@@ -364,7 +388,7 @@ async function classifyAndBootstrap(
       status: "clarifying",
       pendingClarification,
     });
-    await sendTelegramText(ctx, conversationId, buildClarificationMessage(parsed, pendingClarification));
+    await sendTelegramText(ctx, conversationId, buildClarificationMessage(parsed, pendingClarification, language));
     return;
   }
 
