@@ -6,6 +6,7 @@ import type { PipelineArtifact } from "../intake/types.js";
 
 export type TelegramBootstrapStatus =
   | "received"
+  | "classifying"   // LLM classification in progress
   | "clarifying"
   | "provisioning_repo"
   | "creating_topic"
@@ -111,7 +112,7 @@ export async function readTelegramBootstrapSession(
     // Auto-cleanup expired clarifying sessions so they don't block new requests (A4).
     // A session stuck in "clarifying" past its suppressUntil TTL will never be answered
     // by the user — remove it from disk so the next message starts fresh.
-    if (session.status === "clarifying" && Date.parse(session.suppressUntil) < Date.now()) {
+    if ((session.status === "clarifying" || session.status === "classifying") && Date.parse(session.suppressUntil) < Date.now()) {
       await fs.unlink(sessionPath(workspaceDir, conversationId)).catch(() => {});
       return null;
     }
@@ -120,6 +121,13 @@ export async function readTelegramBootstrapSession(
     if (error?.code === "ENOENT") return null;
     throw error;
   }
+}
+
+export async function deleteTelegramBootstrapSession(
+  workspaceDir: string,
+  conversationId: string,
+): Promise<void> {
+  await fs.unlink(sessionPath(workspaceDir, conversationId)).catch(() => {});
 }
 
 export async function writeTelegramBootstrapSession(

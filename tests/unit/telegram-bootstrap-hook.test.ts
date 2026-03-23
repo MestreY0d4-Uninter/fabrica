@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { registerTelegramBootstrapHook } from "../../lib/dispatch/telegram-bootstrap-hook.js";
+import {
+  upsertTelegramBootstrapSession,
+  readTelegramBootstrapSession,
+} from "../../lib/dispatch/telegram-bootstrap-session.js";
 
 const {
   mockRunPipeline,
@@ -439,5 +443,49 @@ describe("telegram bootstrap hook", () => {
     await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2000 });
     expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("faltou a associacao obrigatoria com um topico Telegram");
+  });
+});
+
+describe("telegram bootstrap session — classifying status", () => {
+  const workspaceDir = "/tmp/workspace";
+
+  beforeEach(async () => {
+    await fs.rm("/tmp/workspace/fabrica/bootstrap-sessions", { recursive: true, force: true });
+  });
+
+  it("auto-cleans expired classifying sessions", async () => {
+    // Write a session with "classifying" status and an already-expired suppressUntil
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: "123456",
+      rawIdea: "build me an app",
+      sourceRoute: { channel: "telegram", channelId: "123456" },
+      status: "classifying",
+    });
+
+    // Manually expire the session by overwriting suppressUntil
+    const sessionPath = `/tmp/workspace/fabrica/bootstrap-sessions/123456.json`;
+    const raw = JSON.parse(await fs.readFile(sessionPath, "utf-8"));
+    raw.suppressUntil = new Date(Date.now() - 1000).toISOString();
+    await fs.writeFile(sessionPath, JSON.stringify(raw), "utf-8");
+
+    // readTelegramBootstrapSession should auto-clean and return null
+    const result = await readTelegramBootstrapSession(workspaceDir, "123456");
+    expect(result).toBeNull();
+
+    // File should be deleted
+    await expect(fs.access(sessionPath)).rejects.toThrow();
+  });
+
+  it("preserves active classifying sessions", async () => {
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: "123456",
+      rawIdea: "build me an app",
+      sourceRoute: { channel: "telegram", channelId: "123456" },
+      status: "classifying",
+    });
+
+    const result = await readTelegramBootstrapSession(workspaceDir, "123456");
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe("classifying");
   });
 });
