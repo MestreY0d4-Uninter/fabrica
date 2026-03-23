@@ -258,14 +258,36 @@ export class GitHubProvider implements IssueProvider {
     init: RequestInit,
     auth: { type: "app_jwt"; token: string } | { type: "installation"; token: string },
   ): Promise<Response> {
-    const headers = new Headers(init.headers ?? {});
-    headers.set("Accept", "application/vnd.github+json");
-    headers.set("Authorization", `Bearer ${auth.token}`);
-    headers.set("X-GitHub-Api-Version", "2022-11-28");
-    if (init.body && !headers.has("Content-Type")) {
-      headers.set("Content-Type", "application/json");
-    }
-    return fetch(url, { ...init, headers });
+    return withResilience(async () => {
+      const headers = new Headers(init.headers ?? {});
+      headers.set("Accept", "application/vnd.github+json");
+      headers.set("Authorization", `Bearer ${auth.token}`);
+      headers.set("X-GitHub-Api-Version", "2022-11-28");
+      if (init.body && !headers.has("Content-Type")) {
+        headers.set("Content-Type", "application/json");
+      }
+      const res = await fetch(url, { ...init, headers });
+
+      // Detect rate limit responses and throw typed error (not retried by policy)
+      const remaining = res.headers.get("x-ratelimit-remaining");
+      if (res.status === 429 || (res.status === 403 && remaining === "0")) {
+        const retryAfter = res.headers.get("retry-after");
+        const resetEpoch = res.headers.get("x-ratelimit-reset");
+        const waitMs = retryAfter
+          ? parseInt(retryAfter, 10) * 1000
+          : resetEpoch
+            ? Math.max(0, parseInt(resetEpoch, 10) * 1000 - Date.now()) + 1000
+            : 60_000;
+        throw new GitHubRateLimitError(waitMs);
+      }
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`GitHub API ${res.status}: ${body}`);
+      }
+
+      return res;
+    }, this.providerKey);
   }
 
   private async resolveInstallationAuth(): Promise<{
