@@ -471,12 +471,16 @@ async function continueBootstrap(
     await upsertTelegramBootstrapSession(workspaceDir, {
       conversationId,
       rawIdea: request.rawIdea,
-      projectName: request.projectName,
+      projectName: request.projectName ?? undefined,
       status: "clarifying",
       pendingClarification: "stack",
       language: lang,
     });
-    await sendTelegramText(ctx, conversationId, buildClarificationMessage(request, "stack", lang));
+    await sendTelegramText(ctx, conversationId, buildClarificationMessage(
+      { rawIdea: request.rawIdea, projectName: request.projectName ?? undefined, stackHint: request.stackHint ?? undefined },
+      "stack",
+      lang,
+    ));
     return;
   }
 
