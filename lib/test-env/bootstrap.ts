@@ -130,6 +130,16 @@ async function pathExists(candidate: string): Promise<boolean> {
   }
 }
 
+/** Check if a file exists AND has non-zero size (catches 0-byte corrupt binaries). */
+export async function isValidBinary(filePath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(filePath);
+    return stat.size > 0;
+  } catch {
+    return false;
+  }
+}
+
 function familyForStack(stack: CanonicalStack): TestEnvironmentFamily {
   if (NODE_STACKS.has(stack)) return "node";
   if (PYTHON_STACKS.has(stack)) return "python";
@@ -252,7 +262,7 @@ function buildPythonBootstrapPrelude(): string {
 
 # --- Shared toolchain (ruff, mypy, pip-audit) ---
 TOOLCHAIN="$HOME/.openclaw/toolchains/python"
-if [ ! -x "$TOOLCHAIN/bin/ruff" ]; then
+if [ ! -x "$TOOLCHAIN/bin/ruff" ] || [ ! -s "$TOOLCHAIN/bin/ruff" ]; then
   echo "[qa] Toolchain not found — provisioning..."
   command -v uv >/dev/null 2>&1 || {
     curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -431,7 +441,7 @@ export async function ensurePythonToolchain(
   const expectedFp = toolchainFingerprint();
 
   // Check if already provisioned with matching fingerprint
-  if (await pathExists(ruffPath)) {
+  if (await isValidBinary(ruffPath)) {
     try {
       const currentFp = (await fs.readFile(fingerprintPath, "utf-8")).trim();
       if (currentFp === expectedFp) {
