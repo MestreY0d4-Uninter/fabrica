@@ -5,6 +5,7 @@ import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguous
 import {
   upsertTelegramBootstrapSession,
   readTelegramBootstrapSession,
+  deleteTelegramBootstrapSession,
 } from "../../lib/dispatch/telegram-bootstrap-session.js";
 
 const {
@@ -83,6 +84,8 @@ describe("telegram bootstrap hook", () => {
     mockReadProjects.mockResolvedValue({ projects: {} });
     mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: "/tmp/workspace" }]);
     mockProjectTick.mockResolvedValue({ pickups: [], skipped: [] });
+    ctx.runCommand.mockClear();
+    ctx.runCommand.mockResolvedValue({ stdout: "", stderr: "", code: 0 });
     await fs.rm("/tmp/workspace/fabrica/bootstrap-sessions", { recursive: true, force: true });
   });
 
@@ -664,5 +667,218 @@ describe("classifyDmIntent", () => {
       stackHint: null,
       projectSlug: null,
     });
+  });
+});
+
+// NOTE: The following describe block tests Layer 3 integration via the message_received handler.
+// These tests will FAIL until Task 5 wires classifyAndBootstrap() into the message_received handler.
+describe("Layer 3: LLM classification via message_received", () => {
+  let handler: ((msg: any, meta: any) => Promise<void>) | undefined;
+  const sendMessageTelegram = vi.fn(async () => undefined);
+
+  const ctx = {
+    pluginConfig: {
+      telegram: {
+        bootstrapDmEnabled: true,
+        projectsForumChatId: "-1003709213169",
+      },
+    },
+    config: {
+      agents: {
+        defaults: {
+          workspace: "/tmp/workspace",
+        },
+      },
+    },
+    logger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+    },
+    runtime: {
+      channel: {
+        telegram: {
+          sendMessageTelegram,
+        },
+      },
+    },
+    runCommand: vi.fn(async () => ({ stdout: "", stderr: "", code: 0 })),
+  } as any;
+
+  beforeEach(async () => {
+    handler = undefined;
+    sendMessageTelegram.mockClear();
+    ctx.runCommand.mockClear();
+    ctx.runCommand.mockResolvedValue({ stdout: "", stderr: "", code: 0 });
+    mockRunPipeline.mockReset();
+    mockReadProjects.mockReset();
+    mockProjectTick.mockReset();
+    mockDiscoverAgents.mockReset();
+    mockReadProjects.mockResolvedValue({ projects: {} });
+    mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: "/tmp/workspace" }]);
+    mockProjectTick.mockResolvedValue({ pickups: [], skipped: [] });
+    await fs.rm("/tmp/workspace/fabrica/bootstrap-sessions", { recursive: true, force: true });
+  });
+
+  it("classifies ambiguous message via LLM and triggers bootstrap when create_project", async () => {
+    const api = {
+      on: vi.fn((name: string, fn: any) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    ctx.runCommand.mockImplementation(async (args: string[]) => {
+      const argsStr = args.join(" ");
+      if (argsStr.includes("agent") && argsStr.includes("--local") && argsStr.includes("--json")) {
+        return {
+          stdout: JSON.stringify({
+            payloads: [{
+              text: '{"intent":"create_project","confidence":0.95,"stackHint":"python-cli","projectSlug":"validador-cpf"}',
+            }],
+          }),
+          stderr: "",
+          code: 0,
+        };
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    });
+
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 888,
+          project_slug: "validador-cpf",
+        },
+      },
+    });
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    // "Build me a Python CLI that validates CPF numbers" — no createCue, but has softwareCue "CLI"
+    await handler?.(
+      { content: "Build me a Python CLI that validates CPF numbers", metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    // classifyAndBootstrap is fire-and-forget; wait for pipeline
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 5000 });
+
+    // Verify ack was sent
+    expect(sendMessageTelegram).toHaveBeenCalledWith(
+      "6951571380",
+      expect.stringContaining("Recebi!"),
+      expect.anything(),
+    );
+  });
+
+  it("deletes session and does not bootstrap when LLM returns 'other'", async () => {
+    const api = {
+      on: vi.fn((name: string, fn: any) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    ctx.runCommand.mockImplementation(async () => ({
+      stdout: JSON.stringify({
+        payloads: [{
+          text: '{"intent":"other","confidence":0.95,"stackHint":null,"projectSlug":null}',
+        }],
+      }),
+      stderr: "",
+      code: 0,
+    }));
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    // "How does this API work?" — has softwareCue "API", >20 chars, but not a project request
+    await handler?.(
+      { content: "How does this API work in the system?", metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    // Wait for fire-and-forget to complete
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    expect(sendMessageTelegram).not.toHaveBeenCalled();
+  });
+
+  it("deletes session when LLM call fails (fail-open to chat)", async () => {
+    const api = {
+      on: vi.fn((name: string, fn: any) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    ctx.runCommand.mockImplementation(async () => { throw new Error("LLM timeout"); });
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    await handler?.(
+      { content: "I need a tool for data processing tasks", metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    expect(sendMessageTelegram).not.toHaveBeenCalled();
+    const session = await readTelegramBootstrapSession("/tmp/workspace", "6951571380");
+    expect(session).toBeNull();
+  });
+
+  it("enters clarification when LLM returns create_project without stackHint", async () => {
+    const api = {
+      on: vi.fn((name: string, fn: any) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    ctx.runCommand.mockImplementation(async () => ({
+      stdout: JSON.stringify({
+        payloads: [{
+          text: '{"intent":"create_project","confidence":0.9,"stackHint":null,"projectSlug":"task-manager"}',
+        }],
+      }),
+      stderr: "",
+      code: 0,
+    }));
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    // "I want an app that manages my tasks and deadlines" — no stack hint detectable
+    await handler?.(
+      { content: "I want an app that manages my tasks and deadlines", metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 5000 });
+
+    // First call: ack
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Recebi!");
+    // Second call: clarification asking for stack
+    expect(String(sendMessageTelegram.mock.calls[1]?.[1])).toMatch(/stack|tecnologia/i);
+
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+  });
+
+  it("does not call LLM for messages without softwareCue", async () => {
+    const api = {
+      on: vi.fn((name: string, fn: any) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    await handler?.(
+      { content: "Oi, como vai? Tudo tranquilo?", metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    expect(ctx.runCommand).not.toHaveBeenCalled();
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    expect(sendMessageTelegram).not.toHaveBeenCalled();
   });
 });

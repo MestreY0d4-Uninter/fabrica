@@ -13,6 +13,7 @@ import { extractJsonFromStdout } from "../intake/lib/extract-json.js";
 import { z } from "zod";
 import {
   buildBootstrapRequestHash,
+  deleteTelegramBootstrapSession,
   readTelegramBootstrapSession,
   shouldSuppressTelegramBootstrapReply,
   upsertTelegramBootstrapSession,
@@ -277,6 +278,98 @@ function logBootstrapWarning(ctx: PluginContext, message: string): void {
   if (typeof ctx.logger?.info === "function") {
     ctx.logger.info(message);
   }
+}
+
+/**
+ * Layer 3: LLM-based classification for ambiguous DMs.
+ * Classifies the message via classifyDmIntent. If LLM returns null, "other", or
+ * low confidence (< 0.7), deletes the classifying session (fail-open to chat).
+ * If "create_project" with confidence >= 0.7, sends ack, merges LLM enrichment
+ * into the parsed request, deduplicates, and enters clarification or fires the pipeline.
+ */
+async function classifyAndBootstrap(
+  ctx: PluginContext,
+  workspaceDir: string,
+  conversationId: string,
+  content: string,
+): Promise<void> {
+  const classification = await classifyDmIntent(ctx, content, workspaceDir);
+
+  // Fail-open: if LLM failed or returned "other" or low confidence, delete session so agent can respond
+  if (!classification || classification.intent !== "create_project" || classification.confidence < 0.7) {
+    if (!classification) {
+      logBootstrapWarning(ctx, `[telegram-bootstrap] LLM classify failed, falling back (conversation: ${conversationId})`);
+    }
+    await deleteTelegramBootstrapSession(workspaceDir, conversationId);
+    return;
+  }
+
+  // LLM says create_project with high confidence — send ack
+  await sendTelegramText(ctx, conversationId, "Recebi! Vou analisar e começar a montar o projeto...");
+
+  // Parse the original content with existing regex parser, then merge LLM enrichment
+  const parsed = parseBootstrapRequest(content);
+  if (classification.stackHint && !parsed.stackHint) {
+    parsed.stackHint = classification.stackHint;
+  }
+  if (classification.projectSlug && !parsed.projectName) {
+    parsed.projectName = classification.projectSlug;
+  }
+
+  const incomingRequest = {
+    rawIdea: parsed.rawIdea,
+    projectName: parsed.projectName ?? null,
+    stackHint: parsed.stackHint ?? null,
+    repoUrl: parsed.repoUrl ?? null,
+    repoPath: parsed.repoPath ?? null,
+  };
+
+  // Dedup check — same logic as Layer 2
+  const incomingRequestHash = buildBootstrapRequestHash(incomingRequest);
+  const sessionForHash = await readTelegramBootstrapSession(workspaceDir, conversationId);
+  if (sessionForHash?.requestHash === incomingRequestHash) {
+    if (sessionForHash.status === "completed") {
+      ctx.logger.info(`[telegram-bootstrap] duplicate completed DM ignored (LLM path) for conversation ${conversationId}`);
+      return;
+    }
+    const isExpiredReceived =
+      sessionForHash.status === "received" &&
+      Date.parse(sessionForHash.suppressUntil) < Date.now();
+    if (sessionForHash.status !== "failed" && sessionForHash.status !== "classifying" && !isExpiredReceived) {
+      ctx.logger.info(`[telegram-bootstrap] duplicate in-flight DM ignored (LLM path) for conversation ${conversationId}`);
+      return;
+    }
+  }
+
+  const sourceRoute: TelegramBootstrapRoute = { channel: "telegram", channelId: conversationId };
+
+  // Upsert session with "received" status
+  const session = await upsertTelegramBootstrapSession(workspaceDir, {
+    conversationId,
+    ...incomingRequest,
+    sourceRoute,
+    sourceChannel: "telegram",
+    status: "received",
+  });
+
+  // If no stack hint, enter clarification flow (same as Layer 2)
+  if (!parsed.stackHint) {
+    const pendingClarification = !parsed.projectName ? "stack_and_name" as const : "stack" as const;
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId,
+      ...incomingRequest,
+      sourceRoute: session.sourceRoute,
+      status: "clarifying",
+      pendingClarification,
+    });
+    await sendTelegramText(ctx, conversationId, buildClarificationMessage(parsed, pendingClarification));
+    return;
+  }
+
+  // Fire-and-forget pipeline
+  continueBootstrap(ctx, conversationId, workspaceDir, incomingRequest, sourceRoute).catch((err) => {
+    logBootstrapWarning(ctx, `[telegram-bootstrap] unhandled pipeline error (LLM path): ${err instanceof Error ? err.message : String(err)}`);
+  });
 }
 
 /**
