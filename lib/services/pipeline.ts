@@ -86,7 +86,12 @@ export async function persistMergedArtifact(opts: {
     },
     currentPrState: PrState.MERGED,
     followUpPrRequired: false,
-  }).catch(() => {});
+  }).catch((err) => {
+    console.warn(
+      JSON.stringify({ projectSlug, issueId, prNumber, error: String(err) }),
+      "persistMergedArtifact failed — issue close guard may not find merge evidence",
+    );
+  });
 }
 
 export async function guardedCloseIssue(opts: {
