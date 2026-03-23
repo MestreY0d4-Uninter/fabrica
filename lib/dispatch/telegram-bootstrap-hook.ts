@@ -109,6 +109,7 @@ type DmIntentClassification = {
   confidence: number;
   stackHint?: string | null;
   projectSlug?: string | null;
+  language: "pt" | "en";
 };
 
 const DmIntentSchema = z.object({
@@ -116,6 +117,7 @@ const DmIntentSchema = z.object({
   confidence: z.number().min(0).max(1),
   stackHint: z.string().nullable().optional(),
   projectSlug: z.string().nullable().optional(),
+  language: z.enum(["pt", "en"]).optional().default("pt"),
 });
 
 const CLASSIFY_PROMPT_TEMPLATE = `Classify this Telegram DM. Is the user asking to create/build a new software project, or is it something else (question, greeting, status check)?
@@ -123,14 +125,14 @@ const CLASSIFY_PROMPT_TEMPLATE = `Classify this Telegram DM. Is the user asking 
 Message: "$CONTENT"
 
 Return ONLY valid JSON:
-{"intent": "create_project" | "other", "confidence": 0.0-1.0, "stackHint": "<detected stack or null>", "projectSlug": "<suggested slug or null>"}
+{"intent": "create_project" | "other", "confidence": 0.0-1.0, "stackHint": "<detected stack or null>", "projectSlug": "<suggested slug or null>", "language": "pt" | "en"}
 
 Examples:
-- "Cria uma CLI Python que valida CPF" → {"intent":"create_project","confidence":0.95,"stackHint":"python-cli","projectSlug":"validador-cpf-cli"}
-- "Build me a REST API for tasks" → {"intent":"create_project","confidence":0.9,"stackHint":"fastapi","projectSlug":"task-api"}
-- "How's the project going?" → {"intent":"other","confidence":0.95,"stackHint":null,"projectSlug":null}
-- "Oi, tudo bem?" → {"intent":"other","confidence":0.99,"stackHint":null,"projectSlug":null}
-- "Me faz um app que converte temperaturas" → {"intent":"create_project","confidence":0.9,"stackHint":null,"projectSlug":"conversor-temperaturas"}`;
+- "Cria uma CLI Python que valida CPF" → {"intent":"create_project","confidence":0.95,"stackHint":"python-cli","projectSlug":"validador-cpf-cli","language":"pt"}
+- "Build me a REST API for tasks" → {"intent":"create_project","confidence":0.9,"stackHint":"fastapi","projectSlug":"task-api","language":"en"}
+- "How's the project going?" → {"intent":"other","confidence":0.95,"stackHint":null,"projectSlug":null,"language":"en"}
+- "Oi, tudo bem?" → {"intent":"other","confidence":0.99,"stackHint":null,"projectSlug":null,"language":"pt"}
+- "Me faz um app que converte temperaturas" → {"intent":"create_project","confidence":0.9,"stackHint":null,"projectSlug":"conversor-temperaturas","language":"pt"}`;
 
 async function classifyDmIntent(
   ctx: PluginContext,

@@ -48,6 +48,7 @@ export type TelegramBootstrapSession = {
   createdAt: string;
   updatedAt: string;
   suppressUntil: string;
+  language?: "pt" | "en";
   error?: string | null;
 };
 
@@ -164,6 +165,7 @@ export async function upsertTelegramBootstrapSession(
     issueId?: number | null;
     messageThreadId?: number | null;
     projectChannelId?: string | null;
+    language?: "pt" | "en";
   },
 ): Promise<TelegramBootstrapSession> {
   const existing = await readTelegramBootstrapSession(workspaceDir, input.conversationId);
@@ -196,6 +198,7 @@ export async function upsertTelegramBootstrapSession(
     issueId: input.issueId ?? existing?.issueId ?? null,
     messageThreadId: input.messageThreadId ?? existing?.messageThreadId ?? null,
     projectChannelId: input.projectChannelId ?? existing?.projectChannelId ?? null,
+    language: input.language ?? existing?.language,
     status: input.status,
     pendingClarification: input.pendingClarification !== undefined
       ? input.pendingClarification

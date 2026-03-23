@@ -807,6 +807,7 @@ describe("classifyDmIntent", () => {
       confidence: 0.95,
       stackHint: "python-cli",
       projectSlug: "cpf-validator",
+      language: "pt",
     });
   });
 
@@ -830,6 +831,7 @@ describe("classifyDmIntent", () => {
       confidence: 0.99,
       stackHint: null,
       projectSlug: null,
+      language: "pt",
     });
   });
 
@@ -895,7 +897,40 @@ describe("classifyDmIntent", () => {
       confidence: 0.5,
       stackHint: null,
       projectSlug: null,
+      language: "pt",
     });
+  });
+
+  it("returns language field when LLM provides it", async () => {
+    const mockCtx = {
+      ...ctx,
+      runCommand: vi.fn(async () => ({
+        stdout: JSON.stringify({
+          payloads: [{ text: '{"intent":"create_project","confidence":0.9,"stackHint":"python-cli","projectSlug":"test","language":"en"}' }],
+        }),
+        stderr: "",
+        code: 0,
+      })),
+    };
+    const result = await classifyDmIntent(mockCtx as any, "Build me a CLI", "/tmp/workspace");
+    expect(result).not.toBeNull();
+    expect(result!.language).toBe("en");
+  });
+
+  it("defaults language to 'pt' when LLM omits it", async () => {
+    const mockCtx = {
+      ...ctx,
+      runCommand: vi.fn(async () => ({
+        stdout: JSON.stringify({
+          payloads: [{ text: '{"intent":"create_project","confidence":0.9,"stackHint":"python-cli","projectSlug":"test"}' }],
+        }),
+        stderr: "",
+        code: 0,
+      })),
+    };
+    const result = await classifyDmIntent(mockCtx as any, "Cria uma CLI", "/tmp/workspace");
+    expect(result).not.toBeNull();
+    expect(result!.language).toBe("pt");
   });
 });
 
