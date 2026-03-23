@@ -20,6 +20,7 @@ import { detectStepRouting } from "../queue-scan.js";
 import { log as auditLog } from "../../audit.js";
 import { guardedCloseIssue, persistMergedArtifact } from "../pipeline.js";
 import { readProjects, getProject, getIssueRuntime } from "../../projects/index.js";
+import { resilientLabelTransition } from "../../workflow/labels.js";
 
 /**
  * Scan test queue states and auto-transition issues with test:skip.
@@ -106,7 +107,7 @@ export async function testSkipPass(opts: {
                   const failedKey = typeof failedTransition === "string" ? failedTransition : failedTransition.target;
                   const failedState = workflow.states[failedKey];
                   if (failedState) {
-                    await provider.transitionLabel(issue.iid, state.label, failedState.label);
+                    await resilientLabelTransition(provider, issue.iid, state.label, failedState.label);
                     transitions++;
                   }
                 }
@@ -147,7 +148,7 @@ export async function testSkipPass(opts: {
       if (aborted) continue;
 
       // Transition label
-      await provider.transitionLabel(issue.iid, state.label, targetState.label);
+      await resilientLabelTransition(provider, issue.iid, state.label, targetState.label);
 
       await auditLog(workspaceDir, "test_skip_transition", {
         project: projectName,

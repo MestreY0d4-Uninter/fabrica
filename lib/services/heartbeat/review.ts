@@ -20,6 +20,7 @@ import type { RunCommand } from "../../context.js";
 import { log as auditLog } from "../../audit.js";
 import { guardedCloseIssue, persistMergedArtifact } from "../pipeline.js";
 import { readProjects, getProject, getIssueRuntime, updateIssueRuntime } from "../../projects/index.js";
+import { resilientLabelTransition } from "../../workflow/labels.js";
 
 /**
  * Scan review-type states and transition issues whose PR check condition is met.
@@ -101,7 +102,7 @@ export async function reviewPass(opts: {
           const targetKey = typeof changesTransition === "string" ? changesTransition : changesTransition.target;
           const targetState = workflow.states[targetKey];
           if (targetState) {
-            await provider.transitionLabel(issue.iid, state.label, targetState.label);
+            await resilientLabelTransition(provider, issue.iid, state.label, targetState.label);
             await auditLog(workspaceDir, "review_transition", {
               project: projectName, issueId: issue.iid,
               from: state.label, to: targetState.label,
@@ -124,7 +125,7 @@ export async function reviewPass(opts: {
           const targetKey = typeof conflictTransition === "string" ? conflictTransition : conflictTransition.target;
           const targetState = workflow.states[targetKey];
           if (targetState) {
-            await provider.transitionLabel(issue.iid, state.label, targetState.label);
+            await resilientLabelTransition(provider, issue.iid, state.label, targetState.label);
             await auditLog(workspaceDir, "review_transition", {
               project: projectName, issueId: issue.iid,
               from: state.label, to: targetState.label,
@@ -158,7 +159,7 @@ export async function reviewPass(opts: {
           const closedActions = typeof closedTransition === "object" ? closedTransition.actions : undefined;
           const targetState = workflow.states[targetKey];
           if (targetState) {
-            await provider.transitionLabel(issue.iid, state.label, targetState.label);
+            await resilientLabelTransition(provider, issue.iid, state.label, targetState.label);
             if (closedActions) {
               for (const action of closedActions) {
                 switch (action) {
@@ -281,7 +282,7 @@ export async function reviewPass(opts: {
                   const failedKey = typeof failedTransition === "string" ? failedTransition : failedTransition.target;
                   const failedState = workflow.states[failedKey];
                   if (failedState) {
-                    await provider.transitionLabel(issue.iid, state.label, failedState.label);
+                    await resilientLabelTransition(provider, issue.iid, state.label, failedState.label);
                     await auditLog(workspaceDir, "review_transition", {
                       project: projectName,
                       issueId: issue.iid,
@@ -326,7 +327,7 @@ export async function reviewPass(opts: {
       if (aborted) continue; // skip normal transition, move to next issue
 
       // Transition label
-      await provider.transitionLabel(issue.iid, state.label, targetState.label);
+      await resilientLabelTransition(provider, issue.iid, state.label, targetState.label);
 
       await auditLog(workspaceDir, "review_transition", {
         project: projectName,

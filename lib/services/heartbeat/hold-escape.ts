@@ -19,6 +19,7 @@ import { log as auditLog } from "../../audit.js";
 import { persistMergedArtifact } from "../pipeline.js";
 import { readProjects, getProject, getIssueRuntime, clearIssueRuntime } from "../../projects/index.js";
 import { getCanonicalPrSelector } from "../../projects/pr-binding.js";
+import { resilientLabelTransition } from "../../workflow/labels.js";
 
 /**
  * Scan hold states and close issues whose canonical PR is already merged.
@@ -87,7 +88,7 @@ export async function holdEscapePass(opts: {
         await clearIssueRuntime(workspaceDir, project.slug, issue.iid);
 
         // Transition label to terminal state (after close to avoid orphaned Done+open)
-        await provider.transitionLabel(issue.iid, state.label, terminalState.label);
+        await resilientLabelTransition(provider, issue.iid, state.label, terminalState.label);
 
         await auditLog(workspaceDir, "hold_escape_transition", {
           project: projectName,

@@ -56,6 +56,7 @@ import type { PluginRuntime } from "openclaw/plugin-sdk";
 import type { RunCommand } from "../../context.js";
 import { withCorrelationContext } from "../../observability/context.js";
 import { withTelemetrySpan } from "../../observability/telemetry.js";
+import { resilientLabelTransition } from "../../workflow/labels.js";
 
 // Re-export for consumers that import from health.ts
 export { fetchGatewaySessions, isSessionAlive, type GatewaySession, type SessionLookup } from "../gateway-sessions.js";
@@ -335,7 +336,7 @@ export async function checkWorkerHealth(opts: {
       async function revertLabel(fix: HealthFix, from: StateLabel, to: StateLabel) {
         if (!issueIdNum) return;
         try {
-          await provider.transitionLabel(issueIdNum, from, to);
+          await resilientLabelTransition(provider, issueIdNum, from, to);
           fix.labelReverted = `${from} → ${to}`;
         } catch {
           fix.labelRevertFailed = true;
@@ -998,7 +999,7 @@ export async function scanOrphanedLabels(opts: {
           const revertTarget = await resolveOrphanRevertLabel(
             provider, issue.iid, role, queueLabel, workflow,
           );
-          await provider.transitionLabel(issue.iid, activeLabel, revertTarget);
+          await resilientLabelTransition(provider, issue.iid, activeLabel, revertTarget);
           fix.fixed = true;
           fix.labelReverted = `${activeLabel} → ${revertTarget}`;
           fix.issue.expectedLabel = revertTarget;

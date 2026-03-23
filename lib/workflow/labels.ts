@@ -204,7 +204,7 @@ export async function resilientLabelTransition(
         for (let i = 0; i < 2; i++) {
           try {
             await provider.removeLabels(issueId, [from]);
-            log?.(`Dual state resolved: removed ${from} from issue ${issueId}`);
+            log?.(`dual_state_recovery: removed ${from} from issue ${issueId} (atomic PUT should have prevented this — investigate)`);
             return { success: true, dualStateResolved: true };
           } catch (retryErr) {
             log?.(`Retry ${i + 1}/2 to remove ${from} failed: ${String(retryErr)}`);
