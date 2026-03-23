@@ -10,20 +10,35 @@ import {
   circuitBreaker,
   ConsecutiveBreaker,
   handleAll,
+  handleWhen,
   wrap,
   type IPolicy,
 } from "cockatiel";
+
+/**
+ * Thrown when a GitHub API call receives a rate limit response (429 or 403 with
+ * x-ratelimit-remaining: 0). NOT retried by the cockatiel policy — rate limits
+ * require waiting 60+ seconds, not exponential backoff retries.
+ */
+export class GitHubRateLimitError extends Error {
+  constructor(public readonly retryAfterMs: number) {
+    super(`GitHub rate limit — retry after ${retryAfterMs}ms`);
+    this.name = "GitHubRateLimitError";
+  }
+}
 
 const MAX_ENTRIES = 50;
 const policyCache = new Map<string, IPolicy>();
 const accessOrder: string[] = [];
 
 function createPolicy(): IPolicy {
-  const retryPolicy = retry(handleAll, {
+  const retryableErrors = handleWhen((err) => !(err instanceof GitHubRateLimitError));
+
+  const retryPolicy = retry(retryableErrors, {
     maxAttempts: 3,
     backoff: new ExponentialBackoff({
       initialDelay: 500,
-      maxDelay: 5_000,
+      maxDelay: 10_000,
     }),
   });
 
