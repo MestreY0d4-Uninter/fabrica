@@ -22,7 +22,7 @@ import {
 } from "./provider.js";
 import type { RunCommand } from "../context.js";
 import { getRootLogger } from "../observability/logger.js";
-import { withResilience } from "./resilience.js";
+import { withResilience, GitHubRateLimitError } from "./resilience.js";
 import {
   DEFAULT_WORKFLOW,
   getStateLabels,
@@ -158,6 +158,37 @@ export class GitHubProvider implements IssueProvider {
 
   private async gh(args: string[]): Promise<string> {
     return this.ghAt(args, { cwd: this.repoPath });
+  }
+
+  private get providerKey(): string {
+    return this.repoPath;
+  }
+
+  /**
+   * Execute a `gh api` call with optional JSON body sent via stdin.
+   * Uses withResilience (per-provider retry + circuit breaker).
+   * Throws GitHubRateLimitError on 429 / rate limit responses.
+   */
+  private async ghApi(endpoint: string, method: string, body?: unknown): Promise<string> {
+    const args = ["api", endpoint, "--method", method];
+    if (body !== undefined) {
+      args.push("--input", "-");
+    }
+    return withResilience(async () => {
+      const result = await this.runCommand(["gh", ...args], {
+        timeoutMs: 30_000,
+        cwd: this.repoPath,
+        input: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+      if (result.code != null && result.code !== 0) {
+        const errText = result.stderr?.trim() ?? "";
+        if (errText.includes("rate limit") || errText.includes("429")) {
+          throw new GitHubRateLimitError(60_000);
+        }
+        throw new Error(errText || `gh api ${method} ${endpoint} failed with exit code ${result.code}`);
+      }
+      return result.stdout.trim();
+    }, this.providerKey);
   }
 
   private async git(args: string[], opts?: { cwd?: string; timeoutMs?: number; allowFailure?: boolean }): Promise<string> {
@@ -734,41 +765,33 @@ export class GitHubProvider implements IssueProvider {
   }
 
   async transitionLabel(issueId: number, from: StateLabel, to: StateLabel): Promise<void> {
-    // Two-phase transition to ensure atomicity and recoverability:
-    // Phase 1: Add new label first (safer than removing first)
-    // Phase 2: Remove old state labels
-    // This way, if phase 2 fails, the issue still has the new label (issue is correctly transitioned)
-    // instead of having no state label at all.
-    
-    await this.gh(["issue", "edit", String(issueId), "--add-label", to]);
-    
-    // Remove old state labels (best-effort if there are multiple old labels)
+    // Read current labels to compute desired set.
     const issue = await this.getIssue(issueId);
     const stateLabels = getStateLabels(this.workflow);
-    const currentStateLabels = issue.labels.filter((l) => stateLabels.includes(l) && l !== to);
-    const staleOperationalLabels = issue.labels.filter((l) =>
-      LEGACY_OPERATIONAL_LABELS.includes(l as (typeof LEGACY_OPERATIONAL_LABELS)[number]),
-    );
 
-    if (currentStateLabels.length > 0 || staleOperationalLabels.length > 0) {
-      const args = ["issue", "edit", String(issueId)];
-      for (const l of currentStateLabels) args.push("--remove-label", l);
-      for (const l of staleOperationalLabels) args.push("--remove-label", l);
-      await this.gh(args);
-    }
+    // Compute desired label set: keep non-state + non-legacy labels, add target state label.
+    const desired = issue.labels
+      .filter(
+        (l) =>
+          !stateLabels.includes(l) &&
+          !LEGACY_OPERATIONAL_LABELS.includes(l as (typeof LEGACY_OPERATIONAL_LABELS)[number]),
+      )
+      .concat(to);
 
-    // Post-transition validation: verify exactly one state label remains (#473)
+    // Single atomic PUT — replaces ALL labels in one HTTP call.
+    // Eliminates the race window where fixDualStateLabels could interfere between
+    // the old add-then-remove two-phase approach.
+    await this.ghApi(`repos/{owner}/{repo}/issues/${issueId}/labels`, "PUT", { labels: desired });
+
+    // Post-transition validation (best-effort — don't fail the transition)
     try {
       const postIssue = await this.getIssue(issueId);
       const postStateLabels = postIssue.labels.filter((l) => stateLabels.includes(l));
       if (postStateLabels.length !== 1 || !postStateLabels.includes(to)) {
-        // Log anomaly but don't throw — transition is already committed
-        logger.error({
-          issueId,
-          from,
-          to,
-          postStateLabels,
-        }, "State transition anomaly detected after GitHub issue label transition");
+        logger.error(
+          { issueId, from, to, postStateLabels },
+          "State transition anomaly detected after atomic label PUT",
+        );
       }
     } catch {
       // Validation is best-effort — don't break the transition
