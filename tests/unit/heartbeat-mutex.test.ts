@@ -2,36 +2,35 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { raceWithTimeout } from "../../lib/utils/async.js";
 
 describe("heartbeat mutex deadlock prevention", () => {
-  it("releases mutex when tickPromise is undefined in timeout handler", async () => {
-    // Simulate the heartbeat mutex pattern:
-    // _anyTickRunning should be released even if tickPromise is not assigned
+  it("deferred promise always releases mutex on timeout", async () => {
+    // The deferred promise pattern ensures tickPromise is always defined
+    // when the timeout handler fires, so the mutex is always released.
     let mutexReleased = false;
-    let tickPromise: Promise<void> | undefined;
+
+    let resolveTick!: (v: unknown) => void;
+    const tickPromise = new Promise<unknown>((res) => { resolveTick = res; });
+    tickPromise.catch(() => {});
 
     const result = await raceWithTimeout(
       () => {
-        // Simulate a tick that takes long enough for timeout to fire
-        // In the real code, tickPromise is assigned by wrappedTickFn
-        tickPromise = new Promise<void>((resolve) => setTimeout(resolve, 200));
-        return tickPromise;
+        // Simulate a tick that takes longer than the timeout
+        return new Promise<void>((resolve) => {
+          setTimeout(() => { resolveTick("done"); resolve(); }, 200);
+        });
       },
       50, // timeout fires after 50ms
       () => {
-        // This is the timeout handler. In the real code, it checks tickPromise.
-        // The bug is that if tickPromise is undefined here, the mutex is never released.
-        // After the fix, the else branch releases the mutex.
-        if (tickPromise) {
-          tickPromise.finally(() => { mutexReleased = true; });
-        } else {
-          // FIX: release mutex in the else branch
-          mutexReleased = true;
-        }
+        // With the deferred pattern, tickPromise is ALWAYS defined here
+        // — no if/else needed
+        tickPromise.finally(() => { mutexReleased = true; });
       },
     );
 
     expect(result).toBe("timeout");
-    // Wait for the tickPromise to settle
-    await new Promise((r) => setTimeout(r, 300));
+    // Wait for the tickPromise to settle (it resolves after 200ms)
+    await tickPromise;
+    // Give microtask queue time to run .finally()
+    await new Promise((r) => setTimeout(r, 10));
     expect(mutexReleased).toBe(true);
   });
 });
