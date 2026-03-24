@@ -46,6 +46,9 @@ describe("telegram bootstrap hook", () => {
   let beforePromptBuildHandler: ((event: any, eventCtx: any) => Promise<any>) | undefined;
   let messageSendingHandler: ((event: any, eventCtx: any) => Promise<any>) | undefined;
   const sendMessageTelegram = vi.fn(async () => undefined);
+  const outerMockSubagentRun = vi.fn().mockResolvedValue({ runId: "outer-run" });
+  const outerMockSubagentWait = vi.fn().mockResolvedValue({ status: "ok" });
+  const outerMockSubagentGetMessages = vi.fn().mockResolvedValue([]);
 
   const ctx = {
     pluginConfig: {
@@ -71,6 +74,11 @@ describe("telegram bootstrap hook", () => {
           sendMessageTelegram,
         },
       },
+      subagent: {
+        run: outerMockSubagentRun,
+        waitForRun: outerMockSubagentWait,
+        getSessionMessages: outerMockSubagentGetMessages,
+      },
     },
     runCommand: vi.fn(async () => ({ stdout: "", stderr: "", code: 0 })),
   } as any;
@@ -89,6 +97,12 @@ describe("telegram bootstrap hook", () => {
     mockProjectTick.mockResolvedValue({ pickups: [], skipped: [] });
     ctx.runCommand.mockClear();
     ctx.runCommand.mockResolvedValue({ stdout: "", stderr: "", code: 0 });
+    outerMockSubagentRun.mockClear();
+    outerMockSubagentWait.mockClear();
+    outerMockSubagentGetMessages.mockClear();
+    outerMockSubagentRun.mockResolvedValue({ runId: "outer-run" });
+    outerMockSubagentWait.mockResolvedValue({ status: "ok" });
+    outerMockSubagentGetMessages.mockResolvedValue([]);
     await fs.rm("/tmp/workspace/fabrica/bootstrap-sessions", { recursive: true, force: true });
   });
 
@@ -727,12 +741,12 @@ describe("telegram bootstrap hook", () => {
 
     registerTelegramBootstrapHook(api, ctx);
 
-    // Block the classify runCommand so the session stays observable
+    // Block the classify subagent.run so the session stays observable
     let resolveClassify!: () => void;
     const classifyBarrier = new Promise<void>(resolve => { resolveClassify = resolve; });
-    ctx.runCommand.mockImplementationOnce(async () => {
+    outerMockSubagentRun.mockImplementationOnce(async () => {
       await classifyBarrier;
-      return { stdout: "", stderr: "", code: 0 };
+      return { runId: "blocked-run" };
     });
 
     // Fire handler — the handler creates the session synchronously then fires classify as fire-and-forget
@@ -883,21 +897,27 @@ describe("classifyDmIntent", () => {
     runCommand: vi.fn(async () => ({ stdout: "", stderr: "", code: 0 })),
   } as any;
 
-  it("returns create_project classification for a valid LLM response", async () => {
-    const mockCtx = {
+  function makeSubagentCtx(responseContent: string, opts: { throws?: boolean; waitStatus?: string } = {}) {
+    const mockRun = opts.throws
+      ? vi.fn(async () => { throw new Error("timeout"); })
+      : vi.fn().mockResolvedValue({ runId: "test-run" });
+    const mockWait = vi.fn().mockResolvedValue({ status: opts.waitStatus ?? "ok" });
+    const mockGetMessages = vi.fn().mockResolvedValue([
+      { role: "assistant", content: responseContent },
+    ]);
+    return {
       ...ctx,
-      runCommand: vi.fn(async () => ({
-        stdout: JSON.stringify({
-          payloads: [{
-            text: '{"intent":"create_project","confidence":0.95,"stackHint":"python-cli","projectSlug":"cpf-validator"}',
-          }],
-        }),
-        stderr: "",
-        code: 0,
-      })),
-    };
+      runtime: {
+        ...ctx.runtime,
+        subagent: { run: mockRun, waitForRun: mockWait, getSessionMessages: mockGetMessages },
+      },
+    } as any;
+  }
 
-    const result = await classifyDmIntent(mockCtx as any, "Cria uma CLI Python que valida CPF", "/tmp/workspace");
+  it("returns create_project classification for a valid LLM response", async () => {
+    const mockCtx = makeSubagentCtx('{"intent":"create_project","confidence":0.95,"stackHint":"python-cli","projectSlug":"cpf-validator"}');
+
+    const result = await classifyDmIntent(mockCtx, "Cria uma CLI Python que valida CPF", "/tmp/workspace");
     expect(result).toEqual({
       intent: "create_project",
       confidence: 0.95,
@@ -908,20 +928,9 @@ describe("classifyDmIntent", () => {
   });
 
   it("returns other classification for non-project messages", async () => {
-    const mockCtx = {
-      ...ctx,
-      runCommand: vi.fn(async () => ({
-        stdout: JSON.stringify({
-          payloads: [{
-            text: '{"intent":"other","confidence":0.99,"stackHint":null,"projectSlug":null}',
-          }],
-        }),
-        stderr: "",
-        code: 0,
-      })),
-    };
+    const mockCtx = makeSubagentCtx('{"intent":"other","confidence":0.99,"stackHint":null,"projectSlug":null}');
 
-    const result = await classifyDmIntent(mockCtx as any, "Oi, tudo bem?", "/tmp/workspace");
+    const result = await classifyDmIntent(mockCtx, "Oi, tudo bem?", "/tmp/workspace");
     expect(result).toEqual({
       intent: "other",
       confidence: 0.99,
@@ -932,62 +941,30 @@ describe("classifyDmIntent", () => {
   });
 
   it("returns null when LLM throws (timeout/error)", async () => {
-    const mockCtx = {
-      ...ctx,
-      runCommand: vi.fn(async () => { throw new Error("timeout"); }),
-    };
+    const mockCtx = makeSubagentCtx("", { throws: true });
 
-    const result = await classifyDmIntent(mockCtx as any, "Build me a tool", "/tmp/workspace");
+    const result = await classifyDmIntent(mockCtx, "Build me a tool", "/tmp/workspace");
     expect(result).toBeNull();
   });
 
   it("returns null when LLM returns invalid JSON", async () => {
-    const mockCtx = {
-      ...ctx,
-      runCommand: vi.fn(async () => ({
-        stdout: "not json at all",
-        stderr: "",
-        code: 0,
-      })),
-    };
+    const mockCtx = makeSubagentCtx("not json at all");
 
-    const result = await classifyDmIntent(mockCtx as any, "Build me a tool", "/tmp/workspace");
+    const result = await classifyDmIntent(mockCtx, "Build me a tool", "/tmp/workspace");
     expect(result).toBeNull();
   });
 
   it("returns null when LLM response fails Zod validation", async () => {
-    const mockCtx = {
-      ...ctx,
-      runCommand: vi.fn(async () => ({
-        stdout: JSON.stringify({
-          payloads: [{
-            text: '{"intent":"maybe","confidence":"high"}',
-          }],
-        }),
-        stderr: "",
-        code: 0,
-      })),
-    };
+    const mockCtx = makeSubagentCtx('{"intent":"maybe","confidence":"high"}');
 
-    const result = await classifyDmIntent(mockCtx as any, "Build me a tool", "/tmp/workspace");
+    const result = await classifyDmIntent(mockCtx, "Build me a tool", "/tmp/workspace");
     expect(result).toBeNull();
   });
 
   it("returns low-confidence classification without filtering (caller decides threshold)", async () => {
-    const mockCtx = {
-      ...ctx,
-      runCommand: vi.fn(async () => ({
-        stdout: JSON.stringify({
-          payloads: [{
-            text: '{"intent":"create_project","confidence":0.5,"stackHint":null,"projectSlug":null}',
-          }],
-        }),
-        stderr: "",
-        code: 0,
-      })),
-    };
+    const mockCtx = makeSubagentCtx('{"intent":"create_project","confidence":0.5,"stackHint":null,"projectSlug":null}');
 
-    const result = await classifyDmIntent(mockCtx as any, "I need something for tasks", "/tmp/workspace");
+    const result = await classifyDmIntent(mockCtx, "I need something for tasks", "/tmp/workspace");
     expect(result).toEqual({
       intent: "create_project",
       confidence: 0.5,
@@ -998,43 +975,115 @@ describe("classifyDmIntent", () => {
   });
 
   it("returns language field when LLM provides it", async () => {
-    const mockCtx = {
-      ...ctx,
-      runCommand: vi.fn(async () => ({
-        stdout: JSON.stringify({
-          payloads: [{ text: '{"intent":"create_project","confidence":0.9,"stackHint":"python-cli","projectSlug":"test","language":"en"}' }],
-        }),
-        stderr: "",
-        code: 0,
-      })),
-    };
-    const result = await classifyDmIntent(mockCtx as any, "Build me a CLI", "/tmp/workspace");
+    const mockCtx = makeSubagentCtx('{"intent":"create_project","confidence":0.9,"stackHint":"python-cli","projectSlug":"test","language":"en"}');
+    const result = await classifyDmIntent(mockCtx, "Build me a CLI", "/tmp/workspace");
     expect(result).not.toBeNull();
     expect(result!.language).toBe("en");
   });
 
   it("defaults language to 'pt' when LLM omits it", async () => {
+    const mockRun = vi.fn().mockResolvedValue({ runId: "test-lang-run" });
+    const mockWait = vi.fn().mockResolvedValue({ status: "ok" });
+    const mockGetMessages = vi.fn().mockResolvedValue([
+      { role: "assistant", content: '{"intent":"create_project","confidence":0.9,"stackHint":"python-cli","projectSlug":"test"}' },
+    ]);
     const mockCtx = {
       ...ctx,
-      runCommand: vi.fn(async () => ({
-        stdout: JSON.stringify({
-          payloads: [{ text: '{"intent":"create_project","confidence":0.9,"stackHint":"python-cli","projectSlug":"test"}' }],
-        }),
-        stderr: "",
-        code: 0,
-      })),
+      runtime: {
+        ...ctx.runtime,
+        subagent: { run: mockRun, waitForRun: mockWait, getSessionMessages: mockGetMessages },
+      },
     };
     const result = await classifyDmIntent(mockCtx as any, "Cria uma CLI", "/tmp/workspace");
     expect(result).not.toBeNull();
     expect(result!.language).toBe("pt");
   });
+
+  it("returns classification via runtime.subagent.run when available", async () => {
+    const mockRun = vi.fn().mockResolvedValue({ runId: "test-run-1" });
+    const mockWait = vi.fn().mockResolvedValue({ status: "ok" });
+    const mockGetMessages = vi.fn().mockResolvedValue([
+      { role: "assistant", content: JSON.stringify({
+        intent: "create_project",
+        confidence: 0.95,
+        stackHint: "python-cli",
+        projectSlug: "base-converter",
+        language: "en",
+      })},
+    ]);
+
+    const ctxWithSubagent = {
+      ...ctx,
+      runtime: {
+        ...ctx.runtime,
+        subagent: {
+          run: mockRun,
+          waitForRun: mockWait,
+          getSessionMessages: mockGetMessages,
+        },
+      },
+    } as any;
+
+    const result = await classifyDmIntent(ctxWithSubagent, "I need a CLI tool that converts numbers between bases", "/tmp/workspace");
+    expect(result).not.toBeNull();
+    expect(result!.intent).toBe("create_project");
+    expect(result!.projectSlug).toBe("base-converter");
+    expect(mockRun).toHaveBeenCalledTimes(1);
+    expect(mockRun.mock.calls[0][0]).toMatchObject({
+      lane: "subagent",
+      deliver: false,
+    });
+  });
+
+  it("returns null when runtime.subagent is not available", async () => {
+    const ctxNoSubagent = { ...ctx, runtime: { channel: ctx.runtime.channel } } as any;
+    const result = await classifyDmIntent(ctxNoSubagent, "Build me a REST API", "/tmp/workspace");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when LLM response is not valid JSON", async () => {
+    const mockRun = vi.fn().mockResolvedValue({ runId: "test-run-2" });
+    const mockWait = vi.fn().mockResolvedValue({ status: "ok" });
+    const mockGetMessages = vi.fn().mockResolvedValue([
+      { role: "assistant", content: "Sorry, I cannot classify this message." },
+    ]);
+
+    const ctxBadResponse = {
+      ...ctx,
+      runtime: {
+        ...ctx.runtime,
+        subagent: { run: mockRun, waitForRun: mockWait, getSessionMessages: mockGetMessages },
+      },
+    } as any;
+
+    const result = await classifyDmIntent(ctxBadResponse, "Hello there", "/tmp/workspace");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when subagent times out", async () => {
+    const mockRun = vi.fn().mockResolvedValue({ runId: "test-run-3" });
+    const mockWait = vi.fn().mockResolvedValue({ status: "timeout" });
+
+    const ctxTimeout = {
+      ...ctx,
+      runtime: {
+        ...ctx.runtime,
+        subagent: { run: mockRun, waitForRun: mockWait, getSessionMessages: vi.fn() },
+      },
+    } as any;
+
+    const result = await classifyDmIntent(ctxTimeout, "Create a CLI", "/tmp/workspace");
+    expect(result).toBeNull();
+  });
 });
 
 // NOTE: The following describe block tests Layer 3 integration via the message_received handler.
-// These tests will FAIL until Task 5 wires classifyAndBootstrap() into the message_received handler.
 describe("Layer 3: LLM classification via message_received", () => {
   let handler: ((msg: any, meta: any) => Promise<void>) | undefined;
   const sendMessageTelegram = vi.fn(async () => undefined);
+  const mockSubagentRun = vi.fn().mockResolvedValue({ runId: "layer3-run" });
+  const mockSubagentWait = vi.fn().mockResolvedValue({ status: "ok" });
+  const mockSubagentGetMessages = vi.fn().mockResolvedValue([]);
 
   const ctx = {
     pluginConfig: {
@@ -1060,6 +1109,11 @@ describe("Layer 3: LLM classification via message_received", () => {
           sendMessageTelegram,
         },
       },
+      subagent: {
+        run: mockSubagentRun,
+        waitForRun: mockSubagentWait,
+        getSessionMessages: mockSubagentGetMessages,
+      },
     },
     runCommand: vi.fn(async () => ({ stdout: "", stderr: "", code: 0 })),
   } as any;
@@ -1069,6 +1123,12 @@ describe("Layer 3: LLM classification via message_received", () => {
     sendMessageTelegram.mockClear();
     ctx.runCommand.mockClear();
     ctx.runCommand.mockResolvedValue({ stdout: "", stderr: "", code: 0 });
+    mockSubagentRun.mockClear();
+    mockSubagentWait.mockClear();
+    mockSubagentGetMessages.mockClear();
+    mockSubagentRun.mockResolvedValue({ runId: "layer3-run" });
+    mockSubagentWait.mockResolvedValue({ status: "ok" });
+    mockSubagentGetMessages.mockResolvedValue([]);
     mockRunPipeline.mockReset();
     mockReadProjects.mockReset();
     mockProjectTick.mockReset();
@@ -1086,21 +1146,9 @@ describe("Layer 3: LLM classification via message_received", () => {
       }),
     } as unknown as OpenClawPluginApi;
 
-    ctx.runCommand.mockImplementation(async (args: string[]) => {
-      const argsStr = args.join(" ");
-      if (argsStr.includes("agent") && argsStr.includes("--local") && argsStr.includes("--json")) {
-        return {
-          stdout: JSON.stringify({
-            payloads: [{
-              text: '{"intent":"create_project","confidence":0.95,"stackHint":"python-cli","projectSlug":"validador-cpf"}',
-            }],
-          }),
-          stderr: "",
-          code: 0,
-        };
-      }
-      return { stdout: "", stderr: "", code: 0 };
-    });
+    mockSubagentGetMessages.mockResolvedValue([
+      { role: "assistant", content: '{"intent":"create_project","confidence":0.95,"stackHint":"python-cli","projectSlug":"validador-cpf"}' },
+    ]);
 
     mockRunPipeline.mockResolvedValue({
       success: true,
@@ -1139,15 +1187,9 @@ describe("Layer 3: LLM classification via message_received", () => {
       }),
     } as unknown as OpenClawPluginApi;
 
-    ctx.runCommand.mockImplementation(async () => ({
-      stdout: JSON.stringify({
-        payloads: [{
-          text: '{"intent":"other","confidence":0.95,"stackHint":null,"projectSlug":null}',
-        }],
-      }),
-      stderr: "",
-      code: 0,
-    }));
+    mockSubagentGetMessages.mockResolvedValue([
+      { role: "assistant", content: '{"intent":"other","confidence":0.95,"stackHint":null,"projectSlug":null}' },
+    ]);
 
     registerTelegramBootstrapHook(api, ctx);
 
@@ -1171,7 +1213,7 @@ describe("Layer 3: LLM classification via message_received", () => {
       }),
     } as unknown as OpenClawPluginApi;
 
-    ctx.runCommand.mockImplementation(async () => { throw new Error("LLM timeout"); });
+    mockSubagentRun.mockImplementation(async () => { throw new Error("LLM timeout"); });
 
     registerTelegramBootstrapHook(api, ctx);
 
@@ -1195,15 +1237,9 @@ describe("Layer 3: LLM classification via message_received", () => {
       }),
     } as unknown as OpenClawPluginApi;
 
-    ctx.runCommand.mockImplementation(async () => ({
-      stdout: JSON.stringify({
-        payloads: [{
-          text: '{"intent":"create_project","confidence":0.9,"stackHint":null,"projectSlug":"task-manager"}',
-        }],
-      }),
-      stderr: "",
-      code: 0,
-    }));
+    mockSubagentGetMessages.mockResolvedValue([
+      { role: "assistant", content: '{"intent":"create_project","confidence":0.9,"stackHint":null,"projectSlug":"task-manager"}' },
+    ]);
 
     registerTelegramBootstrapHook(api, ctx);
 
@@ -1237,7 +1273,7 @@ describe("Layer 3: LLM classification via message_received", () => {
       { channelId: "telegram", conversationId: "6951571380" },
     );
 
-    expect(ctx.runCommand).not.toHaveBeenCalled();
+    expect(mockSubagentRun).not.toHaveBeenCalled();
     expect(mockRunPipeline).not.toHaveBeenCalled();
     expect(sendMessageTelegram).not.toHaveBeenCalled();
   });
@@ -1409,6 +1445,9 @@ describe("buildTopicDeepLink", () => {
 describe("bilingual bootstrap messages", () => {
   let handler: ((msg: any, meta: any) => Promise<void>) | undefined;
   const sendMessageTelegram = vi.fn(async () => undefined);
+  const mockBiSubagentRun = vi.fn().mockResolvedValue({ runId: "bilingual-run" });
+  const mockBiSubagentWait = vi.fn().mockResolvedValue({ status: "ok" });
+  const mockBiSubagentGetMessages = vi.fn().mockResolvedValue([]);
 
   const ctx = {
     pluginConfig: {
@@ -1434,6 +1473,11 @@ describe("bilingual bootstrap messages", () => {
           sendMessageTelegram,
         },
       },
+      subagent: {
+        run: mockBiSubagentRun,
+        waitForRun: mockBiSubagentWait,
+        getSessionMessages: mockBiSubagentGetMessages,
+      },
     },
     runCommand: vi.fn(async () => ({ stdout: "", stderr: "", code: 0 })),
   } as any;
@@ -1443,6 +1487,12 @@ describe("bilingual bootstrap messages", () => {
     sendMessageTelegram.mockClear();
     ctx.runCommand.mockClear();
     ctx.runCommand.mockResolvedValue({ stdout: "", stderr: "", code: 0 });
+    mockBiSubagentRun.mockClear();
+    mockBiSubagentWait.mockClear();
+    mockBiSubagentGetMessages.mockClear();
+    mockBiSubagentRun.mockResolvedValue({ runId: "bilingual-run" });
+    mockBiSubagentWait.mockResolvedValue({ status: "ok" });
+    mockBiSubagentGetMessages.mockResolvedValue([]);
     mockRunPipeline.mockReset();
     mockReadProjects.mockReset();
     mockProjectTick.mockReset();
@@ -1460,21 +1510,9 @@ describe("bilingual bootstrap messages", () => {
       }),
     } as unknown as OpenClawPluginApi;
 
-    ctx.runCommand.mockImplementation(async (args: string[]) => {
-      const argsStr = args.join(" ");
-      if (argsStr.includes("agent") && argsStr.includes("--local") && argsStr.includes("--json")) {
-        return {
-          stdout: JSON.stringify({
-            payloads: [{
-              text: '{"intent":"create_project","confidence":0.92,"stackHint":"python-cli","projectSlug":"cpf-validator","language":"en"}',
-            }],
-          }),
-          stderr: "",
-          code: 0,
-        };
-      }
-      return { stdout: "", stderr: "", code: 0 };
-    });
+    mockBiSubagentGetMessages.mockResolvedValue([
+      { role: "assistant", content: '{"intent":"create_project","confidence":0.92,"stackHint":"python-cli","projectSlug":"cpf-validator","language":"en"}' },
+    ]);
 
     mockRunPipeline.mockResolvedValue({
       success: true,
@@ -1513,21 +1551,9 @@ describe("bilingual bootstrap messages", () => {
       }),
     } as unknown as OpenClawPluginApi;
 
-    ctx.runCommand.mockImplementation(async (args: string[]) => {
-      const argsStr = args.join(" ");
-      if (argsStr.includes("agent") && argsStr.includes("--local") && argsStr.includes("--json")) {
-        return {
-          stdout: JSON.stringify({
-            payloads: [{
-              text: '{"intent":"create_project","confidence":0.88,"stackHint":null,"projectSlug":"my-tool","language":"en"}',
-            }],
-          }),
-          stderr: "",
-          code: 0,
-        };
-      }
-      return { stdout: "", stderr: "", code: 0 };
-    });
+    mockBiSubagentGetMessages.mockResolvedValue([
+      { role: "assistant", content: '{"intent":"create_project","confidence":0.88,"stackHint":null,"projectSlug":"my-tool","language":"en"}' },
+    ]);
 
     registerTelegramBootstrapHook(api, ctx);
 

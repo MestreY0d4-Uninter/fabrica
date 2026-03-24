@@ -8,8 +8,6 @@ import { readFabricaTelegramConfig } from "../telegram/config.js";
 import { readProjects } from "../projects/index.js";
 import { discoverAgents } from "../services/heartbeat/agent-discovery.js";
 import { projectTick } from "../services/tick.js";
-import { resolveOpenClawCli } from "../intake/lib/runtime-paths.js";
-import { extractJsonFromStdout } from "../intake/lib/extract-json.js";
 import { z } from "zod";
 import {
   buildBootstrapRequestHash,
@@ -165,36 +163,37 @@ Examples:
 async function classifyDmIntent(
   ctx: PluginContext,
   content: string,
-  workspaceDir: string,
+  _workspaceDir: string,
 ): Promise<DmIntentClassification | null> {
   try {
+    const runtime = ctx.runtime;
+    if (!runtime?.subagent?.run) return null;
+
     const truncated = content.slice(0, MAX_CLASSIFY_LENGTH);
     const prompt = CLASSIFY_PROMPT_TEMPLATE.replace("$CONTENT", truncated.replace(/"/g, '\\"'));
-    const cliPath = resolveOpenClawCli({ homeDir: homedir(), workspaceDir });
-    const sessionId = `dm-classify-${Date.now()}`;
+    const sessionKey = `dm-classify-${Date.now()}`;
 
-    const result = await ctx.runCommand(
-      [cliPath, "agent", "--local", "-m", prompt, "--session-id", sessionId, "--json"],
-      { timeoutMs: 15_000 },
-    );
+    const { runId } = await runtime.subagent.run({
+      sessionKey,
+      message: prompt,
+      extraSystemPrompt: "You are a JSON classifier. Return ONLY valid JSON, no markdown fences.",
+      lane: "subagent",
+      deliver: false,
+      idempotencyKey: sessionKey,
+    });
 
-    const stdout = result.stdout ?? "";
-    if (!stdout.trim()) return null;
+    const waitResult = await runtime.subagent.waitForRun({ runId, timeoutMs: 15_000 });
+    if (waitResult.status !== "ok") return null;
 
-    const parsed = extractJsonFromStdout(stdout);
-    if (!parsed) return null;
+    const messages = await runtime.subagent.getSessionMessages({ sessionKey });
+    const lastAssistant = messages?.filter((m: any) => m.role === "assistant").pop();
+    const text = lastAssistant?.content ?? "";
+    if (!text.trim()) return null;
 
-    // The LLM response wraps in { payloads: [{ text: "..." }] }
-    const text = parsed?.payloads?.[0]?.text;
-    const jsonStr = text
-      ? text.replace(/^```(json)?/gm, "").replace(/```$/gm, "").trim()
-      : JSON.stringify(parsed);
-
+    const jsonStr = text.replace(/^```(json)?/gm, "").replace(/```$/gm, "").trim();
     const intentData = JSON.parse(jsonStr);
     const validated = DmIntentSchema.safeParse(intentData);
-    if (!validated.success) return null;
-
-    return validated.data;
+    return validated.success ? validated.data : null;
   } catch {
     return null;
   }
