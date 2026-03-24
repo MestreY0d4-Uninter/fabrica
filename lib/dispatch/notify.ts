@@ -118,6 +118,13 @@ export type NotifyEvent =
       issueTitle: string;
       prUrl?: string;
       fromState: string;
+    }
+  | {
+      type: "infraFailure";
+      project: string;
+      issueId: number;
+      summary: string;
+      infraFailCount: number;
     };
 
 /**
@@ -298,6 +305,18 @@ function buildMessage(event: NotifyEvent): string {
       if (event.prUrl) msg += `\n🔗 ${prLink(event.prUrl)}`;
       msg += `\n📋 [Issue #${event.issueId}](${event.issueUrl})`;
       msg += `\n🏁 Done — no human action needed.`;
+      return msg;
+    }
+
+    case "infraFailure": {
+      const icon = event.infraFailCount >= 2 ? "🚨" : "⚠️";
+      let msg = `${icon} Infrastructure failure on #${event.issueId} (attempt ${event.infraFailCount})`;
+      msg += `\n${event.summary}`;
+      if (event.infraFailCount >= 2) {
+        msg += `\n→ Circuit breaker tripped — moved to Refining (operator intervention required)`;
+      } else {
+        msg += `\n→ Returned to To Test queue — will retry after toolchain is fixed`;
+      }
       return msg;
     }
   }

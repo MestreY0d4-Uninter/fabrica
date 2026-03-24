@@ -12,13 +12,15 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ToolContext } from "../../types.js";
 import type { PluginContext, RunCommand } from "../../context.js";
-import { getRoleWorker, recordIssueLifecycle, recordIssueLifecycleBySessionKey, resolveRepoPath, updateIssueRuntime, requireCanonicalPrSelector } from "../../projects/index.js";
+import { getRoleWorker, recordIssueLifecycle, recordIssueLifecycleBySessionKey, resolveRepoPath, updateIssueRuntime, requireCanonicalPrSelector, deactivateWorker } from "../../projects/index.js";
 import { executeCompletion, getRule } from "../../services/pipeline.js";
 import { log as auditLog } from "../../audit.js";
 import { DATA_DIR } from "../../setup/migrate-layout.js";
 import { requireWorkspaceDir, resolveProjectFromContext, resolveProvider } from "../helpers.js";
 import { getAllRoleIds, isValidResult, getCompletionResults } from "../../roles/index.js";
 import { getQueueLabels, isFeedbackState } from "../../workflow/index.js";
+import { resilientLabelTransition, resolveNotifyChannel } from "../../workflow/labels.js";
+import { notify, getNotificationConfig } from "../../dispatch/notify.js";
 import { loadConfig } from "../../config/index.js";
 import { PrState, type ReviewArtifactType, type PrSelector } from "../../providers/provider.js";
 import {
@@ -318,7 +320,7 @@ export function createWorkFinishTool(ctx: PluginContext) {
       properties: {
         channelId: { type: "string", description: "YOUR chat/group ID — the numeric ID of the chat you are in right now (e.g. '-1003844794417'). Do NOT guess; use the ID of the conversation this message came from." },
         role: { type: "string", enum: getAllRoleIds(), description: "Worker role" },
-        result: { type: "string", enum: ["done", "pass", "fail", "refine", "blocked", "approve", "reject"], description: "Completion result" },
+        result: { type: "string", enum: ["done", "pass", "fail", "fail_infra", "refine", "blocked", "approve", "reject"], description: "Completion result. Use fail_infra (tester only) when the test toolchain is missing or broken — this keeps the issue in the test queue instead of routing it to the developer." },
         summary: { type: "string", description: "Brief summary" },
         prUrl: { type: "string", description: "PR/MR URL (auto-detected if omitted)" },
         createdTasks: {
@@ -411,6 +413,66 @@ export function createWorkFinishTool(ctx: PluginContext) {
         })),
         keyTransitions: resolvedConfig.workflowMeta.keyTransitions,
       });
+
+      // --- fail_infra special case: no workflow rule, handled directly ---
+      if (role === "tester" && result === "fail_infra") {
+        const currentInfraFails = (issueRuntime?.infraFailCount ?? 0) + 1;
+        await updateIssueRuntime(workspaceDir, project.slug, issueId, {
+          infraFailCount: currentInfraFails,
+        });
+
+        await auditLog(workspaceDir, "infra_failure", {
+          project: project.name, issue: issueId, role, result,
+          summary: summary ?? null, infraFailCount: currentInfraFails,
+        });
+
+        // Notify operator
+        const notifyConfig = getNotificationConfig(ctx.pluginConfig);
+        const target = resolveNotifyChannel([], project.channels);
+        await notify(
+          {
+            type: "infraFailure",
+            project: project.name,
+            issueId,
+            summary: summary ?? "Infrastructure failure during testing",
+            infraFailCount: currentInfraFails,
+          },
+          {
+            workspaceDir,
+            config: notifyConfig,
+            channelId: target?.channelId,
+            channel: target?.channel ?? "telegram",
+            runtime: ctx.runtime,
+            accountId: target?.accountId,
+            messageThreadId: target?.messageThreadId,
+            runCommand: ctx.runCommand,
+          },
+        ).catch((err) => { getRootLogger().warn(`infra_failure notification failed: ${err}`); });
+
+        // Circuit breaker: after 2 infra failures, move to Refining (hold state)
+        if (currentInfraFails >= 2) {
+          await auditLog(workspaceDir, "infra_failure_circuit_breaker", {
+            project: project.name, issue: issueId, infraFailCount: currentInfraFails,
+          });
+          await resilientLabelTransition(provider, issueId, "Testing", "Refining");
+        } else {
+          // Stay in test queue — will be re-dispatched after toolchain is fixed
+          await resilientLabelTransition(provider, issueId, "Testing", "To Test");
+        }
+
+        // Release worker slot
+        await deactivateWorker(workspaceDir, project.slug, "tester", {
+          level: slotLevel,
+          slotIndex,
+          issueId: String(issueId),
+        });
+
+        return jsonResult({
+          success: true, project: project.name, projectSlug: project.slug,
+          issueId, role, result, infraFailCount: currentInfraFails,
+          circuitBroken: currentInfraFails >= 2,
+        });
+      }
 
       if (!getRule(role, result, workflow))
         throw new Error(`Invalid completion: ${role}:${result}`);

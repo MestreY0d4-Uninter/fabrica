@@ -59,6 +59,7 @@ export type IssueRuntimeState = {
   lastConflictDetectedAt?: string | null;
   parentIssueId?: number | null;
   childIssueIds?: number[];
+  infraFailCount?: number;
 };
 
 /**

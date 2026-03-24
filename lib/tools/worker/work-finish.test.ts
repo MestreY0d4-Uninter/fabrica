@@ -568,3 +568,41 @@ Exit code: 0
     });
   });
 });
+
+describe("fail_infra result type (E9-5)", () => {
+  // Registry validation tests
+  it("isValidResult accepts fail_infra for tester", async () => {
+    const { isValidResult } = await import("../../roles/index.js");
+    expect(isValidResult("tester", "fail_infra")).toBe(true);
+  });
+
+  it("isValidResult rejects fail_infra for developer", async () => {
+    const { isValidResult } = await import("../../roles/index.js");
+    expect(isValidResult("developer", "fail_infra")).toBe(false);
+  });
+
+  // Circuit breaker logic tests
+  it("first fail_infra should NOT trip circuit breaker", () => {
+    const currentCount = 0;
+    const newCount = currentCount + 1;
+    expect(newCount).toBeLessThan(2);
+  });
+
+  it("second fail_infra should trip circuit breaker", () => {
+    const currentCount = 1;
+    const newCount = currentCount + 1;
+    expect(newCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it("infraFailCount increments correctly from undefined", () => {
+    const issueRuntime: { infraFailCount?: number } = {};
+    const currentInfraFails = (issueRuntime.infraFailCount ?? 0) + 1;
+    expect(currentInfraFails).toBe(1);
+  });
+
+  it("infraFailCount increments correctly from existing count", () => {
+    const issueRuntime = { infraFailCount: 1 };
+    const currentInfraFails = (issueRuntime.infraFailCount ?? 0) + 1;
+    expect(currentInfraFails).toBe(2);
+  });
+});

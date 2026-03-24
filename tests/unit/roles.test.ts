@@ -212,8 +212,8 @@ describe("role selectors — completion", () => {
     expect(getCompletionResults("developer")).toEqual(["done", "blocked"]);
   });
 
-  it("tester has pass, fail, refine, blocked", () => {
-    expect(getCompletionResults("tester")).toEqual(["pass", "fail", "refine", "blocked"]);
+  it("tester has pass, fail, fail_infra, refine, blocked", () => {
+    expect(getCompletionResults("tester")).toEqual(["pass", "fail", "fail_infra", "refine", "blocked"]);
   });
 
   it("reviewer has approve, reject, blocked", () => {
