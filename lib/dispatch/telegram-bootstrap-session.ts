@@ -5,8 +5,9 @@ import { DATA_DIR } from "../setup/migrate-layout.js";
 import type { PipelineArtifact } from "../intake/types.js";
 
 export type TelegramBootstrapStatus =
+  | "pending_classify"  // session created, LLM classification not yet started
   | "received"
-  | "classifying"   // LLM classification in progress
+  | "classifying"       // LLM classification in progress
   | "clarifying"
   | "provisioning_repo"
   | "creating_topic"
@@ -43,7 +44,7 @@ export type TelegramBootstrapSession = {
   messageThreadId?: number | null;
   projectChannelId?: string | null;
   status: TelegramBootstrapStatus;
-  pendingClarification?: "stack" | "stack_and_name" | null;
+  pendingClarification?: "stack" | "stack_and_name" | "name" | null;
   orphanedArtifacts?: PipelineArtifact[] | null;
   createdAt: string;
   updatedAt: string;
@@ -101,7 +102,9 @@ export function buildBootstrapRequestHash(input: {
 }
 
 function nextSuppressUntil(status?: TelegramBootstrapStatus): string {
-  const ttl = status === "classifying" ? CLASSIFYING_TTL_MS : SESSION_TTL_MS;
+  const ttl = (status === "classifying" || status === "pending_classify")
+    ? CLASSIFYING_TTL_MS
+    : SESSION_TTL_MS;
   return new Date(Date.now() + ttl).toISOString();
 }
 
@@ -115,7 +118,7 @@ export async function readTelegramBootstrapSession(
     // Auto-cleanup expired clarifying/classifying sessions so they don't block new requests (A4).
     // A session stuck in "clarifying" or "classifying" past its suppressUntil TTL will never
     // be resolved — remove it from disk so the next message starts fresh.
-    if ((session.status === "clarifying" || session.status === "classifying") && Date.parse(session.suppressUntil) < Date.now()) {
+    if ((session.status === "clarifying" || session.status === "classifying" || session.status === "pending_classify") && Date.parse(session.suppressUntil) < Date.now()) {
       await fs.unlink(sessionPath(workspaceDir, conversationId)).catch(() => {});
       return null;
     }
@@ -158,7 +161,7 @@ export async function upsertTelegramBootstrapSession(
     repoUrl?: string | null;
     repoPath?: string | null;
     status: TelegramBootstrapStatus;
-    pendingClarification?: "stack" | "stack_and_name" | null;
+    pendingClarification?: "stack" | "stack_and_name" | "name" | null;
     orphanedArtifacts?: PipelineArtifact[] | null;
     error?: string | null;
     projectSlug?: string | null;
