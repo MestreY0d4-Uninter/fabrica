@@ -1,7 +1,6 @@
 export type PublicOutputViolation = "secret" | "path" | "env_dump";
 
 const SECRET_PATTERNS = [
-  /\b[A-Za-z_][A-Za-z0-9_]*=([^\s]+)/g,
   /\b(?:ghp_|gho_|github_pat_|sk-|xoxb-|xoxp-|AIza|AKIA|glpat-)[A-Za-z0-9._-]*/g,
   /\b(?:token|secret|api[_-]?key|password|passwd|authorization|bearer)\b\s*[:=]\s*[^\s]+/gi,
 ];
