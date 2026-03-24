@@ -155,11 +155,29 @@ async function runHeartbeatTick(
       ? () => lifecycle.track(mode === "repair" ? "recovery" : "heartbeat", {}, run)
       : run;
 
-    let tickPromise: Promise<unknown> | undefined;
-    const wrappedTickFn = () => {
-      tickPromise = tickFn();
-      return tickPromise;
+    // Deferred promise pattern — tickPromise is ALWAYS defined before raceWithTimeout.
+    // This eliminates the race window where timeout fires before wrappedTickFn executes.
+    let resolveTick!: (v: unknown) => void;
+    let rejectTick!: (e: unknown) => void;
+    const tickPromise = new Promise<unknown>((res, rej) => {
+      resolveTick = res;
+      rejectTick = rej;
+    });
+    // Prevent unhandled rejection if wrappedTickFn rejects before .finally() is attached
+    tickPromise.catch(() => {});
+
+    const wrappedTickFn = async () => {
+      try {
+        const result = await tickFn();
+        resolveTick(result);
+        return result;
+      } catch (err) {
+        rejectTick(err);
+        throw err;
+      }
     };
+
+    const HARD_TICK_TIMEOUT_MS = 5 * 60_000;
 
     const raceResult = await raceWithTimeout(wrappedTickFn, DEFAULT_TICK_TIMEOUT_MS, () => {
       _ticksTimedOut++;
@@ -167,21 +185,20 @@ async function runHeartbeatTick(
       logger.warn(`work_heartbeat ${mode} tick timed out after ${DEFAULT_TICK_TIMEOUT_MS}ms (total timeouts: ${_ticksTimedOut})`);
       // Do NOT release mutex here — the tick promise is still running.
       // Release it when the promise settles (see .finally() below).
-      if (tickPromise) {
-        tickPromise.finally(() => {
-          _tickRunning[mode] = false;
-          _anyTickRunning = false;
-        });
-      } else {
-        // tickPromise is undefined — safety release to prevent permanent deadlock.
-        // The finally() block at the end skips release when timedOut=true, so we must
-        // release here to avoid permanently locking the heartbeat.
-        logger.error("tick_mutex: tickPromise undefined in timeout handler — forcing mutex release");
+      // tickPromise is always defined (deferred pattern) — no guard needed.
+      const hardTimeout = setTimeout(() => {
+        logger.error("tick_mutex: hard timeout — forcing mutex release");
         _tickRunning[mode] = false;
         _anyTickRunning = false;
-      }
+      }, HARD_TICK_TIMEOUT_MS);
+
+      tickPromise.finally(() => {
+        clearTimeout(hardTimeout);
+        _tickRunning[mode] = false;
+        _anyTickRunning = false;
+      });
     });
-    void raceResult; // used only for logging; mutex lifecycle handled above/below
+    void raceResult;
   } catch (err) {
     logger.error(`work_heartbeat ${mode} tick failed: ${err}`);
   } finally {
