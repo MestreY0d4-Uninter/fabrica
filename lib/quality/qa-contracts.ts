@@ -1,7 +1,7 @@
 /**
  * QA contract generation — stack-aware quality gates.
  *
- * Port of genesis/scripts/generate-qa-contract.sh.
+ * Stack-aware QA contract generator.
  * Generates a qa.sh script with 5 mandatory gates (lint, types, security, tests, coverage)
  * configured per stack.
  */

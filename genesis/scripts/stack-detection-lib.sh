@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # stack-detection-lib.sh — Unified stack detection for Genesis pipeline
-# Single source of truth: scaffold-project.sh and generate-qa-contract.sh
-# both import this instead of maintaining their own detection logic.
+# Single source of truth for stack detection in Genesis pipeline
+# Imported by various Genesis scripts for consistent detection logic.
 # shellcheck shell=bash
 
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -88,7 +88,7 @@ genesis_stack_flags() {
 }
 
 # genesis_detect_stack_flags_from_context <stack_hint> <languages_text> <scope_text>
-# Comprehensive flag detection used by generate-qa-contract.sh.
+# Comprehensive flag detection for QA contract generation.
 # Sets IS_PY, IS_JS, IS_GO based on multiple signal sources.
 # Outputs: IS_PY IS_JS IS_GO (space-separated)
 genesis_detect_stack_flags_from_context() {
