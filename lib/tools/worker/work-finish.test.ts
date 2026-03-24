@@ -21,6 +21,7 @@ import {
   resolveWorkerSlot,
   validateReviewerArtifact,
   validatePrExistsForDeveloper,
+  INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD,
 } from "./work-finish.js";
 import { TestProvider } from "../../testing/test-provider.js";
 import type { RunCommand } from "../../context.js";
@@ -581,17 +582,23 @@ describe("fail_infra result type (E9-5)", () => {
     expect(isValidResult("developer", "fail_infra")).toBe(false);
   });
 
-  // Circuit breaker logic tests
+  // Circuit breaker threshold tests
+  it("circuit breaker threshold is 2", () => {
+    // Verify threshold: 1 failure → To Test, 2 failures → Refining
+    expect(1).toBeLessThan(INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD);
+    expect(2).toBeGreaterThanOrEqual(INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD);
+  });
+
   it("first fail_infra should NOT trip circuit breaker", () => {
     const currentCount = 0;
     const newCount = currentCount + 1;
-    expect(newCount).toBeLessThan(2);
+    expect(newCount).toBeLessThan(INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD);
   });
 
   it("second fail_infra should trip circuit breaker", () => {
-    const currentCount = 1;
+    const currentCount = INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD - 1;
     const newCount = currentCount + 1;
-    expect(newCount).toBeGreaterThanOrEqual(2);
+    expect(newCount).toBeGreaterThanOrEqual(INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD);
   });
 
   it("infraFailCount increments correctly from undefined", () => {

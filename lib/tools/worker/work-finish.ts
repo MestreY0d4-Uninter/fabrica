@@ -309,6 +309,8 @@ export function matchesReviewArtifact(
   return comment.state === "COMMENTED" && !comment.path;
 }
 
+export const INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD = 2;
+
 export function createWorkFinishTool(ctx: PluginContext) {
   return (toolCtx: ToolContext) => ({
     name: "work_finish",
@@ -429,11 +431,13 @@ export function createWorkFinishTool(ctx: PluginContext) {
         // Notify operator
         const notifyConfig = getNotificationConfig(ctx.pluginConfig);
         const target = resolveNotifyChannel([], project.channels);
+        const issueUrl = `https://github.com/${project.repo}/issues/${issueId}`;
         await notify(
           {
             type: "infraFailure",
             project: project.name,
             issueId,
+            issueUrl,
             summary: summary ?? "Infrastructure failure during testing",
             infraFailCount: currentInfraFails,
           },
@@ -449,8 +453,8 @@ export function createWorkFinishTool(ctx: PluginContext) {
           },
         ).catch((err) => { getRootLogger().warn(`infra_failure notification failed: ${err}`); });
 
-        // Circuit breaker: after 2 infra failures, move to Refining (hold state)
-        if (currentInfraFails >= 2) {
+        // Circuit breaker: after INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD infra failures, move to Refining (hold state)
+        if (currentInfraFails >= INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD) {
           await auditLog(workspaceDir, "infra_failure_circuit_breaker", {
             project: project.name, issue: issueId, infraFailCount: currentInfraFails,
           });
@@ -467,10 +471,19 @@ export function createWorkFinishTool(ctx: PluginContext) {
           issueId: String(issueId),
         });
 
+        await recordIssueLifecycle({
+          workspaceDir,
+          slug: project.slug,
+          issueId,
+          stage: "session_completed",
+          sessionKey: toolCtx.sessionKey ?? null,
+          details: { role, result, infraFailCount: currentInfraFails },
+        }).catch(() => {});
+
         return jsonResult({
           success: true, project: project.name, projectSlug: project.slug,
           issueId, role, result, infraFailCount: currentInfraFails,
-          circuitBroken: currentInfraFails >= 2,
+          circuitBroken: currentInfraFails >= INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD,
         });
       }
 
@@ -595,6 +608,11 @@ export function createWorkFinishTool(ctx: PluginContext) {
         sessionKey: toolCtx.sessionKey ?? null,
         details: { role, result },
       }).catch(() => {});
+
+      // Reset infra fail counter after successful tester completion
+      if (role === "tester" && issueRuntime?.infraFailCount) {
+        await updateIssueRuntime(workspaceDir, project.slug, issueId, { infraFailCount: 0 });
+      }
 
       return jsonResult({
         success: true, project: project.name, projectSlug: project.slug, issueId, role, result,

@@ -123,6 +123,7 @@ export type NotifyEvent =
       type: "infraFailure";
       project: string;
       issueId: number;
+      issueUrl: string;
       summary: string;
       infraFailCount: number;
     };
@@ -312,6 +313,7 @@ function buildMessage(event: NotifyEvent): string {
       const icon = event.infraFailCount >= 2 ? "🚨" : "⚠️";
       let msg = `${icon} Infrastructure failure on #${event.issueId} (attempt ${event.infraFailCount})`;
       msg += `\n${event.summary}`;
+      msg += `\n📋 [Issue #${event.issueId}](${event.issueUrl})`;
       if (event.infraFailCount >= 2) {
         msg += `\n→ Circuit breaker tripped — moved to Refining (operator intervention required)`;
       } else {
