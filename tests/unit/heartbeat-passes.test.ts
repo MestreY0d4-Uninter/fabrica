@@ -61,6 +61,7 @@ describe("performReviewPass", () => {
       mockResolvedConfig, undefined, undefined, mockRunCommand,
     );
     expect(result).toBe(0);
+    expect(reviewPass).toHaveBeenCalledOnce();
   });
 });
 
