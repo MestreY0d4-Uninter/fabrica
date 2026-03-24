@@ -727,25 +727,38 @@ describe("telegram bootstrap hook", () => {
 
     registerTelegramBootstrapHook(api, ctx);
 
-    // "I need a CLI tool" is ambiguous — has software cue ("cli") but no create cue
-    const handlerPromise = handler?.(
+    // Block the classify runCommand so the session stays observable
+    let resolveClassify!: () => void;
+    const classifyBarrier = new Promise<void>(resolve => { resolveClassify = resolve; });
+    ctx.runCommand.mockImplementationOnce(async () => {
+      await classifyBarrier;
+      return { stdout: "", stderr: "", code: 0 };
+    });
+
+    // Fire handler — the handler creates the session synchronously then fires classify as fire-and-forget
+    handler?.(
       { content: "I need a CLI tool that converts numbers between bases", metadata: {} },
       { channelId: "telegram", conversationId: "6951571380" },
     );
 
-    // Session should exist with pending_classify status BEFORE the async classification
-    // We check immediately after calling handler (not waiting for it to complete)
-    // The session creation is synchronous (awaited) before fire-and-forget
-    await handlerPromise;
+    // Wait for the session to reach "classifying" status (pending_classify → classifying happens
+    // synchronously inside classifyAndBootstrap before the blocked runCommand call)
+    let session: Awaited<ReturnType<typeof readTelegramBootstrapSession>> = null;
+    await vi.waitFor(async () => {
+      session = await readTelegramBootstrapSession("/tmp/workspace", "6951571380");
+      expect(session).not.toBeNull();
+      expect(session!.status).toBe("classifying");
+    }, { timeout: 2000 });
 
-    const session = await readTelegramBootstrapSession("/tmp/workspace", "6951571380");
-    // After handler returns, session should be pending_classify (or classifying if classify already ran)
-    expect(session?.status === "pending_classify" || session?.status === "classifying" || session === null).toBe(true);
-    // The key check: if session exists, suppress should have been active at some point
-    // Verify shouldSuppressTelegramBootstrapReply works for pending_classify
-    if (session && session.status === "pending_classify") {
-      expect(shouldSuppressTelegramBootstrapReply(session)).toBe(true);
-    }
+    // Session must exist and suppress must be active
+    expect(shouldSuppressTelegramBootstrapReply(session)).toBe(true);
+
+    // Unblock classify so the test cleans up properly
+    resolveClassify();
+    await vi.waitFor(async () => {
+      const s = await readTelegramBootstrapSession("/tmp/workspace", "6951571380");
+      expect(s).toBeNull(); // classify failed (empty stdout) → session deleted
+    }, { timeout: 2000 });
   });
 
   it("shouldSuppressTelegramBootstrapReply returns true for pending_classify session", async () => {
