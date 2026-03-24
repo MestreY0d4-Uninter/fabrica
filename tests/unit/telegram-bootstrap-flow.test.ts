@@ -96,7 +96,7 @@ describe("telegram bootstrap clarification flow", () => {
     await fs.rm(`${WORKSPACE}/fabrica/bootstrap-sessions`, { recursive: true, force: true });
   });
 
-  it("resumes pipeline with original rawIdea after bare 'python' clarification response", async () => {
+  it("resumes pipeline with original rawIdea after bare 'python' clarification response followed by name", async () => {
     mockRunPipeline.mockResolvedValue({
       success: true,
       payload: {
@@ -122,9 +122,24 @@ describe("telegram bootstrap clarification flow", () => {
 
     sendMessageTelegram.mockClear();
 
-    // Step 2: user replies with bare "python"
+    // Step 2: user replies with bare "python" — stack resolved, now asks for name
     await handler?.(
       { content: "python", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    // Should ask for project name now
+    await vi.waitFor(
+      () => expect(sendMessageTelegram).toHaveBeenCalledTimes(1),
+      { timeout: 2000 },
+    );
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toMatch(/nome|name/i);
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    sendMessageTelegram.mockClear();
+
+    // Step 3: user provides project name
+    await handler?.(
+      { content: "tarefas-cli", metadata: {} },
       { channelId: "telegram", conversationId: CONVERSATION_ID },
     );
 
@@ -134,6 +149,7 @@ describe("telegram bootstrap clarification flow", () => {
     expect(pipelinePayload.raw_idea).toContain("CLI de tarefas");
     // Stack should be resolved to python-cli
     expect(pipelinePayload.metadata.stack_hint).toBe("python-cli");
+    expect(pipelinePayload.metadata.project_name).toBe("tarefas-cli");
   });
 
   it("re-asks when clarification response is irrelevant", async () => {
@@ -162,7 +178,7 @@ describe("telegram bootstrap clarification flow", () => {
     expect(followUp).toMatch(/stack|linguagem|framework/i);
   });
 
-  it("resumes pipeline after structured 'Stack: node-cli' clarification", async () => {
+  it("resumes pipeline after structured 'Stack: node-cli' clarification followed by name", async () => {
     mockRunPipeline.mockResolvedValue({
       success: true,
       payload: {
@@ -184,15 +200,31 @@ describe("telegram bootstrap clarification flow", () => {
     expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
     sendMessageTelegram.mockClear();
 
-    // Step 2: structured clarification response
+    // Step 2: structured clarification response for stack
     await handler?.(
       { content: "Stack: node-cli", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    // Should ask for project name now
+    await vi.waitFor(
+      () => expect(sendMessageTelegram).toHaveBeenCalledTimes(1),
+      { timeout: 2000 },
+    );
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toMatch(/nome|name/i);
+    sendMessageTelegram.mockClear();
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+
+    // Step 3: user provides project name
+    await handler?.(
+      { content: "deploy-automation-cli", metadata: {} },
       { channelId: "telegram", conversationId: CONVERSATION_ID },
     );
 
     await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
     const pipelinePayload = mockRunPipeline.mock.calls[0]?.[0];
     expect(pipelinePayload.metadata.stack_hint).toBe("node-cli");
+    expect(pipelinePayload.metadata.project_name).toBe("deploy-automation-cli");
     // original idea preserved
     expect(pipelinePayload.raw_idea).toContain("automatizar deploys");
   });
@@ -232,22 +264,65 @@ describe("telegram bootstrap clarification flow", () => {
       return;
     }
 
-    // Step 2: send a completely new bootstrap candidate
+    // Step 2: send a completely new bootstrap candidate with project name (newline-separated fields)
     await handler?.(
       {
-        content: "Crie um novo projeto totalmente diferente. Stack: python-cli. Idea: outra ideia.",
+        content: "Crie um novo projeto totalmente diferente.\nStack: python-cli\nProject name: novo-projeto-cli\nIdea: outra ideia.",
         metadata: {},
       },
       { channelId: "telegram", conversationId: CONVERSATION_ID },
     );
 
     // Since session is expired, the new message is a bootstrap candidate that should proceed
-    // (either to clarification for the new request, or directly to pipeline if stack is present)
-    // In this case, Stack is provided so it should go to pipeline
+    // Stack + project name are both provided, so it should go to pipeline directly
     await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
     const pipelinePayload = mockRunPipeline.mock.calls[0]?.[0];
     // The pipeline gets the NEW idea, not the old one
     expect(pipelinePayload.raw_idea).toContain("outra ideia");
     expect(pipelinePayload.metadata.stack_hint).toBe("python-cli");
+    expect(pipelinePayload.metadata.project_name).toBe("novo-projeto-cli");
+  });
+
+  it("asks for project name when stack is known but name is missing, then accepts bare name response", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 803,
+          project_slug: "my-converter",
+        },
+      },
+    });
+
+    // Send DM with explicit stack but no project name
+    await handler?.(
+      { content: "Crie um projeto.\nStack: python-cli\nIdeia: Uma CLI para converter bases numericas.", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    // Should ask for project name: ack first (sync), then name question (async from bootstrapWithTimeout)
+    await vi.waitFor(
+      () => expect(sendMessageTelegram).toHaveBeenCalledTimes(2),
+      { timeout: 3000 },
+    );
+    const calls = sendMessageTelegram.mock.calls.map((c: any[]) => String(c[1] ?? ""));
+    const nameQuestion = calls.find((msg: string) => /nome|name/i.test(msg));
+    expect(nameQuestion).toBeTruthy();
+    sendMessageTelegram.mockClear();
+
+    // User responds with a project name
+    await handler?.(
+      { content: "base-converter-cli", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    await vi.waitFor(
+      () => expect(mockRunPipeline).toHaveBeenCalledTimes(1),
+      { timeout: 3000 },
+    );
+    const payload = mockRunPipeline.mock.calls[0]?.[0];
+    expect(payload.metadata.project_name).toBe("base-converter-cli");
+    expect(payload.metadata.stack_hint).toBe("python-cli");
   });
 });

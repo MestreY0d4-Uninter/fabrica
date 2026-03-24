@@ -55,6 +55,10 @@ const BOOTSTRAP_MESSAGES = {
     pt: "Não consegui identificar a stack. Pode me dizer qual linguagem/framework você quer usar? Ex: Python, Node.js, Go, Java...",
     en: "Couldn't identify the stack. Can you tell me which language/framework you'd like to use? e.g., Python, Node.js, Go, Java...",
   },
+  clarifyName: {
+    pt: "Como você quer chamar o projeto? Se preferir, posso escolher um nome.",
+    en: "What do you want to name the project? If you prefer, I can pick one.",
+  },
   registered: {
     pt: (name: string, link: string) => `Projeto "${name}" registrado.\nVou continuar o fluxo em ${link}`,
     en: (name: string, link: string) => `Project "${name}" registered.\nI'll continue the flow at ${link}`,
@@ -62,7 +66,13 @@ const BOOTSTRAP_MESSAGES = {
 } as const;
 
 function inferProjectSlug(text: string): string | undefined {
-  const slug = text
+  let cleaned = text
+    .replace(/^(create|build|crie|cria|criar|fazer?|quero|i need|i want)\s+(uma|um|me\s+a?|an|a)?\s*/i, "")
+    .replace(/\s+(that|which|que|para|for|pra)\s+.*/i, "")
+    .trim();
+  if (!cleaned) cleaned = text;
+
+  const slug = cleaned
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[^\w\s-]/g, "")
@@ -199,7 +209,7 @@ async function classifyDmIntent(
   }
 }
 
-export { isAmbiguousCandidate as _testIsAmbiguousCandidate, classifyDmIntent as _testClassifyDmIntent, buildTopicDeepLink as _testBuildTopicDeepLink };
+export { isAmbiguousCandidate as _testIsAmbiguousCandidate, classifyDmIntent as _testClassifyDmIntent, buildTopicDeepLink as _testBuildTopicDeepLink, inferProjectSlug as _testInferProjectSlug };
 
 function isBootstrapCandidate(text: string): boolean {
   const lower = text.toLowerCase();
@@ -214,6 +224,24 @@ function parseClarificationResponse(text: string, session: TelegramBootstrapSess
   stackHint?: string;
   projectName?: string;
 } {
+  // When asking for project name only, treat response as project name
+  if (session.pendingClarification === "name") {
+    const trimmed = text.trim();
+    const autoPatterns = /^(escolha|pick one|tanto faz|you choose|pode escolher|auto|skip)$/i;
+    if (autoPatterns.test(trimmed)) {
+      // User wants auto-generation — return recognized with no projectName (slug derived from rawIdea)
+      return { recognized: true, stackHint: session.stackHint ?? undefined };
+    }
+    const nameField = parseField(text, ["project name", "nome do projeto", "nome", "name"]);
+    if (nameField) {
+      return { recognized: true, projectName: nameField, stackHint: session.stackHint ?? undefined };
+    }
+    if (trimmed.length > 0 && trimmed.length <= 64) {
+      return { recognized: true, projectName: trimmed, stackHint: session.stackHint ?? undefined };
+    }
+    return { recognized: false };
+  }
+
   // Try structured field format first (e.g. "Stack: python-cli")
   const stackField = parseField(text, ["stack", "framework", "linguagem", "language"]);
   if (stackField) {
@@ -253,7 +281,10 @@ function parseClarificationResponse(text: string, session: TelegramBootstrapSess
   return { recognized: false };
 }
 
-function buildClarificationMessage(parsed: BootstrapRequest, pendingClarification?: "stack" | "stack_and_name", language: BootstrapLanguage = "pt"): string {
+function buildClarificationMessage(parsed: BootstrapRequest, pendingClarification?: "stack" | "stack_and_name" | "name", language: BootstrapLanguage = "pt"): string {
+  if (pendingClarification === "name") {
+    return BOOTSTRAP_MESSAGES.clarifyName[language];
+  }
   if (pendingClarification === "stack_and_name" || (!parsed.stackHint && !parsed.projectName)) {
     return BOOTSTRAP_MESSAGES.clarifyBoth[language];
   }
@@ -488,6 +519,30 @@ async function continueBootstrap(
       "stack",
       lang,
     ));
+    return;
+  }
+
+  // If stack known but name unknown, ask for name
+  if (!projectName) {
+    const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
+    const lang: BootstrapLanguage = existingSession?.language ?? "pt";
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId,
+      rawIdea: request.rawIdea,
+      stackHint: request.stackHint ?? undefined,
+      status: "clarifying",
+      pendingClarification: "name",
+      language: lang,
+    });
+    await sendTelegramText(
+      ctx,
+      conversationId,
+      buildClarificationMessage(
+        { rawIdea: request.rawIdea, projectName: undefined, stackHint: request.stackHint ?? undefined },
+        "name",
+        lang,
+      ),
+    );
     return;
   }
 
@@ -812,6 +867,14 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
     }
 
     const parsed = parseBootstrapRequest(content);
+
+    // If no projectName from structured fields, try LLM slug derivation
+    if (!parsed.projectName && ctx.runtime?.subagent?.run) {
+      const classification = await classifyDmIntent(ctx, content, workspaceDir);
+      if (classification?.projectSlug) {
+        parsed.projectName = classification.projectSlug;
+      }
+    }
 
     const incomingRequest = {
       rawIdea: parsed.rawIdea,

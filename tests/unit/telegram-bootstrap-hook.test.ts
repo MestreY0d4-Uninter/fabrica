@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate, _testClassifyDmIntent as classifyDmIntent, _testBuildTopicDeepLink as buildTopicDeepLink } from "../../lib/dispatch/telegram-bootstrap-hook.js";
+import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate, _testClassifyDmIntent as classifyDmIntent, _testBuildTopicDeepLink as buildTopicDeepLink, _testInferProjectSlug as inferProjectSlug } from "../../lib/dispatch/telegram-bootstrap-hook.js";
 import {
   upsertTelegramBootstrapSession,
   readTelegramBootstrapSession,
@@ -364,7 +364,7 @@ describe("telegram bootstrap hook", () => {
     expect(mockProjectTick).not.toHaveBeenCalled();
   });
 
-  it("infers the project name from the DM when the user does not provide one explicitly", async () => {
+  it("asks for project name when stack is provided but no project name in the DM", async () => {
     const api = {
       on: vi.fn((name, fn) => {
         if (name === "message_received") handler = fn;
@@ -373,14 +373,11 @@ describe("telegram bootstrap hook", () => {
 
     registerTelegramBootstrapHook(api, ctx);
 
+    // Pipeline returns without channel_id/message_thread_id to take the simple error path
+    // (avoids complex post-pipeline async fire-and-forget that races with test cleanup)
     mockRunPipeline.mockResolvedValue({
-      success: true,
-      payload: {
-        metadata: {
-          channel_id: "-1003709213169",
-          message_thread_id: 778,
-        },
-      },
+      success: false,
+      error: "test_pipeline_done",
     });
 
     await handler?.(
@@ -395,17 +392,30 @@ describe("telegram bootstrap hook", () => {
       },
       { channelId: "telegram", conversationId: "6951571380" },
     );
+    // Should NOT call pipeline immediately — asks for name first
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    // 2 sends: ack (calls[0]), name question (calls[1])
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    expect(String(sendMessageTelegram.mock.calls[1]?.[1])).toMatch(/nome|name/i);
+
+    sendMessageTelegram.mockClear();
+
+    // User responds with a project name
+    await handler?.(
+      { content: "gerador-senhas-cli", metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
     await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
     expect(mockRunPipeline.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
       raw_idea: "Uma CLI em Python que gere senhas aleatorias no terminal.",
       metadata: expect.objectContaining({
-        project_name: null,
+        project_name: "gerador-senhas-cli",
         stack_hint: "python-cli",
       }),
     }));
-    // Drain fire-and-forget pipeline to prevent mock pollution in subsequent tests.
-    // 3 sends: ack (calls[0]), topic kickoff (calls[1]), DM ack (calls[2])
-    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(3), { timeout: 2000 });
+    // Drain: pipeline failed path sends 1 error message then upserts "failed" session
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2000 });
   });
 
   it("detects node-cli from natural TypeScript CLI language instead of falling back to express", async () => {
@@ -1340,13 +1350,14 @@ describe("Layer 2 language heuristic", () => {
     registerTelegramBootstrapHook(api, ctx);
 
     // "Crie um novo projeto cli python" — has createCue "crie" (PT) + softwareCue "cli" + "projeto"
-    // detectStackHint matches "cli python" → python-cli, so pipeline fires (no clarification)
+    // detectStackHint matches "cli python" → python-cli, stack known but no name → name clarification fires
     await handler?.(
       { content: "Crie um novo projeto cli python", metadata: {} },
       { channelId: "telegram", conversationId: "6951571380" },
     );
 
-    // First call is the ack (synchronous before fire-and-forget)
+    // First call is the ack (synchronous); drain fire-and-forget name clarification
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
     expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Recebi!");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).not.toContain("Got it!");
@@ -1367,11 +1378,14 @@ describe("Layer 2 language heuristic", () => {
     registerTelegramBootstrapHook(api, ctx);
 
     // "Create a new project cli python" — has createCue "create" (EN) + softwareCue "cli" + "project"
+    // Stack detected (python-cli); no projectName → name clarification fires asynchronously
     await handler?.(
       { content: "Create a new project cli python", metadata: {} },
       { channelId: "telegram", conversationId: "6951571380" },
     );
 
+    // Drain fire-and-forget name clarification (ack + clarifyName)
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
     expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Got it!");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).not.toContain("Recebi!");
@@ -1392,11 +1406,14 @@ describe("Layer 2 language heuristic", () => {
     registerTelegramBootstrapHook(api, ctx);
 
     // "novo projeto cli python" — has createCue "novo projeto" (PT) + softwareCue "cli"
+    // Stack detected (python-cli); no projectName → name clarification fires asynchronously
     await handler?.(
       { content: "novo projeto cli python", metadata: {} },
       { channelId: "telegram", conversationId: "6951571380" },
     );
 
+    // Drain fire-and-forget name clarification (ack + clarifyName)
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
     expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Recebi!");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).not.toContain("Got it!");
@@ -1417,11 +1434,14 @@ describe("Layer 2 language heuristic", () => {
     registerTelegramBootstrapHook(api, ctx);
 
     // "new project cli python" — has createCue "new project" (EN) + softwareCue "cli"
+    // Stack detected (python-cli); no projectName → name clarification fires asynchronously
     await handler?.(
       { content: "new project cli python", metadata: {} },
       { channelId: "telegram", conversationId: "6951571380" },
     );
 
+    // Drain fire-and-forget name clarification (ack + clarifyName)
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
     expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Got it!");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).not.toContain("Recebi!");
@@ -1575,5 +1595,26 @@ describe("bilingual bootstrap messages", () => {
     expect(String(sendMessageTelegram.mock.calls[1]?.[1])).toMatch(/stack|which/i);
     expect(String(sendMessageTelegram.mock.calls[1]?.[1])).not.toContain("Qual stack");
     expect(mockRunPipeline).not.toHaveBeenCalled();
+  });
+});
+
+describe("inferProjectSlug prefix stripping", () => {
+  it("strips 'Create a' prefix", () => {
+    expect(inferProjectSlug("Create a Python CLI tool")).toBe("python-cli-tool");
+  });
+  it("strips 'I need a' prefix", () => {
+    expect(inferProjectSlug("I need a REST API")).toBe("rest-api");
+  });
+  it("strips trailing 'that ...' clause", () => {
+    expect(inferProjectSlug("CLI tool that converts numbers")).toBe("cli-tool");
+  });
+  it("handles normal text without prefix", () => {
+    expect(inferProjectSlug("base-converter-cli")).toBe("base-converter-cli");
+  });
+  it("strips 'crie um' prefix (portuguese)", () => {
+    expect(inferProjectSlug("crie uma CLI de tarefas")).toBe("cli-de-tarefas");
+  });
+  it("strips 'Build a' prefix", () => {
+    expect(inferProjectSlug("Build a task manager app")).toBe("task-manager-app");
   });
 });
