@@ -115,9 +115,9 @@ export async function readTelegramBootstrapSession(
   try {
     const raw = await fs.readFile(sessionPath(workspaceDir, conversationId), "utf-8");
     const session = JSON.parse(raw) as TelegramBootstrapSession;
-    // Auto-cleanup expired clarifying/classifying sessions so they don't block new requests (A4).
-    // A session stuck in "clarifying" or "classifying" past its suppressUntil TTL will never
-    // be resolved — remove it from disk so the next message starts fresh.
+    // Auto-cleanup expired transient sessions so they don't block new requests (A4).
+    // Sessions stuck in "pending_classify", "classifying", or "clarifying" past their
+    // suppressUntil TTL will never be resolved — remove from disk so next message starts fresh.
     if ((session.status === "clarifying" || session.status === "classifying" || session.status === "pending_classify") && Date.parse(session.suppressUntil) < Date.now()) {
       await fs.unlink(sessionPath(workspaceDir, conversationId)).catch(() => {});
       return null;
