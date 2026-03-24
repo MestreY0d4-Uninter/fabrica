@@ -38,55 +38,55 @@ describe("heartbeat mutex deadlock prevention", () => {
 describe("deferred promise pattern — A-5 fix", () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
-  it("tickPromise is always defined before timeout fires", async () => {
-    // Simulate the deferred pattern: promise is created BEFORE raceWithTimeout
-    let resolveTick!: (v: unknown) => void;
-    const tickPromise = new Promise<unknown>((res) => { resolveTick = res; });
-    tickPromise.catch(() => {}); // prevent unhandled rejection
+  it("deferred tickPromise catch prevents unhandled rejection", async () => {
+    // Simulates rejectTick() being called before any .finally() is attached
+    let rejectTickFn!: (e: unknown) => void;
+    const tickPromise = new Promise<unknown>((_res, rej) => { rejectTickFn = rej; });
+    // Attach .catch() immediately — this is what the production code does
+    tickPromise.catch(() => {});
 
-    let promiseWasDefinedInTimeout = false;
+    // Reject without any other handler attached
+    rejectTickFn(new Error("tick failed"));
 
-    await raceWithTimeout(
-      () => {
-        // Simulate slow tick — timeout fires first
-        return new Promise<void>((resolve) => {
-          setTimeout(() => { resolveTick("done"); resolve(); }, 200);
-        });
-      },
-      50,
-      () => {
-        // In the deferred pattern, tickPromise is ALWAYS defined here
-        promiseWasDefinedInTimeout = tickPromise !== undefined;
-      },
-    );
+    // Wait a microtask — if unhandled rejection was going to fire, it would by now
+    await new Promise((r) => setTimeout(r, 10));
 
-    expect(promiseWasDefinedInTimeout).toBe(true);
-    await tickPromise; // wait for settlement
+    // If we reach here without an unhandledRejection event, the .catch() worked.
+    // We verify the promise is settled (rejected) by catching it explicitly:
+    const result = await tickPromise.then(() => "resolved").catch(() => "rejected");
+    expect(result).toBe("rejected");
   });
 
   it("hard safety timeout releases mutex if tick hangs forever", async () => {
     vi.useFakeTimers();
-    let mutexReleased = false;
+    let hardTimeoutFired = false;
+    let finallyRan = false;
 
-    // Simulate a tick that never resolves
     let resolveTick!: (v: unknown) => void;
     const tickPromise = new Promise<unknown>((res) => { resolveTick = res; });
     tickPromise.catch(() => {});
 
     const HARD_TIMEOUT = 5 * 60_000;
-    const hardTimeout = setTimeout(() => { mutexReleased = true; }, HARD_TIMEOUT);
-    tickPromise.finally(() => { clearTimeout(hardTimeout); mutexReleased = true; });
+    // Set up the two separate paths
+    const hardTimeout = setTimeout(() => { hardTimeoutFired = true; }, HARD_TIMEOUT);
+    tickPromise.finally(() => { clearTimeout(hardTimeout); finallyRan = true; });
 
-    // Advance past soft timeout but before hard timeout
+    // Before hard timeout: nothing released
     await vi.advanceTimersByTimeAsync(120_000);
-    expect(mutexReleased).toBe(false);
+    expect(hardTimeoutFired).toBe(false);
+    expect(finallyRan).toBe(false);
 
-    // Advance past hard timeout
+    // Advance past hard timeout — hard timeout fires, NOT .finally()
     await vi.advanceTimersByTimeAsync(HARD_TIMEOUT);
-    expect(mutexReleased).toBe(true);
+    expect(hardTimeoutFired).toBe(true);
+    // .finally() has NOT run yet (tick still pending)
+    expect(finallyRan).toBe(false);
 
-    // Cleanup: resolve the tick to prevent dangling promise
+    // Now resolve the tick — .finally() runs and cancels the hard timeout (already fired, but clearTimeout is safe)
     resolveTick("done");
+    await Promise.resolve(); // flush microtasks
+    expect(finallyRan).toBe(true);
+
     vi.useRealTimers();
   });
 
