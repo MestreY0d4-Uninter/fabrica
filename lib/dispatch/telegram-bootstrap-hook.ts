@@ -229,8 +229,8 @@ function parseClarificationResponse(text: string, session: TelegramBootstrapSess
     const trimmed = text.trim();
     const autoPatterns = /^(escolha|pick one|tanto faz|you choose|pode escolher|auto|skip)$/i;
     if (autoPatterns.test(trimmed)) {
-      // User wants auto-generation — return recognized with no projectName (slug derived from rawIdea)
-      return { recognized: true, stackHint: session.stackHint ?? undefined };
+      // User wants auto-generation — derive slug from rawIdea as fallback
+      return { recognized: true, projectName: inferProjectSlug(session.rawIdea) ?? undefined, stackHint: session.stackHint ?? undefined };
     }
     const nameField = parseField(text, ["project name", "nome do projeto", "nome", "name"]);
     if (nameField) {
