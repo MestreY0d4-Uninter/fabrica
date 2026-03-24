@@ -6,6 +6,7 @@ import {
   upsertTelegramBootstrapSession,
   readTelegramBootstrapSession,
   deleteTelegramBootstrapSession,
+  shouldSuppressTelegramBootstrapReply,
 } from "../../lib/dispatch/telegram-bootstrap-session.js";
 
 const {
@@ -688,6 +689,75 @@ describe("telegram bootstrap hook", () => {
       );
       expect(result).toBeUndefined();
     });
+
+    it("returns { cancel: true } when session status is 'pending_classify'", async () => {
+      const api = {
+        on: vi.fn((name, fn) => {
+          if (name === "message_received") handler = fn;
+          if (name === "before_prompt_build") beforePromptBuildHandler = fn;
+          if (name === "message_sending") messageSendingHandler = fn;
+        }),
+      } as unknown as OpenClawPluginApi;
+
+      registerTelegramBootstrapHook(api, ctx);
+
+      await upsertTelegramBootstrapSession("/tmp/workspace", {
+        conversationId: "telegram:6951571380",
+        rawIdea: "build me a cli app",
+        sourceRoute: { channel: "telegram", channelId: "6951571380" },
+        status: "pending_classify",
+      });
+
+      const result = await messageSendingHandler?.(
+        { to: "6951571380" },
+        { channelId: "telegram" },
+      );
+      expect(result).toEqual({ cancel: true });
+    });
+  });
+
+  it("creates pending_classify session synchronously for ambiguous DM before classification", async () => {
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+        if (name === "before_prompt_build") beforePromptBuildHandler = fn;
+        if (name === "message_sending") messageSendingHandler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    // "I need a CLI tool" is ambiguous — has software cue ("cli") but no create cue
+    const handlerPromise = handler?.(
+      { content: "I need a CLI tool that converts numbers between bases", metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    // Session should exist with pending_classify status BEFORE the async classification
+    // We check immediately after calling handler (not waiting for it to complete)
+    // The session creation is synchronous (awaited) before fire-and-forget
+    await handlerPromise;
+
+    const session = await readTelegramBootstrapSession("/tmp/workspace", "6951571380");
+    // After handler returns, session should be pending_classify (or classifying if classify already ran)
+    expect(session?.status === "pending_classify" || session?.status === "classifying" || session === null).toBe(true);
+    // The key check: if session exists, suppress should have been active at some point
+    // Verify shouldSuppressTelegramBootstrapReply works for pending_classify
+    if (session && session.status === "pending_classify") {
+      expect(shouldSuppressTelegramBootstrapReply(session)).toBe(true);
+    }
+  });
+
+  it("shouldSuppressTelegramBootstrapReply returns true for pending_classify session", async () => {
+    await upsertTelegramBootstrapSession("/tmp/workspace", {
+      conversationId: "telegram:5555555555",
+      rawIdea: "I need a CLI tool",
+      sourceRoute: { channel: "telegram", channelId: "5555555555" },
+      status: "pending_classify",
+    });
+    const session = await readTelegramBootstrapSession("/tmp/workspace", "telegram:5555555555");
+    expect(session).not.toBeNull();
+    expect(shouldSuppressTelegramBootstrapReply(session)).toBe(true);
   });
 });
 

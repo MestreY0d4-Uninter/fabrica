@@ -326,6 +326,14 @@ async function classifyAndBootstrap(
   conversationId: string,
   content: string,
 ): Promise<void> {
+  // Transition from pending_classify → classifying (LLM call about to start)
+  await upsertTelegramBootstrapSession(workspaceDir, {
+    conversationId,
+    rawIdea: content,
+    sourceRoute: { channel: "telegram", channelId: conversationId },
+    status: "classifying",
+  });
+
   const classification = await classifyDmIntent(ctx, content, workspaceDir);
 
   // Fail-open: if LLM failed or returned "other" or low confidence, delete session so agent can respond
@@ -753,8 +761,8 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
     const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
     // If the clarifying session has expired, treat any new bootstrap candidate as a fresh request
     const sessionIsExpired = existingSession != null && Date.parse(existingSession.suppressUntil) < Date.now();
-    if (existingSession && !sessionIsExpired && existingSession.status === "classifying") {
-      // LLM classification is in progress — suppress duplicate messages
+    if (existingSession && !sessionIsExpired && (existingSession.status === "classifying" || existingSession.status === "pending_classify")) {
+      // LLM classification is in progress (pending or active) — suppress duplicate messages
       ctx.logger.info(`[telegram-bootstrap] LLM classification in progress for ${conversationId}, ignoring concurrent message`);
       return;
     }
@@ -788,12 +796,12 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
     if (!isBootstrapCandidate(content)) {
       // Layer 3: LLM for ambiguous cases (fire-and-forget)
       if (isAmbiguousCandidate(content)) {
-        // Create session with "classifying" status to suppress agent response for this turn
+        // Create session IMMEDIATELY with pending_classify to suppress agent response for this turn
         await upsertTelegramBootstrapSession(workspaceDir, {
           conversationId,
           rawIdea: content,
           sourceRoute: { channel: "telegram", channelId: conversationId },
-          status: "classifying",
+          status: "pending_classify",
         });
 
         // Fire-and-forget: LLM classify + bootstrap runs detached from event handler
