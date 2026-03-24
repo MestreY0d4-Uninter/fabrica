@@ -425,8 +425,15 @@ export const PYTHON_TOOLCHAIN_PACKAGES = ["ruff", "mypy", "pip-audit"];
 const TOOLCHAIN_DIR = ".openclaw/toolchains/python";
 const TOOLCHAIN_FINGERPRINT_FILE = "toolchain.sha256";
 
-function toolchainFingerprint(): string {
-  return createHash("sha256").update(PYTHON_TOOLCHAIN_PACKAGES.join(",")).digest("hex");
+export async function toolchainFingerprint(runCommand: RunCommand): Promise<string> {
+  let pythonVersion = "unknown";
+  try {
+    const result = await runCommand("python3", ["--version"], { timeout: 5_000 });
+    if (result.exitCode === 0) pythonVersion = result.stdout.trim();
+  } catch { /* fallback to "unknown" */ }
+  return createHash("sha256")
+    .update(PYTHON_TOOLCHAIN_PACKAGES.join(",") + ":" + pythonVersion)
+    .digest("hex");
 }
 
 export async function ensurePythonToolchain(
@@ -438,7 +445,7 @@ export async function ensurePythonToolchain(
   const ruffPath = path.join(toolchainPath, "bin", "ruff");
   const fingerprintPath = path.join(toolchainPath, TOOLCHAIN_FINGERPRINT_FILE);
 
-  const expectedFp = toolchainFingerprint();
+  const expectedFp = await toolchainFingerprint(runCommand);
 
   // Check if already provisioned with matching fingerprint
   if (await isValidBinary(ruffPath)) {

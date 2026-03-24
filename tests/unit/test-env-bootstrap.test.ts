@@ -11,6 +11,7 @@ import {
   getQaGateCommands,
   getSupportedGreenfieldStacks,
   supportsGreenfieldScaffold,
+  toolchainFingerprint,
   PYTHON_TOOLCHAIN_PACKAGES,
 } from "../../lib/test-env/bootstrap.js";
 
@@ -293,15 +294,19 @@ describe("ensurePythonToolchain", () => {
     await fs.mkdir(path.join(toolchainPath, "bin"), { recursive: true });
     await fs.writeFile(path.join(toolchainPath, "bin", "ruff"), "#!/bin/sh\n", { mode: 0o755 });
 
-    // Write matching fingerprint
-    const hash = createHash("sha256").update(PYTHON_TOOLCHAIN_PACKAGES.join(",")).digest("hex");
-    await fs.writeFile(path.join(toolchainPath, "toolchain.sha256"), hash);
-
     const commandsRun: string[] = [];
     const runCommand = async (cmd: string, args: string[]) => {
       commandsRun.push(`${cmd} ${args.join(" ")}`);
+      if (cmd === "python3" && args[0] === "--version") {
+        return { stdout: "Python 3.12.0\n", stderr: "", exitCode: 0 };
+      }
       return { stdout: "", stderr: "", exitCode: 0 };
     };
+
+    // Write matching fingerprint using the actual function
+    const hash = await toolchainFingerprint(runCommand);
+    await fs.writeFile(path.join(toolchainPath, "toolchain.sha256"), hash);
+    commandsRun.length = 0; // reset after fingerprint call
 
     const result = await ensurePythonToolchain(runCommand, tmpHome);
     expect(result).toBe(toolchainPath);
