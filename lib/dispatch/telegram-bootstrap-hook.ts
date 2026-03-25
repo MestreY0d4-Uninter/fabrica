@@ -214,7 +214,7 @@ async function classifyDmIntent(
   }
 }
 
-export { isAmbiguousCandidate as _testIsAmbiguousCandidate, classifyDmIntent as _testClassifyDmIntent, buildTopicDeepLink as _testBuildTopicDeepLink, inferProjectSlug as _testInferProjectSlug, normalizeUserResponse as _testNormalizeUserResponse };
+export { isAmbiguousCandidate as _testIsAmbiguousCandidate, classifyDmIntent as _testClassifyDmIntent, buildTopicDeepLink as _testBuildTopicDeepLink, inferProjectSlug as _testInferProjectSlug, normalizeUserResponse as _testNormalizeUserResponse, continueBootstrap as _testContinueBootstrap };
 
 function isBootstrapCandidate(text: string): boolean {
   const lower = text.toLowerCase();

@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { registerTelegramBootstrapHook } from "../../lib/dispatch/telegram-bootstrap-hook.js";
+import { registerTelegramBootstrapHook, _testContinueBootstrap } from "../../lib/dispatch/telegram-bootstrap-hook.js";
 
 const {
   mockRunPipeline,
@@ -467,5 +467,56 @@ describe("telegram bootstrap clarification flow", () => {
     await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 3000 });
     const payload = mockRunPipeline.mock.calls[0]?.[0];
     expect(payload.metadata.project_name).toBeTruthy();
+  });
+
+  it("continueBootstrap generates fallback slug when rawIdea empty and name was already asked (Bug J level 2)", async () => {
+    // Seed a session with pendingClarification: "name" so level 2 guard fires
+    // when continueBootstrap is called with projectName: null and rawIdea that
+    // yields undefined from inferProjectSlug.
+    // "@@@" → all non-word, non-hyphen chars → regex strips everything → slug "" → undefined
+    const sessionDir = `${WORKSPACE}/fabrica/bootstrap-sessions`;
+    await fs.mkdir(sessionDir, { recursive: true });
+    await fs.writeFile(
+      `${sessionDir}/${CONVERSATION_ID}.json`,
+      JSON.stringify({
+        conversationId: CONVERSATION_ID,
+        rawIdea: "@@@",
+        stackHint: "python-cli",
+        status: "clarifying",
+        pendingClarification: "name",
+        language: "pt",
+        suppressUntil: new Date(Date.now() + 60_000).toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }) + "\n",
+      "utf-8",
+    );
+
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 830,
+          project_slug: "project-fallback",
+        },
+      },
+    });
+
+    // Call continueBootstrap directly:
+    // - request.projectName is null → triggers the name resolution branch
+    // - inferProjectSlug("@@@") returns undefined ("@" chars are stripped by [^\w\s-] → empty slug)
+    // - existing session has pendingClarification === "name" → level 2 fires: project-${Date.now()}
+    await _testContinueBootstrap(ctx, CONVERSATION_ID, WORKSPACE, {
+      rawIdea: "@@@",
+      projectName: null,
+      stackHint: "python-cli",
+    }, { channel: "telegram", channelId: CONVERSATION_ID });
+
+    // Pipeline must have been called with a timestamp-based fallback slug
+    expect(mockRunPipeline).toHaveBeenCalledTimes(1);
+    const pipelinePayload = mockRunPipeline.mock.calls[0]?.[0];
+    expect(pipelinePayload.metadata.project_name).toBeTruthy();
+    expect(String(pipelinePayload.metadata.project_name)).toMatch(/^project-\d+$/);
   });
 });
