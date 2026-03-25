@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate, _testClassifyDmIntent as classifyDmIntent, _testBuildTopicDeepLink as buildTopicDeepLink, _testInferProjectSlug as inferProjectSlug, _testNormalizeUserResponse as normalizeUserResponse } from "../../lib/dispatch/telegram-bootstrap-hook.js";
@@ -795,6 +795,104 @@ describe("telegram bootstrap hook", () => {
     const session = await readTelegramBootstrapSession("/tmp/workspace", "telegram:5555555555");
     expect(session).not.toBeNull();
     expect(shouldSuppressTelegramBootstrapReply(session)).toBe(true);
+  });
+
+  describe("Layer 3 confidence threshold", () => {
+    afterEach(async () => {
+      // Clean up session files written by these tests to avoid polluting other describe blocks.
+      // Wait briefly to let any fire-and-forget classifyAndBootstrap calls complete first.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await fs.rm("/tmp/workspace/fabrica/bootstrap-sessions", { recursive: true, force: true });
+    });
+
+    it("proceeds with bootstrap when confidence is 0.6 (boundary)", async () => {
+      outerMockSubagentRun.mockResolvedValue({ runId: "classify-run" });
+      outerMockSubagentWait.mockResolvedValue({ status: "ok" });
+      outerMockSubagentGetMessages.mockResolvedValue([
+        { role: "assistant", content: JSON.stringify({ intent: "create_project", confidence: 0.6, stackHint: "python-cli", projectSlug: "log-analyzer", language: "pt" }) },
+      ]);
+
+      const api = {
+        on: vi.fn((name, fn) => {
+          if (name === "message_received") handler = fn;
+          if (name === "before_prompt_build") beforePromptBuildHandler = fn;
+        }),
+      } as unknown as OpenClawPluginApi;
+
+      registerTelegramBootstrapHook(api, ctx);
+
+      await handler?.(
+        { content: "Preciso de um sistema que analise logs de erro do servidor", metadata: {} },
+        { channelId: "telegram", conversationId: "111222333" },
+      );
+
+      // Should have sent ack (Layer 3 accepted)
+      await vi.waitFor(() => {
+        const ackCalls = sendMessageTelegram.mock.calls.filter(
+          (c: any) => String(c[1]).includes("Recebi") || String(c[1]).includes("Got it"),
+        );
+        expect(ackCalls.length).toBeGreaterThanOrEqual(1);
+      }, { timeout: 3000 });
+    });
+
+    it("proceeds with bootstrap when confidence is 0.65", async () => {
+      outerMockSubagentRun.mockResolvedValue({ runId: "classify-run-65" });
+      outerMockSubagentWait.mockResolvedValue({ status: "ok" });
+      outerMockSubagentGetMessages.mockResolvedValue([
+        { role: "assistant", content: JSON.stringify({ intent: "create_project", confidence: 0.65, stackHint: "python-cli", projectSlug: "log-analyzer", language: "pt" }) },
+      ]);
+
+      const api = {
+        on: vi.fn((name, fn) => {
+          if (name === "message_received") handler = fn;
+          if (name === "before_prompt_build") beforePromptBuildHandler = fn;
+        }),
+      } as unknown as OpenClawPluginApi;
+
+      registerTelegramBootstrapHook(api, ctx);
+
+      await handler?.(
+        { content: "Preciso de uma ferramenta que analise logs do servidor", metadata: {} },
+        { channelId: "telegram", conversationId: "111222335" },
+      );
+
+      await vi.waitFor(() => {
+        const ackCalls = sendMessageTelegram.mock.calls.filter(
+          (c: any) => String(c[1]).includes("Recebi") || String(c[1]).includes("Got it"),
+        );
+        expect(ackCalls.length).toBeGreaterThanOrEqual(1);
+      }, { timeout: 3000 });
+    });
+
+    it("falls back to chat when confidence is 0.59 (below threshold)", async () => {
+      outerMockSubagentRun.mockResolvedValue({ runId: "classify-run-2" });
+      outerMockSubagentWait.mockResolvedValue({ status: "ok" });
+      outerMockSubagentGetMessages.mockResolvedValue([
+        { role: "assistant", content: JSON.stringify({ intent: "create_project", confidence: 0.59, stackHint: null, projectSlug: null, language: "pt" }) },
+      ]);
+
+      const api = {
+        on: vi.fn((name, fn) => {
+          if (name === "message_received") handler = fn;
+          if (name === "before_prompt_build") beforePromptBuildHandler = fn;
+        }),
+      } as unknown as OpenClawPluginApi;
+
+      registerTelegramBootstrapHook(api, ctx);
+
+      await handler?.(
+        { content: "Preciso de um sistema que analise logs de erro do servidor", metadata: {} },
+        { channelId: "telegram", conversationId: "111222334" },
+      );
+
+      // Wait for fire-and-forget to complete
+      await vi.waitFor(() => {
+        const ackCalls = sendMessageTelegram.mock.calls.filter(
+          (c: any) => String(c[1]).includes("Recebi") || String(c[1]).includes("Got it"),
+        );
+        expect(ackCalls.length).toBe(0);
+      }, { timeout: 3000 });
+    });
   });
 });
 

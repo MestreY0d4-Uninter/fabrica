@@ -20,6 +20,7 @@ import {
 import { raceWithTimeout } from "../utils/async.js";
 
 const BOOTSTRAP_TIMEOUT_MS = 5 * 60_000; // 5 minutes
+const LAYER3_CONFIDENCE_THRESHOLD = 0.6;
 
 type BootstrapRequest = {
   rawIdea: string;
@@ -350,8 +351,8 @@ function logBootstrapWarning(ctx: PluginContext, message: string): void {
 /**
  * Layer 3: LLM-based classification for ambiguous DMs.
  * Classifies the message via classifyDmIntent. If LLM returns null, "other", or
- * low confidence (< 0.7), deletes the classifying session (fail-open to chat).
- * If "create_project" with confidence >= 0.7, sends ack, merges LLM enrichment
+ * low confidence (< LAYER3_CONFIDENCE_THRESHOLD), deletes the classifying session (fail-open to chat).
+ * If "create_project" with confidence >= LAYER3_CONFIDENCE_THRESHOLD (0.6), sends ack, merges LLM enrichment
  * into the parsed request, deduplicates, and enters clarification or fires the pipeline.
  */
 async function classifyAndBootstrap(
@@ -371,7 +372,7 @@ async function classifyAndBootstrap(
   const classification = await classifyDmIntent(ctx, content, workspaceDir);
 
   // Fail-open: if LLM failed or returned "other" or low confidence, delete session so agent can respond
-  if (!classification || classification.intent !== "create_project" || classification.confidence < 0.7) {
+  if (!classification || classification.intent !== "create_project" || classification.confidence < LAYER3_CONFIDENCE_THRESHOLD) {
     if (!classification) {
       logBootstrapWarning(ctx, `[telegram-bootstrap] LLM classify failed, falling back (conversation: ${conversationId})`);
     }
