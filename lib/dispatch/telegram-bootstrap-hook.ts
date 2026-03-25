@@ -89,7 +89,7 @@ function normalizeText(value: string | undefined): string | undefined {
 }
 
 function normalizeUserResponse(text: string): string {
-  return text.trim().replace(/[.,!?;:]+$/, "").toLowerCase();
+  return text.trim().replace(/[.,!?;:\u2026]+$/, "").toLowerCase();
 }
 
 function detectStackHint(text: string): string | undefined {

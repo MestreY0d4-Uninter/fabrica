@@ -1627,6 +1627,7 @@ describe("normalizeUserResponse", () => {
     expect(normalizeUserResponse("java?")).toBe("java");
     expect(normalizeUserResponse("Go...")).toBe("go");
     expect(normalizeUserResponse("TypeScript;:")).toBe("typescript");
+    expect(normalizeUserResponse("Python\u2026")).toBe("python");
   });
 
   it("preserves clean input", () => {
