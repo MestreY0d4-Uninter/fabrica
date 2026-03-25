@@ -96,7 +96,7 @@ describe("telegram bootstrap clarification flow", () => {
     await fs.rm(`${WORKSPACE}/fabrica/bootstrap-sessions`, { recursive: true, force: true });
   });
 
-  it("resumes pipeline with original rawIdea after bare 'python' clarification response followed by name", async () => {
+  it("resumes pipeline with original rawIdea after bare 'python' clarification response (Bug J: skips name clarification)", async () => {
     mockRunPipeline.mockResolvedValue({
       success: true,
       payload: {
@@ -122,24 +122,10 @@ describe("telegram bootstrap clarification flow", () => {
 
     sendMessageTelegram.mockClear();
 
-    // Step 2: user replies with bare "python" — stack resolved, now asks for name
+    // Step 2: user replies with bare "python" — stack resolved
+    // inferProjectSlug succeeds on rawIdea → pipeline runs directly (no name clarification)
     await handler?.(
       { content: "python", metadata: {} },
-      { channelId: "telegram", conversationId: CONVERSATION_ID },
-    );
-
-    // Should ask for project name now
-    await vi.waitFor(
-      () => expect(sendMessageTelegram).toHaveBeenCalledTimes(1),
-      { timeout: 2000 },
-    );
-    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toMatch(/nome|name/i);
-    expect(mockRunPipeline).not.toHaveBeenCalled();
-    sendMessageTelegram.mockClear();
-
-    // Step 3: user provides project name
-    await handler?.(
-      { content: "tarefas-cli", metadata: {} },
       { channelId: "telegram", conversationId: CONVERSATION_ID },
     );
 
@@ -149,7 +135,8 @@ describe("telegram bootstrap clarification flow", () => {
     expect(pipelinePayload.raw_idea).toContain("CLI de tarefas");
     // Stack should be resolved to python-cli
     expect(pipelinePayload.metadata.stack_hint).toBe("python-cli");
-    expect(pipelinePayload.metadata.project_name).toBe("tarefas-cli");
+    // project_name should be inferred (non-null)
+    expect(pipelinePayload.metadata.project_name).toBeTruthy();
   });
 
   it("re-asks when clarification response is irrelevant", async () => {
@@ -178,7 +165,7 @@ describe("telegram bootstrap clarification flow", () => {
     expect(followUp).toMatch(/stack|linguagem|framework/i);
   });
 
-  it("resumes pipeline after structured 'Stack: node-cli' clarification followed by name", async () => {
+  it("resumes pipeline after structured 'Stack: node-cli' clarification (Bug J: skips name clarification)", async () => {
     mockRunPipeline.mockResolvedValue({
       success: true,
       payload: {
@@ -201,30 +188,17 @@ describe("telegram bootstrap clarification flow", () => {
     sendMessageTelegram.mockClear();
 
     // Step 2: structured clarification response for stack
+    // inferProjectSlug succeeds on rawIdea → pipeline runs directly (no name clarification)
     await handler?.(
       { content: "Stack: node-cli", metadata: {} },
-      { channelId: "telegram", conversationId: CONVERSATION_ID },
-    );
-
-    // Should ask for project name now
-    await vi.waitFor(
-      () => expect(sendMessageTelegram).toHaveBeenCalledTimes(1),
-      { timeout: 2000 },
-    );
-    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toMatch(/nome|name/i);
-    sendMessageTelegram.mockClear();
-    expect(mockRunPipeline).not.toHaveBeenCalled();
-
-    // Step 3: user provides project name
-    await handler?.(
-      { content: "deploy-automation-cli", metadata: {} },
       { channelId: "telegram", conversationId: CONVERSATION_ID },
     );
 
     await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
     const pipelinePayload = mockRunPipeline.mock.calls[0]?.[0];
     expect(pipelinePayload.metadata.stack_hint).toBe("node-cli");
-    expect(pipelinePayload.metadata.project_name).toBe("deploy-automation-cli");
+    // project_name should be inferred (non-null)
+    expect(pipelinePayload.metadata.project_name).toBeTruthy();
     // original idea preserved
     expect(pipelinePayload.raw_idea).toContain("automatizar deploys");
   });
@@ -283,7 +257,7 @@ describe("telegram bootstrap clarification flow", () => {
     expect(pipelinePayload.metadata.project_name).toBe("novo-projeto-cli");
   });
 
-  it("asks for project name when stack is known but name is missing, then accepts bare name response", async () => {
+  it("proceeds to pipeline directly when stack is known and inferProjectSlug succeeds (Bug J: no name loop)", async () => {
     mockRunPipeline.mockResolvedValue({
       success: true,
       payload: {
@@ -295,25 +269,10 @@ describe("telegram bootstrap clarification flow", () => {
       },
     });
 
-    // Send DM with explicit stack but no project name
+    // Send DM with explicit stack but no explicit project name
+    // inferProjectSlug will succeed on "Uma CLI para converter bases numericas." → pipeline runs directly
     await handler?.(
       { content: "Crie um projeto.\nStack: python-cli\nIdeia: Uma CLI para converter bases numericas.", metadata: {} },
-      { channelId: "telegram", conversationId: CONVERSATION_ID },
-    );
-
-    // Should ask for project name: ack first (sync), then name question (async from bootstrapWithTimeout)
-    await vi.waitFor(
-      () => expect(sendMessageTelegram).toHaveBeenCalledTimes(2),
-      { timeout: 3000 },
-    );
-    const calls = sendMessageTelegram.mock.calls.map((c: any[]) => String(c[1] ?? ""));
-    const nameQuestion = calls.find((msg: string) => /nome|name/i.test(msg));
-    expect(nameQuestion).toBeTruthy();
-    sendMessageTelegram.mockClear();
-
-    // User responds with a project name
-    await handler?.(
-      { content: "base-converter-cli", metadata: {} },
       { channelId: "telegram", conversationId: CONVERSATION_ID },
     );
 
@@ -322,11 +281,12 @@ describe("telegram bootstrap clarification flow", () => {
       { timeout: 3000 },
     );
     const payload = mockRunPipeline.mock.calls[0]?.[0];
-    expect(payload.metadata.project_name).toBe("base-converter-cli");
+    // project_name should be inferred (non-null, not blank)
+    expect(payload.metadata.project_name).toBeTruthy();
     expect(payload.metadata.stack_hint).toBe("python-cli");
   });
 
-  it("recognizes 'Python.' (with punctuation) as stack clarification response", async () => {
+  it("recognizes 'Python.' (with punctuation) as stack clarification response and proceeds to pipeline", async () => {
     mockRunPipeline.mockResolvedValue({
       success: true,
       payload: {
@@ -343,17 +303,19 @@ describe("telegram bootstrap clarification flow", () => {
     sendMessageTelegram.mockClear();
 
     // Step 2: user replies "Python." with trailing period
+    // normalizeUserResponse strips the period → detected as python-cli
+    // inferProjectSlug succeeds on rawIdea → pipeline runs directly
     await handler?.(
       { content: "Python.", metadata: {} },
       { channelId: "telegram", conversationId: CONVERSATION_ID },
     );
 
-    // Should ask for project name (stack resolved)
+    // Pipeline should be called (stack resolved, name inferred)
     await vi.waitFor(
-      () => expect(sendMessageTelegram).toHaveBeenCalledTimes(1),
+      () => expect(mockRunPipeline).toHaveBeenCalledTimes(1),
       { timeout: 2000 },
     );
-    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toMatch(/nome|name/i);
+    expect(mockRunPipeline.mock.calls[0]?.[0].metadata.stack_hint).toBeTruthy();
   });
 
   it("re-asks with contextual name question when name clarification is not recognized", async () => {
@@ -364,33 +326,33 @@ describe("telegram bootstrap clarification flow", () => {
       },
     });
 
-    // Step 1: trigger clarification (stack_and_name)
-    await handler?.(
-      { content: "Crie um projeto novo para monitorar CPU", metadata: {} },
-      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    // Seed a clarifying session in "name" pending state (rawIdea="" so inferProjectSlug=undefined)
+    const sessionDir = `${WORKSPACE}/fabrica/bootstrap-sessions`;
+    await fs.mkdir(sessionDir, { recursive: true });
+    await fs.writeFile(
+      `${sessionDir}/${CONVERSATION_ID}.json`,
+      JSON.stringify({
+        conversationId: CONVERSATION_ID,
+        rawIdea: "",
+        stackHint: "python-cli",
+        status: "clarifying",
+        pendingClarification: "name",
+        language: "pt",
+        suppressUntil: new Date(Date.now() + 60_000).toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }) + "\n",
+      "utf-8",
     );
-    sendMessageTelegram.mockClear();
 
-    // Step 2: provide stack → now asks for name
-    await handler?.(
-      { content: "python", metadata: {} },
-      { channelId: "telegram", conversationId: CONVERSATION_ID },
-    );
-    await vi.waitFor(
-      () => expect(sendMessageTelegram).toHaveBeenCalledTimes(1),
-      { timeout: 2000 },
-    );
-    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toMatch(/nome|name/i);
-    sendMessageTelegram.mockClear();
-
-    // Step 3: send gibberish that won't match name (too long, >64 chars)
+    // Send gibberish that won't match name (too long, >64 chars)
     await handler?.(
       { content: "a".repeat(65), metadata: {} },
       { channelId: "telegram", conversationId: CONVERSATION_ID },
     );
 
     // Re-ask should be the NAME question, not a generic "more details"
-    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2000 });
     const reAsk = String(sendMessageTelegram.mock.calls[0]?.[1]);
     expect(reAsk).toMatch(/nome|name/i);
     // Must NOT be the old generic message
@@ -398,7 +360,7 @@ describe("telegram bootstrap clarification flow", () => {
     expect(reAsk).not.toContain("more details");
   });
 
-  it("recognizes bare 'Python' (no punctuation) as stack — regression", async () => {
+  it("recognizes bare 'Python' (no punctuation) as stack and proceeds to pipeline (Bug J: name inferred)", async () => {
     mockRunPipeline.mockResolvedValue({
       success: true,
       payload: {
@@ -413,16 +375,97 @@ describe("telegram bootstrap clarification flow", () => {
     );
     sendMessageTelegram.mockClear();
 
-    // Step 2: "Python" without punctuation — must still work
+    // Step 2: "Python" without punctuation — stack recognized
+    // inferProjectSlug succeeds on rawIdea → pipeline runs directly (no name clarification)
     await handler?.(
       { content: "Python", metadata: {} },
       { channelId: "telegram", conversationId: CONVERSATION_ID },
     );
 
     await vi.waitFor(
-      () => expect(sendMessageTelegram).toHaveBeenCalledTimes(1),
+      () => expect(mockRunPipeline).toHaveBeenCalledTimes(1),
       { timeout: 2000 },
     );
-    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toMatch(/nome|name/i);
+    expect(mockRunPipeline.mock.calls[0]?.[0].metadata.project_name).toBeTruthy();
+  });
+
+  it("breaks auto-name loop when inferProjectSlug returns undefined (Bug J)", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: { channel_id: "-1003709213169", message_thread_id: 820, project_slug: "project-fallback" },
+      },
+    });
+
+    // Seed a clarifying session with an empty rawIdea to simulate the Bug J scenario:
+    // inferProjectSlug("") → undefined. Without the fix, "auto" would return projectName=undefined
+    // and the loop would repeat. With the fix, it returns "project-${Date.now()}".
+    const sessionDir = `${WORKSPACE}/fabrica/bootstrap-sessions`;
+    await fs.mkdir(sessionDir, { recursive: true });
+    await fs.writeFile(
+      `${sessionDir}/${CONVERSATION_ID}.json`,
+      JSON.stringify({
+        conversationId: CONVERSATION_ID,
+        rawIdea: "",
+        stackHint: "python-cli",
+        status: "clarifying",
+        pendingClarification: "name",
+        language: "pt",
+        suppressUntil: new Date(Date.now() + 60_000).toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }) + "\n",
+      "utf-8",
+    );
+
+    // User says "auto" — parseClarificationResponse sees auto-pattern and returns project-${Date.now()}
+    await handler?.(
+      { content: "auto", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    // Pipeline should be called (no loop)
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    const payload = mockRunPipeline.mock.calls[0]?.[0];
+    expect(payload.metadata.project_name).toBeTruthy();
+  });
+
+  it("recognizes 'auto.' (with punctuation) as auto-name pattern (Bug A/J interaction)", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: { channel_id: "-1003709213169", message_thread_id: 821, project_slug: "test" },
+      },
+    });
+
+    // Seed a clarifying session with empty rawIdea
+    const sessionDir = `${WORKSPACE}/fabrica/bootstrap-sessions`;
+    await fs.mkdir(sessionDir, { recursive: true });
+    await fs.writeFile(
+      `${sessionDir}/${CONVERSATION_ID}.json`,
+      JSON.stringify({
+        conversationId: CONVERSATION_ID,
+        rawIdea: "",
+        stackHint: "python-cli",
+        status: "clarifying",
+        pendingClarification: "name",
+        language: "pt",
+        suppressUntil: new Date(Date.now() + 60_000).toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }) + "\n",
+      "utf-8",
+    );
+
+    // "auto." with trailing period — normalizeUserResponse strips the period → matches "auto"
+    await handler?.(
+      { content: "auto.", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    // Pipeline should be called (auto-pattern matched via normalizeUserResponse)
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    const payload = mockRunPipeline.mock.calls[0]?.[0];
+    expect(payload.metadata.project_name).toBeTruthy();
   });
 });

@@ -392,30 +392,16 @@ describe("telegram bootstrap hook", () => {
       },
       { channelId: "telegram", conversationId: "6951571380" },
     );
-    // Should NOT call pipeline immediately — asks for name first
-    expect(mockRunPipeline).not.toHaveBeenCalled();
-    // 2 sends: ack (calls[0]), name question (calls[1])
-    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
-    expect(String(sendMessageTelegram.mock.calls[1]?.[1])).toMatch(/nome|name/i);
-
-    sendMessageTelegram.mockClear();
-
-    // User responds with a project name
-    await handler?.(
-      { content: "gerador-senhas-cli", metadata: {} },
-      { channelId: "telegram", conversationId: "6951571380" },
-    );
-
+    // inferProjectSlug succeeds for the rawIdea → pipeline runs directly without asking for name
     await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
     expect(mockRunPipeline.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
       raw_idea: "Uma CLI em Python que gere senhas aleatorias no terminal.",
       metadata: expect.objectContaining({
-        project_name: "gerador-senhas-cli",
         stack_hint: "python-cli",
       }),
     }));
-    // Drain: pipeline failed path sends 1 error message then upserts "failed" session
-    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    // project_name should be non-null (inferred from rawIdea)
+    expect(mockRunPipeline.mock.calls[0]?.[0].metadata.project_name).toBeTruthy();
   });
 
   it("detects node-cli from natural TypeScript CLI language instead of falling back to express", async () => {
@@ -1448,14 +1434,15 @@ describe("Layer 2 language heuristic", () => {
     registerTelegramBootstrapHook(api, ctx);
 
     // "Crie um novo projeto cli python" — has createCue "crie" (PT) + softwareCue "cli" + "projeto"
-    // detectStackHint matches "cli python" → python-cli, stack known but no name → name clarification fires
+    // detectStackHint matches "cli python" → python-cli, stack known
+    // inferProjectSlug succeeds → pipeline runs directly (no name clarification)
     await handler?.(
       { content: "Crie um novo projeto cli python", metadata: {} },
       { channelId: "telegram", conversationId: "6951571380" },
     );
 
-    // First call is the ack (synchronous); drain fire-and-forget name clarification
-    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    // First call is the ack (synchronous); wait for pipeline to complete
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
     expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Recebi!");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).not.toContain("Got it!");
@@ -1476,14 +1463,14 @@ describe("Layer 2 language heuristic", () => {
     registerTelegramBootstrapHook(api, ctx);
 
     // "Create a new project cli python" — has createCue "create" (EN) + softwareCue "cli" + "project"
-    // Stack detected (python-cli); no projectName → name clarification fires asynchronously
+    // Stack detected (python-cli); inferProjectSlug succeeds → pipeline runs directly
     await handler?.(
       { content: "Create a new project cli python", metadata: {} },
       { channelId: "telegram", conversationId: "6951571380" },
     );
 
-    // Drain fire-and-forget name clarification (ack + clarifyName)
-    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    // First call is the ack (synchronous); wait for pipeline to complete
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
     expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Got it!");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).not.toContain("Recebi!");
@@ -1504,14 +1491,14 @@ describe("Layer 2 language heuristic", () => {
     registerTelegramBootstrapHook(api, ctx);
 
     // "novo projeto cli python" — has createCue "novo projeto" (PT) + softwareCue "cli"
-    // Stack detected (python-cli); no projectName → name clarification fires asynchronously
+    // Stack detected (python-cli); inferProjectSlug succeeds → pipeline runs directly
     await handler?.(
       { content: "novo projeto cli python", metadata: {} },
       { channelId: "telegram", conversationId: "6951571380" },
     );
 
-    // Drain fire-and-forget name clarification (ack + clarifyName)
-    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    // First call is the ack (synchronous); wait for pipeline to complete
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
     expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Recebi!");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).not.toContain("Got it!");
@@ -1532,14 +1519,14 @@ describe("Layer 2 language heuristic", () => {
     registerTelegramBootstrapHook(api, ctx);
 
     // "new project cli python" — has createCue "new project" (EN) + softwareCue "cli"
-    // Stack detected (python-cli); no projectName → name clarification fires asynchronously
+    // Stack detected (python-cli); inferProjectSlug succeeds → pipeline runs directly
     await handler?.(
       { content: "new project cli python", metadata: {} },
       { channelId: "telegram", conversationId: "6951571380" },
     );
 
-    // Drain fire-and-forget name clarification (ack + clarifyName)
-    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    // First call is the ack (synchronous); wait for pipeline to complete
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
     expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("6951571380");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Got it!");
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).not.toContain("Recebi!");
@@ -1736,5 +1723,18 @@ describe("normalizeUserResponse", () => {
   it("does not strip punctuation mid-word", () => {
     expect(normalizeUserResponse("node.js")).toBe("node.js");
     expect(normalizeUserResponse("C#")).toBe("c#");
+  });
+});
+
+describe("inferProjectSlug fallback (Bug J)", () => {
+  it("returns undefined for empty rawIdea — documents the problem", () => {
+    const result = inferProjectSlug("");
+    expect(result).toBeUndefined();
+  });
+
+  it("returns valid slug for normal rawIdea", () => {
+    const result = inferProjectSlug("Crie uma CLI que valida CPF");
+    expect(result).toBeTruthy();
+    expect(result).toMatch(/^[a-z0-9-]+$/);
   });
 });

@@ -233,9 +233,9 @@ function parseClarificationResponse(text: string, session: TelegramBootstrapSess
   if (session.pendingClarification === "name") {
     const trimmed = text.trim();
     const autoPatterns = /^(escolha|pick one|tanto faz|you choose|pode escolher|auto|skip)$/i;
-    if (autoPatterns.test(trimmed)) {
-      // User wants auto-generation — derive slug from rawIdea as fallback
-      return { recognized: true, projectName: inferProjectSlug(session.rawIdea) ?? undefined, stackHint: session.stackHint ?? undefined };
+    if (autoPatterns.test(normalizeUserResponse(text))) {
+      // User wants auto-generation — derive slug from rawIdea, fallback to timestamp slug
+      return { recognized: true, projectName: inferProjectSlug(session.rawIdea) ?? `project-${Date.now()}`, stackHint: session.stackHint ?? undefined };
     }
     const nameField = parseField(text, ["project name", "nome do projeto", "nome", "name"]);
     if (nameField) {
@@ -497,7 +497,6 @@ async function continueBootstrap(
     return;
   }
 
-  const projectName = request.projectName ?? undefined;
   const stackHint = request.stackHint;
   if (!stackHint) {
     // stackHint missing after clarification — redirect to stack clarification.
@@ -519,31 +518,43 @@ async function continueBootstrap(
     return;
   }
 
-  // If stack known but name unknown, ask for name
-  if (!projectName) {
-    const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
-    const lang: BootstrapLanguage = existingSession?.language ?? "pt";
-    await upsertTelegramBootstrapSession(workspaceDir, {
-      conversationId,
-      rawIdea: request.rawIdea,
-      stackHint: request.stackHint ?? undefined,
-      status: "clarifying",
-      pendingClarification: "name",
-      language: lang,
-    });
-    await sendTelegramText(
-      ctx,
-      conversationId,
-      buildClarificationMessage(
-        { rawIdea: request.rawIdea, projectName: undefined, stackHint: request.stackHint ?? undefined },
-        "name",
-        lang,
-      ),
-    );
-    return;
+  // If stack known but name unknown, try fallbacks before asking
+  if (!request.projectName) {
+    // Fallback 1: try to derive slug from rawIdea silently
+    const inferredSlug = inferProjectSlug(request.rawIdea);
+    if (inferredSlug) {
+      request.projectName = inferredSlug;
+    } else {
+      // Fallback 2: if already asked for name before, don't loop — generate timestamp slug
+      const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
+      if (existingSession?.pendingClarification === "name") {
+        request.projectName = `project-${Date.now()}`;
+      } else {
+        // First time asking: enter clarification
+        const lang: BootstrapLanguage = existingSession?.language ?? "pt";
+        await upsertTelegramBootstrapSession(workspaceDir, {
+          conversationId,
+          rawIdea: request.rawIdea,
+          stackHint: request.stackHint ?? undefined,
+          status: "clarifying",
+          pendingClarification: "name",
+          language: lang,
+        });
+        await sendTelegramText(
+          ctx,
+          conversationId,
+          buildClarificationMessage(
+            { rawIdea: request.rawIdea, projectName: undefined, stackHint: request.stackHint ?? undefined },
+            "name",
+            lang,
+          ),
+        );
+        return;
+      }
+    }
   }
 
-  const candidateSlug = inferProjectSlug(projectName ?? request.rawIdea);
+  const candidateSlug = inferProjectSlug(request.projectName ?? request.rawIdea);
   if (candidateSlug) {
     const projects = await readProjects(workspaceDir).catch(() => null);
     if (projects?.projects?.[candidateSlug]) {
@@ -594,7 +605,7 @@ async function continueBootstrap(
     metadata: {
       source: "telegram-dm-bootstrap",
       factory_change: false,
-      project_name: projectName ?? null,
+      project_name: request.projectName ?? null,
       repo_url: request.repoUrl ?? null,
       repo_path: request.repoPath ?? null,
       stack_hint: stackHint,
@@ -653,7 +664,7 @@ async function continueBootstrap(
   const resolvedProjectName =
     result.payload.metadata.project_name
     ?? result.payload.metadata.project_slug
-    ?? projectName
+    ?? request.projectName
     ?? "projeto";
   const projectChannelId = result.payload.metadata.channel_id ?? telegramConfig.projectsForumChatId;
   const messageThreadId = result.payload.metadata.message_thread_id;
