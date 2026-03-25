@@ -296,14 +296,6 @@ function buildClarificationMessage(parsed: BootstrapRequest, pendingClarificatio
   return BOOTSTRAP_MESSAGES.clarifyStack[language];
 }
 
-function buildFollowUpClarification(session: TelegramBootstrapSession): string {
-  const lang: BootstrapLanguage = session.language ?? "pt";
-  if (!session.stackHint) return BOOTSTRAP_MESSAGES.clarifyStackFollowUp[lang];
-  return lang === "en"
-    ? "Can you give me more details about what you want to build?"
-    : "Pode me dar mais detalhes sobre o que você quer construir?";
-}
-
 function buildTopicDeepLink(chatId: string, topicId: number): string {
   const stripped = chatId.replace(/^-100/, "");
   return `https://t.me/c/${stripped}/${topicId}`;
@@ -830,7 +822,11 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       if (!clarResult.recognized) {
         // Re-ask — don't let the regular agent respond to this message either
         ctx.logger.info(`[telegram-bootstrap] clarification response not recognized, re-asking (conversation: ${conversationId})`);
-        await sendTelegramText(ctx, conversationId, buildFollowUpClarification(existingSession));
+        await sendTelegramText(ctx, conversationId, buildClarificationMessage(
+          { rawIdea: existingSession.rawIdea, stackHint: existingSession.stackHint ?? undefined, projectName: existingSession.projectName ?? undefined },
+          existingSession.pendingClarification ?? undefined,
+          existingSession.language ?? "pt",
+        ));
         return;
       }
       // Merge clarification into existing session, preserving rawIdea

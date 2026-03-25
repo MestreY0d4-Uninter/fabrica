@@ -3,7 +3,7 @@
  *
  * Covers:
  * - Natural "python" response to clarification → pipeline continues with original rawIdea
- * - Irrelevant response → re-asks (buildFollowUpClarification)
+ * - Irrelevant response → re-asks using buildClarificationMessage with session.pendingClarification
  * - Structured "Stack: node-cli" response → pipeline continues
  * - Expired clarifying session + new bootstrap candidate → starts fresh (not treated as clarification)
  */
@@ -354,6 +354,48 @@ describe("telegram bootstrap clarification flow", () => {
       { timeout: 2000 },
     );
     expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toMatch(/nome|name/i);
+  });
+
+  it("re-asks with contextual name question when name clarification is not recognized", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: { channel_id: "-1003709213169", message_thread_id: 810, project_slug: "test" },
+      },
+    });
+
+    // Step 1: trigger clarification (stack_and_name)
+    await handler?.(
+      { content: "Crie um projeto novo para monitorar CPU", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+    sendMessageTelegram.mockClear();
+
+    // Step 2: provide stack → now asks for name
+    await handler?.(
+      { content: "python", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+    await vi.waitFor(
+      () => expect(sendMessageTelegram).toHaveBeenCalledTimes(1),
+      { timeout: 2000 },
+    );
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toMatch(/nome|name/i);
+    sendMessageTelegram.mockClear();
+
+    // Step 3: send gibberish that won't match name (too long, >64 chars)
+    await handler?.(
+      { content: "a".repeat(65), metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    // Re-ask should be the NAME question, not a generic "more details"
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    const reAsk = String(sendMessageTelegram.mock.calls[0]?.[1]);
+    expect(reAsk).toMatch(/nome|name/i);
+    // Must NOT be the old generic message
+    expect(reAsk).not.toContain("mais detalhes");
+    expect(reAsk).not.toContain("more details");
   });
 
   it("recognizes bare 'Python' (no punctuation) as stack — regression", async () => {
