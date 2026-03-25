@@ -325,4 +325,62 @@ describe("telegram bootstrap clarification flow", () => {
     expect(payload.metadata.project_name).toBe("base-converter-cli");
     expect(payload.metadata.stack_hint).toBe("python-cli");
   });
+
+  it("recognizes 'Python.' (with punctuation) as stack clarification response", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: { channel_id: "-1003709213169", message_thread_id: 900, project_slug: "my-project" },
+      },
+    });
+
+    // Step 1: trigger clarification (stack_and_name)
+    await handler?.(
+      { content: "Crie um projeto novo para validar CPF", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(2); // ack + clarification
+    sendMessageTelegram.mockClear();
+
+    // Step 2: user replies "Python." with trailing period
+    await handler?.(
+      { content: "Python.", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    // Should ask for project name (stack resolved)
+    await vi.waitFor(
+      () => expect(sendMessageTelegram).toHaveBeenCalledTimes(1),
+      { timeout: 2000 },
+    );
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toMatch(/nome|name/i);
+  });
+
+  it("recognizes bare 'Python' (no punctuation) as stack — regression", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: { channel_id: "-1003709213169", message_thread_id: 901, project_slug: "my-project2" },
+      },
+    });
+
+    // Step 1: trigger clarification (stack_and_name)
+    await handler?.(
+      { content: "Crie um projeto novo para monitorar servidores", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+    sendMessageTelegram.mockClear();
+
+    // Step 2: "Python" without punctuation — must still work
+    await handler?.(
+      { content: "Python", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    await vi.waitFor(
+      () => expect(sendMessageTelegram).toHaveBeenCalledTimes(1),
+      { timeout: 2000 },
+    );
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toMatch(/nome|name/i);
+  });
 });

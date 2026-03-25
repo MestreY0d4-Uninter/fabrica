@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate, _testClassifyDmIntent as classifyDmIntent, _testBuildTopicDeepLink as buildTopicDeepLink, _testInferProjectSlug as inferProjectSlug } from "../../lib/dispatch/telegram-bootstrap-hook.js";
+import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate, _testClassifyDmIntent as classifyDmIntent, _testBuildTopicDeepLink as buildTopicDeepLink, _testInferProjectSlug as inferProjectSlug, _testNormalizeUserResponse as normalizeUserResponse } from "../../lib/dispatch/telegram-bootstrap-hook.js";
 import {
   upsertTelegramBootstrapSession,
   readTelegramBootstrapSession,
@@ -1616,5 +1616,26 @@ describe("inferProjectSlug prefix stripping", () => {
   });
   it("strips 'Build a' prefix", () => {
     expect(inferProjectSlug("Build a task manager app")).toBe("task-manager-app");
+  });
+});
+
+describe("normalizeUserResponse", () => {
+  it("strips trailing punctuation and lowercases", () => {
+    expect(normalizeUserResponse("Python.")).toBe("python");
+    expect(normalizeUserResponse("node,")).toBe("node");
+    expect(normalizeUserResponse("Rust!")).toBe("rust");
+    expect(normalizeUserResponse("java?")).toBe("java");
+    expect(normalizeUserResponse("Go...")).toBe("go");
+    expect(normalizeUserResponse("TypeScript;:")).toBe("typescript");
+  });
+
+  it("preserves clean input", () => {
+    expect(normalizeUserResponse("python")).toBe("python");
+    expect(normalizeUserResponse("  node  ")).toBe("node");
+  });
+
+  it("does not strip punctuation mid-word", () => {
+    expect(normalizeUserResponse("node.js")).toBe("node.js");
+    expect(normalizeUserResponse("C#")).toBe("c#");
   });
 });

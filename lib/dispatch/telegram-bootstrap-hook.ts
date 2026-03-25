@@ -88,6 +88,10 @@ function normalizeText(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function normalizeUserResponse(text: string): string {
+  return text.trim().replace(/[.,!?;:]+$/, "").toLowerCase();
+}
+
 function detectStackHint(text: string): string | undefined {
   const lower = text.toLowerCase();
   if (/\b(nextjs|next\.js)\b/.test(lower)) return "nextjs";
@@ -209,7 +213,7 @@ async function classifyDmIntent(
   }
 }
 
-export { isAmbiguousCandidate as _testIsAmbiguousCandidate, classifyDmIntent as _testClassifyDmIntent, buildTopicDeepLink as _testBuildTopicDeepLink, inferProjectSlug as _testInferProjectSlug };
+export { isAmbiguousCandidate as _testIsAmbiguousCandidate, classifyDmIntent as _testClassifyDmIntent, buildTopicDeepLink as _testBuildTopicDeepLink, inferProjectSlug as _testInferProjectSlug, normalizeUserResponse as _testNormalizeUserResponse };
 
 function isBootstrapCandidate(text: string): boolean {
   const lower = text.toLowerCase();
@@ -253,7 +257,7 @@ function parseClarificationResponse(text: string, session: TelegramBootstrapSess
     return { recognized: true, stackHint: detectedStack };
   }
   // Detect bare language names as stack hints
-  const lower = text.toLowerCase().trim();
+  const lower = normalizeUserResponse(text);
   const bareStackMap: Record<string, string> = {
     python: "python-cli",
     py: "python-cli",
