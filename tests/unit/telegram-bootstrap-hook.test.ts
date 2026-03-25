@@ -1738,3 +1738,98 @@ describe("inferProjectSlug fallback (Bug J)", () => {
     expect(result).toMatch(/^[a-z0-9-]+$/);
   });
 });
+
+describe("Layer 2 suppress race (Bug B)", () => {
+  let handler: ((event: any, eventCtx: any) => Promise<void>) | undefined;
+  const sendMessageTelegram = vi.fn(async () => undefined);
+  const outerMockSubagentRun = vi.fn().mockResolvedValue({ runId: "outer-run" });
+  const outerMockSubagentWait = vi.fn().mockResolvedValue({ status: "ok" });
+  const outerMockSubagentGetMessages = vi.fn().mockResolvedValue([]);
+
+  const ctx = {
+    pluginConfig: {
+      telegram: {
+        bootstrapDmEnabled: true,
+        projectsForumChatId: "-1003709213169",
+      },
+    },
+    config: {
+      agents: {
+        defaults: {
+          workspace: "/tmp/workspace",
+        },
+      },
+    },
+    logger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+    },
+    runtime: {
+      channel: {
+        telegram: {
+          sendMessageTelegram,
+        },
+      },
+      subagent: {
+        run: outerMockSubagentRun,
+        waitForRun: outerMockSubagentWait,
+        getSessionMessages: outerMockSubagentGetMessages,
+      },
+    },
+    runCommand: vi.fn(async () => ({ stdout: "", stderr: "", code: 0 })),
+  } as any;
+
+  beforeEach(async () => {
+    handler = undefined;
+    sendMessageTelegram.mockClear();
+    mockRunPipeline.mockReset();
+    mockReadProjects.mockReset();
+    mockProjectTick.mockReset();
+    mockDiscoverAgents.mockReset();
+    mockReadProjects.mockResolvedValue({ projects: {} });
+    mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: "/tmp/workspace" }]);
+    mockProjectTick.mockResolvedValue({ pickups: [], skipped: [] });
+    outerMockSubagentRun.mockClear();
+    outerMockSubagentWait.mockClear();
+    outerMockSubagentGetMessages.mockClear();
+    outerMockSubagentRun.mockResolvedValue({ runId: "outer-run" });
+    outerMockSubagentWait.mockResolvedValue({ status: "ok" });
+    outerMockSubagentGetMessages.mockResolvedValue([]);
+    await fs.rm("/tmp/workspace/fabrica/bootstrap-sessions", { recursive: true, force: true });
+  });
+
+  it("creates pending_classify session before classifyDmIntent in Layer 2", async () => {
+    const callOrder: string[] = [];
+
+    // Mock subagent to check session state DURING the LLM call
+    outerMockSubagentRun.mockImplementation(async () => {
+      // The workspace path matches ctx.config.agents.defaults.workspace = "/tmp/workspace"
+      const sessionDuringLLM = await readTelegramBootstrapSession("/tmp/workspace", "555666777");
+      if (sessionDuringLLM?.status === "pending_classify") {
+        callOrder.push("session_found_during_llm");
+      }
+      return { runId: "layer2-run" };
+    });
+    outerMockSubagentWait.mockResolvedValue({ status: "ok" });
+    outerMockSubagentGetMessages.mockResolvedValue([
+      { role: "assistant", content: JSON.stringify({ intent: "create_project", confidence: 0.9, stackHint: "python-cli", projectSlug: "test-project", language: "pt" }) },
+    ]);
+
+    const api = {
+      on: vi.fn((name: string, fn: any) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    // Send a Layer 2 message: has createCue ("Crie") + softwareCue ("projeto") but no structured projectName
+    await handler?.(
+      { content: "Crie um novo projeto para automatizar testes", metadata: {} },
+      { channelId: "telegram", conversationId: "555666777" },
+    );
+
+    // Session must have existed with pending_classify status DURING the LLM call
+    expect(callOrder).toContain("session_found_during_llm");
+  });
+});

@@ -880,8 +880,54 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
 
     const parsed = parseBootstrapRequest(content);
 
+    // Dedup guard: compute hash from parsed fields (pre-LLM, projectName may be null)
+    // and check for existing in-flight sessions before starting classification.
+    const preClassifyRequest = {
+      rawIdea: parsed.rawIdea,
+      projectName: parsed.projectName ?? null,
+      stackHint: parsed.stackHint ?? null,
+      repoUrl: parsed.repoUrl ?? null,
+      repoPath: parsed.repoPath ?? null,
+    };
+    const preClassifyHash = buildBootstrapRequestHash(preClassifyRequest);
+    const sessionForHashPreClassify = await readTelegramBootstrapSession(workspaceDir, conversationId);
+    // Hash guard uses pre-LLM state (projectName may be null). For messages without a structured
+    // projectName, the hash will NOT match a previously stored post-LLM session (which includes
+    // the LLM-derived slug). Dedup in that window is carried by the pending_classify session
+    // status check below, not by this hash guard.
+    if (sessionForHashPreClassify?.requestHash === preClassifyHash) {
+      if (sessionForHashPreClassify.status === "completed") {
+        ctx.logger.info(`[telegram-bootstrap] duplicate completed DM ignored for conversation ${conversationId}`);
+        return;
+      }
+      // Allow restart if pipeline is stuck in "received" with an expired suppress window.
+      // This happens when the gateway restarts mid-pipeline (session never reached "failed").
+      const isExpiredReceived =
+        sessionForHashPreClassify.status === "received" &&
+        Date.parse(sessionForHashPreClassify.suppressUntil) < Date.now();
+      // Note: unlike Layer 3, this guard intentionally does NOT exclude "classifying" status.
+      // If a "classifying" session has a matching hash and is still active, Layer 2 is correctly
+      // blocked — this avoids double-firing during the LLM classification window.
+      if (sessionForHashPreClassify.status !== "failed" && !isExpiredReceived) {
+        ctx.logger.info(`[telegram-bootstrap] duplicate in-flight DM ignored for conversation ${conversationId}`);
+        return;
+      }
+      if (isExpiredReceived) {
+        ctx.logger.info(`[telegram-bootstrap] stale received session (expired) — restarting pipeline for conversation ${conversationId}`);
+      }
+    }
+
     // If no projectName from structured fields, try LLM slug derivation
     if (!parsed.projectName && ctx.runtime?.subagent?.run) {
+      // Bug B fix: create pending_classify session BEFORE await to prevent suppress race
+      // (same pattern as Layer 3). The session is overwritten with "received" status after
+      // the LLM call completes.
+      await upsertTelegramBootstrapSession(workspaceDir, {
+        conversationId,
+        rawIdea: parsed.rawIdea,
+        sourceRoute: { channel: "telegram", channelId: conversationId },
+        status: "pending_classify",
+      });
       const classification = await classifyDmIntent(ctx, content, workspaceDir);
       if (classification?.projectSlug) {
         parsed.projectName = classification.projectSlug;
@@ -895,29 +941,6 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       repoUrl: parsed.repoUrl ?? null,
       repoPath: parsed.repoPath ?? null,
     };
-    const incomingRequestHash = buildBootstrapRequestHash(incomingRequest);
-    const sessionForHash = await readTelegramBootstrapSession(workspaceDir, conversationId);
-    if (sessionForHash?.requestHash === incomingRequestHash) {
-      if (sessionForHash.status === "completed") {
-        ctx.logger.info(`[telegram-bootstrap] duplicate completed DM ignored for conversation ${conversationId}`);
-        return;
-      }
-      // Allow restart if pipeline is stuck in "received" with an expired suppress window.
-      // This happens when the gateway restarts mid-pipeline (session never reached "failed").
-      const isExpiredReceived =
-        sessionForHash.status === "received" &&
-        Date.parse(sessionForHash.suppressUntil) < Date.now();
-      // Note: unlike Layer 3, this guard intentionally does NOT exclude "classifying" status.
-      // If a "classifying" session has a matching hash and is still active, Layer 2 is correctly
-      // blocked — this avoids double-firing during the LLM classification window.
-      if (sessionForHash.status !== "failed" && !isExpiredReceived) {
-        ctx.logger.info(`[telegram-bootstrap] duplicate in-flight DM ignored for conversation ${conversationId}`);
-        return;
-      }
-      if (isExpiredReceived) {
-        ctx.logger.info(`[telegram-bootstrap] stale received session (expired) — restarting pipeline for conversation ${conversationId}`);
-      }
-    }
 
     // Layer 2 language heuristic: detect from the matched createCue
     const language: BootstrapLanguage = /\b(cria|crie|criar|construa|desenvolva|registre|novo projeto)\b/i.test(content)
