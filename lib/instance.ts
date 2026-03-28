@@ -2,7 +2,7 @@
  * instance.ts — Persistent instance identity.
  *
  * Each workspace gets a unique fun name (CS pioneer) stored in
- * <workspace>/devclaw/instance.json. The name is generated on first
+ * <workspace>/fabrica/instance.json. The name is generated on first
  * access and persisted across restarts.
  *
  * Can be overridden via `instance.name` in workflow.yaml.
