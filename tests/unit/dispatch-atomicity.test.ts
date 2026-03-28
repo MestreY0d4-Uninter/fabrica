@@ -127,6 +127,7 @@ vi.mock("../../lib/dispatch/session.js", () => ({
     callOrder.push("sendToAgent");
   }),
   shouldClearSession: async () => false,
+  buildEffortPrompt: (_effort: unknown, roleInstructions: string | undefined) => roleInstructions ?? "",
 }));
 
 // --- Mock: ./acknowledge.js ---

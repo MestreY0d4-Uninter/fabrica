@@ -3,6 +3,7 @@
  */
 import type { PluginRuntime } from "openclaw/plugin-sdk";
 import type { RunCommand } from "../context.js";
+import type { EffortLevel } from "../roles/types.js";
 import { log as auditLog } from "../audit.js";
 import { fetchGatewaySessions } from "../services/gateway-sessions.js";
 import { recordIssueLifecycle } from "../projects/index.js";
@@ -190,6 +191,26 @@ export async function ensureSessionReady(
     note: "dispatch_continues_without_confirmation",
   }).catch(() => {});
   // Warning only — dispatch continues. Health check will detect dispatch_unconfirmed state.
+}
+
+export const EFFORT_PROMPTS: Record<EffortLevel, string> = {
+  minimal: "Be concise. Execute the task directly without extensive analysis.",
+  standard: "Analyze the task, then execute. Balance thoroughness with efficiency.",
+  deep: "Think deeply before acting. Consider edge cases, alternatives, and implications. Take your time.",
+};
+
+/**
+ * Build the final system prompt by prepending effort calibration before role instructions.
+ */
+export function buildEffortPrompt(
+  effort: EffortLevel | undefined,
+  roleInstructions: string | undefined,
+): string {
+  const effortPrefix = effort ? EFFORT_PROMPTS[effort] : undefined;
+  if (effortPrefix && roleInstructions) {
+    return `${effortPrefix}\n\n${roleInstructions}`;
+  }
+  return effortPrefix ?? roleInstructions ?? "";
 }
 
 export function sendToAgent(

@@ -34,7 +34,7 @@ import { loadSecurityChecklist } from "./security-checklist.js";
 import { resolveEffectiveModelForGateway } from "../roles/model-fetcher.js";
 
 import { buildTaskMessage, buildConflictFixMessage, buildAnnouncement, formatSessionLabel, formatSessionLabelFull } from "./message-builder.js";
-import { ensureSessionReady, sendToAgent, shouldClearSession } from "./session.js";
+import { buildEffortPrompt, ensureSessionReady, sendToAgent, shouldClearSession } from "./session.js";
 import { acknowledgeComments, EYES_EMOJI } from "./acknowledge.js";
 
 export type DispatchOpts = {
@@ -418,7 +418,10 @@ export async function dispatchTask(
     agentId, projectName: project.name, projectSlug: project.slug, issueId, role, level, slotIndex, fromLabel,
     orchestratorSessionKey: opts.sessionKey, workspaceDir,
     dispatchTimeoutMs: timeouts.dispatchMs,
-    extraSystemPrompt: roleInstructions.trim() || undefined,
+    extraSystemPrompt: buildEffortPrompt(
+      resolvedRole?.effort?.[level],
+      roleInstructions.trim() || undefined,
+    ) || undefined,
     runCommand: rc,
     runtime,
   });
