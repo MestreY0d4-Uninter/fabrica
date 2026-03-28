@@ -15,7 +15,7 @@ async function fileExists(p: string): Promise<boolean> {
 
 describe("migrateWorkspaceLayout — very old layout → fabrica/", () => {
   it("should move projects/projects.json to fabrica/projects.json", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const projDir = path.join(tmpDir, "projects");
     await fs.mkdir(projDir, { recursive: true });
     await fs.writeFile(path.join(projDir, "projects.json"), '{"projects":{}}');
@@ -29,7 +29,7 @@ describe("migrateWorkspaceLayout — very old layout → fabrica/", () => {
   });
 
   it("should rename projects/config.yaml to fabrica/workflow.yaml", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const projDir = path.join(tmpDir, "projects");
     await fs.mkdir(projDir, { recursive: true });
     await fs.writeFile(path.join(projDir, "projects.json"), '{"projects":{}}');
@@ -46,7 +46,7 @@ describe("migrateWorkspaceLayout — very old layout → fabrica/", () => {
   });
 
   it("should move roles/default/* to fabrica/prompts/ with renames", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const projDir = path.join(tmpDir, "projects");
     const defaultDir = path.join(projDir, "roles", "default");
     await fs.mkdir(defaultDir, { recursive: true });
@@ -70,7 +70,7 @@ describe("migrateWorkspaceLayout — very old layout → fabrica/", () => {
   });
 
   it("should move roles/<project>/* to fabrica/projects/<project>/prompts/ with renames", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const projDir = path.join(tmpDir, "projects");
     const roleDir = path.join(projDir, "roles", "my-app");
     await fs.mkdir(roleDir, { recursive: true });
@@ -92,7 +92,7 @@ describe("migrateWorkspaceLayout — very old layout → fabrica/", () => {
   });
 
   it("should rename projects/<project>/config.yaml to fabrica/projects/<project>/workflow.yaml", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const projDir = path.join(tmpDir, "projects");
     const appDir = path.join(projDir, "my-app");
     await fs.mkdir(appDir, { recursive: true });
@@ -108,7 +108,7 @@ describe("migrateWorkspaceLayout — very old layout → fabrica/", () => {
   });
 
   it("should move log/ to fabrica/log/", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const projDir = path.join(tmpDir, "projects");
     const logDir = path.join(tmpDir, "log");
     await fs.mkdir(projDir, { recursive: true });
@@ -127,7 +127,7 @@ describe("migrateWorkspaceLayout — very old layout → fabrica/", () => {
 
 describe("migrateWorkspaceLayout — intermediate layout → fabrica/", () => {
   it("should move projects.json from root to fabrica/", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     await fs.writeFile(path.join(tmpDir, "projects.json"), '{"projects":{}}');
 
     await migrateWorkspaceLayout(tmpDir);
@@ -139,7 +139,7 @@ describe("migrateWorkspaceLayout — intermediate layout → fabrica/", () => {
   });
 
   it("should move workflow.yaml from root to fabrica/", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     await fs.writeFile(path.join(tmpDir, "projects.json"), '{"projects":{}}');
     await fs.writeFile(path.join(tmpDir, "workflow.yaml"), "roles:\n  dev:\n    defaultLevel: medior\n");
 
@@ -152,7 +152,7 @@ describe("migrateWorkspaceLayout — intermediate layout → fabrica/", () => {
   });
 
   it("should move prompts/ from root to fabrica/prompts/", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const promptsDir = path.join(tmpDir, "prompts");
     await fs.mkdir(promptsDir, { recursive: true });
     await fs.writeFile(path.join(tmpDir, "projects.json"), '{"projects":{}}');
@@ -167,7 +167,7 @@ describe("migrateWorkspaceLayout — intermediate layout → fabrica/", () => {
   });
 
   it("should move project .md files into prompts/ subdir", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const projectDir = path.join(tmpDir, "projects", "my-app");
     await fs.mkdir(projectDir, { recursive: true });
     await fs.writeFile(path.join(tmpDir, "projects.json"), '{"projects":{}}');
@@ -183,7 +183,7 @@ describe("migrateWorkspaceLayout — intermediate layout → fabrica/", () => {
   });
 
   it("should rename old role files (dev.md, qa.md) in prompts/", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const promptsDir = path.join(tmpDir, "prompts");
     await fs.mkdir(promptsDir, { recursive: true });
     await fs.writeFile(path.join(tmpDir, "projects.json"), '{"projects":{}}');
@@ -199,7 +199,7 @@ describe("migrateWorkspaceLayout — intermediate layout → fabrica/", () => {
   });
 
   it("should rename old role files in project prompts/", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const projectDir = path.join(tmpDir, "projects", "my-app");
     await fs.mkdir(projectDir, { recursive: true });
     await fs.writeFile(path.join(tmpDir, "projects.json"), '{"projects":{}}');
@@ -215,7 +215,7 @@ describe("migrateWorkspaceLayout — intermediate layout → fabrica/", () => {
   });
 
   it("should move log/ from root to fabrica/log/", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const logDir = path.join(tmpDir, "log");
     await fs.mkdir(logDir, { recursive: true });
     await fs.writeFile(path.join(tmpDir, "projects.json"), '{"projects":{}}');
@@ -232,7 +232,7 @@ describe("migrateWorkspaceLayout — intermediate layout → fabrica/", () => {
 
 describe("migrateWorkspaceLayout — flat project prompts → prompts/ subdir", () => {
   it("should move flat .md files into prompts/ subdir", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const dataDir = path.join(tmpDir, DATA_DIR);
     const projectDir = path.join(dataDir, "projects", "my-app");
     await fs.mkdir(projectDir, { recursive: true });
@@ -252,7 +252,7 @@ describe("migrateWorkspaceLayout — flat project prompts → prompts/ subdir", 
   });
 
   it("should rename old role files during subdir migration", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const dataDir = path.join(tmpDir, DATA_DIR);
     const projectDir = path.join(dataDir, "projects", "my-app");
     await fs.mkdir(projectDir, { recursive: true });
@@ -269,7 +269,7 @@ describe("migrateWorkspaceLayout — flat project prompts → prompts/ subdir", 
   });
 
   it("should skip projects that already have prompts/ subdir", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const dataDir = path.join(tmpDir, DATA_DIR);
     const projectDir = path.join(dataDir, "projects", "my-app");
     const promptsDir = path.join(projectDir, "prompts");
@@ -288,7 +288,7 @@ describe("migrateWorkspaceLayout — flat project prompts → prompts/ subdir", 
 
 describe("migrateWorkspaceLayout — no-op cases", () => {
   it("migrates a legacy devclaw/ data dir into fabrica/", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const legacyDir = path.join(tmpDir, LEGACY_DATA_DIR);
     await fs.mkdir(path.join(legacyDir, "log"), { recursive: true });
     await fs.writeFile(path.join(legacyDir, "projects.json"), '{"projects":{}}');
@@ -304,7 +304,7 @@ describe("migrateWorkspaceLayout — no-op cases", () => {
   });
 
   it("should no-op when already fully migrated", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
     const dataDir = path.join(tmpDir, DATA_DIR);
     const promptsDir = path.join(dataDir, "projects", "app", "prompts");
     await fs.mkdir(promptsDir, { recursive: true });
@@ -319,7 +319,7 @@ describe("migrateWorkspaceLayout — no-op cases", () => {
   });
 
   it("should no-op when workspace is empty", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-migrate-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-migrate-"));
 
     await migrateWorkspaceLayout(tmpDir);
 

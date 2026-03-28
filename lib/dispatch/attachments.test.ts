@@ -95,7 +95,7 @@ describe("extractIssueReferences", () => {
 
 describe("saveAttachment / listAttachments", () => {
   it("saves and lists attachments", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-attach-test-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-attach-test-"));
     try {
       const buffer = Buffer.from("hello world");
       const meta = await saveAttachment(tmpDir, "test-project", 42, {
@@ -137,7 +137,7 @@ describe("saveAttachment / listAttachments", () => {
   });
 
   it("returns empty list for non-existent issue", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-attach-test-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-attach-test-"));
     try {
       const list = await listAttachments(tmpDir, "test-project", 999);
       assert.strictEqual(list.length, 0);
@@ -175,7 +175,7 @@ describe("formatAttachmentComment", () => {
 
 describe("formatAttachmentsForTask", () => {
   it("returns empty string when no attachments", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-attach-test-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-attach-test-"));
     try {
       const result = await formatAttachmentsForTask(tmpDir, "test-project", 999);
       assert.strictEqual(result, "");
@@ -185,7 +185,7 @@ describe("formatAttachmentsForTask", () => {
   });
 
   it("includes attachment info for existing attachments", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-attach-test-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-attach-test-"));
     try {
       await saveAttachment(tmpDir, "test-project", 42, {
         buffer: Buffer.from("test"),

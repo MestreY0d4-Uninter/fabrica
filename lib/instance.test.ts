@@ -9,7 +9,7 @@ describe("loadInstanceName", () => {
   let tmpDir: string;
 
   async function createWorkspace(): Promise<string> {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-instance-test-"));
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-instance-test-"));
     await fs.mkdir(path.join(tmpDir, DATA_DIR), { recursive: true });
     return tmpDir;
   }

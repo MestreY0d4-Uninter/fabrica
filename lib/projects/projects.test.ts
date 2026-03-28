@@ -23,7 +23,7 @@ import {
 
 describe("readProjects migration", () => {
   it("should migrate old format (dev/qa/architect fields) to per-level workers", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-proj-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-proj-"));
     const projDir = path.join(tmpDir, "projects");
     await fs.mkdir(projDir, { recursive: true });
 
@@ -70,7 +70,7 @@ describe("readProjects migration", () => {
   });
 
   it("should migrate old level names in old format", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-proj-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-proj-"));
     const projDir = path.join(tmpDir, "projects");
     await fs.mkdir(projDir, { recursive: true });
 
@@ -106,7 +106,7 @@ describe("readProjects migration", () => {
   });
 
   it("should read legacy workers-map format and migrate to per-level", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-proj-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-proj-"));
     const dataDir = path.join(tmpDir, "devclaw");
     await fs.mkdir(dataDir, { recursive: true });
 
@@ -142,7 +142,7 @@ describe("readProjects migration", () => {
   });
 
   it("should read old slot-based format and migrate to per-level", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-proj-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-proj-"));
     const dataDir = path.join(tmpDir, "devclaw");
     await fs.mkdir(dataDir, { recursive: true });
 
@@ -184,7 +184,7 @@ describe("readProjects migration", () => {
   });
 
   it("should read new per-level format correctly", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-proj-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-proj-"));
     const dataDir = path.join(tmpDir, "devclaw");
     await fs.mkdir(dataDir, { recursive: true });
 
@@ -227,7 +227,7 @@ describe("readProjects migration", () => {
   });
 
   it("should migrate old worker keys in workers-map format", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-proj-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-proj-"));
     const dataDir = path.join(tmpDir, "devclaw");
     await fs.mkdir(dataDir, { recursive: true });
 
@@ -324,7 +324,7 @@ describe("per-level slot helpers", () => {
 
 describe("writeProjects round-trip", () => {
   it("should preserve per-level workers through write/read cycle", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-proj-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-proj-"));
     const dataDir = path.join(tmpDir, "devclaw");
     await fs.mkdir(dataDir, { recursive: true });
 

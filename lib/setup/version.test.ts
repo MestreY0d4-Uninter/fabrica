@@ -24,33 +24,33 @@ describe("version tracking", () => {
   });
 
   it("readVersionFile returns null when no file exists", async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-ver-test-"));
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-ver-test-"));
     const result = await readVersionFile(tmpDir);
     assert.strictEqual(result, null);
   });
 
   it("writeVersionFile creates a .version file", async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-ver-test-"));
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-ver-test-"));
     await writeVersionFile(tmpDir);
     const content = await fs.readFile(path.join(tmpDir, ".version"), "utf-8");
     assert.strictEqual(content.trim(), getCurrentVersion());
   });
 
   it("detectUpgrade returns null on first run", async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-ver-test-"));
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-ver-test-"));
     const result = await detectUpgrade(tmpDir);
     assert.strictEqual(result, null);
   });
 
   it("detectUpgrade returns null when versions match", async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-ver-test-"));
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-ver-test-"));
     await writeVersionFile(tmpDir);
     const result = await detectUpgrade(tmpDir);
     assert.strictEqual(result, null);
   });
 
   it("detectUpgrade detects version change", async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-ver-test-"));
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-ver-test-"));
     await fs.writeFile(path.join(tmpDir, ".version"), "1.0.0\n", "utf-8");
     const result = await detectUpgrade(tmpDir);
     assert.ok(result !== null);

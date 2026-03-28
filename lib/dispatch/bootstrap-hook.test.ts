@@ -58,7 +58,7 @@ describe("parseFabricaSessionKey", () => {
 
 describe("loadRoleInstructions", () => {
   it("should load project-specific instructions from devclaw/projects/<project>/prompts/", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-test-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-test-"));
     const projectDir = path.join(tmpDir, "devclaw", "projects", "test-project", "prompts");
     await fs.mkdir(projectDir, { recursive: true });
     await fs.writeFile(path.join(projectDir, "developer.md"), "# Developer Instructions\nDo the thing.");
@@ -70,7 +70,7 @@ describe("loadRoleInstructions", () => {
   });
 
   it("should fall back to default instructions from devclaw/prompts/", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-test-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-test-"));
     const promptsDir = path.join(tmpDir, "devclaw", "prompts");
     await fs.mkdir(promptsDir, { recursive: true });
     await fs.writeFile(path.join(promptsDir, "tester.md"), "# Tester Default\nReview carefully.");
@@ -82,7 +82,7 @@ describe("loadRoleInstructions", () => {
   });
 
   it("should return empty string when no instructions exist", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-test-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-test-"));
 
     const result = await loadRoleInstructions(tmpDir, "missing", "developer");
     assert.strictEqual(result, "");
@@ -91,7 +91,7 @@ describe("loadRoleInstructions", () => {
   });
 
   it("should prefer project-specific over default", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-test-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-test-"));
     const projectPromptsDir = path.join(tmpDir, "devclaw", "projects", "my-project", "prompts");
     const defaultPromptsDir = path.join(tmpDir, "devclaw", "prompts");
     await fs.mkdir(projectPromptsDir, { recursive: true });
@@ -106,7 +106,7 @@ describe("loadRoleInstructions", () => {
   });
 
   it("should fall back to old path for unmigrated workspaces", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-test-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-test-"));
     const oldDir = path.join(tmpDir, "projects", "roles", "old-project");
     await fs.mkdir(oldDir, { recursive: true });
     await fs.writeFile(path.join(oldDir, "developer.md"), "Old layout instructions");

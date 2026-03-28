@@ -239,7 +239,7 @@ export async function createTestHarness(opts?: HarnessOptions): Promise<TestHarn
   } = opts ?? {};
 
   // Create temp workspace
-  const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "devclaw-e2e-"));
+  const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-e2e-"));
   const dataDir = path.join(workspaceDir, DATA_DIR);
   const logDir = path.join(dataDir, "log");
   await fs.mkdir(logDir, { recursive: true });
