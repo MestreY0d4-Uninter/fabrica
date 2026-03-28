@@ -2,9 +2,9 @@
  * Fabrica — Plugin-raiz da Fabrica de Software.
  *
  * FSM, intake, dispatch, QA, security.
- * Absorbs DevClaw's mature patterns with native fixes for all known patches.
+ * Absorbs Fabrica's mature patterns with native fixes for all known patches.
  *
- * Same tool names as DevClaw for zero-friction cutover.
+ * Same tool names as Fabrica for zero-friction cutover.
  */
 import "./lib/observability/bootstrap.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
@@ -164,7 +164,7 @@ const plugin = {
   register(api: OpenClawPluginApi) {
     const ctx = createPluginContext(api);
 
-    // Worker lifecycle — same tool names as DevClaw for zero-friction cutover
+    // Worker lifecycle — same tool names as Fabrica for zero-friction cutover
     api.registerTool(createTaskStartTool(ctx), { names: ["task_start"] });
     api.registerTool(createWorkFinishTool(ctx), { names: ["work_finish"] });
 

@@ -1,7 +1,7 @@
 /**
  * notify.ts — Programmatic alerting for worker lifecycle events.
  *
- * Sends notifications to project groups for visibility into the DevClaw pipeline.
+ * Sends notifications to project groups for visibility into the Fabrica pipeline.
  *
  * Event types:
  * - workerStart: Worker spawned/resumed for a task (→ project group)

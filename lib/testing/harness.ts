@@ -199,7 +199,7 @@ export type TestHarness = {
   writePrompt(role: string, content: string, projectName?: string): Promise<void>;
   /**
    * Simulate the agent:bootstrap hook firing for a session key.
-   * Tests that AGENTS.md is stripped from bootstrap files for DevClaw workers.
+   * Tests that AGENTS.md is stripped from bootstrap files for Fabrica workers.
    */
   simulateBootstrap(sessionKey: string): Promise<BootstrapResult>;
   /** Clean up temp directory. */

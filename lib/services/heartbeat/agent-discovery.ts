@@ -1,5 +1,5 @@
 /**
- * Agent discovery — scan workspaces to find active DevClaw agents.
+ * Agent discovery — scan workspaces to find active Fabrica agents.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -19,7 +19,7 @@ export type Agent = {
 // ---------------------------------------------------------------------------
 
 /**
- * Discover DevClaw agents by scanning which agent workspaces have projects.
+ * Discover Fabrica agents by scanning which agent workspaces have projects.
  * Self-discovering: any agent whose workspace contains projects.json is processed.
  * Also checks the default workspace (agents.defaults.workspace) for projects.
  */

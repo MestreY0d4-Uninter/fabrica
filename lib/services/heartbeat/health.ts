@@ -1021,7 +1021,7 @@ export async function scanOrphanedLabels(opts: {
 }
 
 /**
- * Scan for open, DevClaw-managed issues that have lost their state label.
+ * Scan for open, Fabrica-managed issues that have lost their state label.
  * These issues are invisible to the queue scanner and effectively stuck.
  *
  * Detection: open issue has workflow-related labels but zero state labels.
@@ -1061,7 +1061,7 @@ export async function scanStatelessIssues(opts: {
     const hasStateLabel = issue.labels.some((l) => stateLabels.includes(l));
     if (hasStateLabel) continue;
 
-    // Only flag DevClaw-managed issues (have workflow labels like role:*, review:*, etc.)
+    // Only flag Fabrica-managed issues (have workflow labels like role:*, review:*, etc.)
     const hasWorkflowLabels = issue.labels.some((l) =>
       l.startsWith("developer:") || l.startsWith("tester:") || l.startsWith("reviewer:") ||
       l.startsWith("architect:") || l.startsWith("review:") || l.startsWith("test:") ||

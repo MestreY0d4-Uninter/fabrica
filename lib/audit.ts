@@ -4,7 +4,7 @@
  * Every tool call automatically logs — no manual action needed from agents.
  * Rotation: atomic rename to .bak, keeps up to 3 backup files.
  *
- * Native fix for DevClaw Patch 2 (audit.log rotation).
+ * Native fix for Fabrica Patch 2 (audit.log rotation).
  */
 import { appendFile, mkdir, readFile, writeFile, rename, unlink, copyFile } from "node:fs/promises";
 import { join, dirname } from "node:path";

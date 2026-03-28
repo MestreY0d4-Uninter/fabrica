@@ -119,7 +119,7 @@ if [[ -z "$TITLE" ]]; then
 fi
 
 # --- Stack detection (3-tier): env > keyword > default ---
-# Uses shared stack-detection-lib.sh for consistent stack detection
+# Uses shared stack-detection-lib.sh for consistency with generate-qa-contract.sh
 STACK="${GENESIS_STACK:-}"
 
 # Normalize: "python" is not a valid stack. Clear unknown hints for auto-detect.

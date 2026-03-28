@@ -1,5 +1,5 @@
 /**
- * Shared types for the DevClaw plugin.
+ * Shared types for the Fabrica plugin.
  *
  * OpenClawPluginToolContext is declared in the plugin-sdk but not exported.
  * We define a compatible local type for use in tool factory functions.

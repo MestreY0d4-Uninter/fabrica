@@ -70,7 +70,7 @@ export async function reviewSkipPass(opts: {
       const routing = detectStepRouting(issue.labels, "review");
       if (routing !== "skip") continue;
 
-      // Only process issues managed by DevClaw (marked with 👀 on issue body).
+      // Only process issues managed by Fabrica (marked with 👀 on issue body).
       const isManaged = await provider.issueHasReaction(issue.iid, "eyes");
       if (!isManaged) continue;
 

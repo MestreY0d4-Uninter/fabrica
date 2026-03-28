@@ -1011,7 +1011,7 @@ export class GitHubProvider implements IssueProvider {
    * This catches the common case where reviewers submit feedback as "Comment"
    * rather than "Request changes".
    *
-   * Note: We don't filter out self-reviews because DevClaw agents commit under
+   * Note: We don't filter out self-reviews because Fabrica agents commit under
    * the repo owner's account — the PR author and reviewer are the same person.
    */
   private async hasUnacknowledgedReviews(prNumber: number): Promise<boolean> {

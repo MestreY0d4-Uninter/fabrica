@@ -193,7 +193,7 @@ export interface IssueProvider {
    */
   /**
    * Add an emoji reaction to the issue body itself (not a comment).
-   * Used to mark issues as "managed by DevClaw" — presence of 👀 on the
+   * Used to mark issues as "managed by Fabrica" — presence of 👀 on the
    * issue body distinguishes new-style issues from legacy ones.
    * Best-effort — implementations should not throw.
    */

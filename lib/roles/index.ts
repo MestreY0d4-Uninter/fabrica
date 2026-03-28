@@ -1,7 +1,7 @@
 /**
  * roles/ — Centralized role configuration.
  *
- * Single source of truth for all worker roles in DevClaw.
+ * Single source of truth for all worker roles in Fabrica.
  * To add a new role, add an entry to registry.ts — everything else derives from it.
  */
 export { ROLE_REGISTRY } from "./registry.js";

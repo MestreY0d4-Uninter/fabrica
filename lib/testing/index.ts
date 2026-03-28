@@ -1,5 +1,5 @@
 /**
- * testing/ — Test infrastructure for DevClaw integration tests.
+ * testing/ — Test infrastructure for Fabrica integration tests.
  *
  * Exports:
  * - TestProvider: In-memory IssueProvider with call tracking

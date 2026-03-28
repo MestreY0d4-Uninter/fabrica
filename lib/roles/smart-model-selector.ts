@@ -1,7 +1,7 @@
 /**
- * smart-model-selector.ts — LLM-powered model selection for DevClaw roles.
+ * smart-model-selector.ts — LLM-powered model selection for Fabrica roles.
  *
- * Uses an LLM to intelligently analyze and assign models to DevClaw roles.
+ * Uses an LLM to intelligently analyze and assign models to Fabrica roles.
  */
 import { getAllRoleIds, getLevelsForRole } from "./index.js";
 import { ROLE_REGISTRY } from "./index.js";
@@ -28,7 +28,7 @@ function singleModelAssignment(model: string): ModelAssignment {
 }
 
 /**
- * Assign available models to DevClaw roles.
+ * Assign available models to Fabrica roles.
  *
  * Strategy:
  * 1. If 0 models → return null (setup should be blocked)
@@ -115,7 +115,7 @@ export function formatAssignment(assignment: ModelAssignment): string {
  * Generate setup instructions when no models are available.
  */
 export function generateSetupInstructions(): string {
-  return `❌ No authenticated models found. DevClaw needs at least one model to work.
+  return `❌ No authenticated models found. Fabrica needs at least one model to work.
 
 To configure model authentication:
 

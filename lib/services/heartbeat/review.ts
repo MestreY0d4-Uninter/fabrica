@@ -63,7 +63,7 @@ export async function reviewPass(opts: {
       const routing = detectStepRouting(issue.labels, "review");
       if (routing !== "human") continue;
 
-      // Only process issues managed by DevClaw (marked with 👀 on issue body).
+      // Only process issues managed by Fabrica (marked with 👀 on issue body).
       // Old-style issues without the marker are skipped to prevent false triggers
       // from historical comments.
       const isManaged = await provider.issueHasReaction(issue.iid, "eyes");
