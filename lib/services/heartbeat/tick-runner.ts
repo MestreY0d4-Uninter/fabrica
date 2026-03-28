@@ -24,6 +24,7 @@ import {
   performHoldEscapePass,
 } from "./passes.js";
 import { runPrDiscoveryPass } from "./pr-discovery.js";
+import { checkGenesisHealth } from "./genesis-health.js";
 import { computeHealthScore } from "../../observability/health-score.js";
 import { shouldAlert, type AlertState } from "../../observability/alerting.js";
 import { withTelemetrySpan as withTickSpan } from "../../observability/tracer.js";
@@ -243,6 +244,9 @@ export async function tick(opts: {
       result.totalSkipped++;
     }
   }
+
+  // Check genesis agent health (stale bootstrap sessions) — best-effort, once per tick
+  await checkGenesisHealth(workspaceDir).catch(() => {});
 
   await auditLog(workspaceDir, "heartbeat_tick", {
     mode,
