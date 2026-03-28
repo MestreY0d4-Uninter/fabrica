@@ -2,20 +2,15 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { InMemoryFabricaRunStore } from "../../lib/github/event-store.js";
 import { syncQualityGateForRun } from "../../lib/github/quality-gate.js";
 
-const octokitRequest = vi.fn();
-
-vi.mock("../../lib/github/app-auth.js", () => ({
-  getGitHubInstallationOctokit: vi.fn(async (_pluginConfig, installationId: number) => {
-    if (!installationId) return null;
-    return {
-      request: octokitRequest,
-    };
-  }),
+// Mock execa so gh CLI calls are intercepted
+const execaMock = vi.fn();
+vi.mock("execa", () => ({
+  execa: execaMock,
 }));
 
 describe("syncQualityGateForRun", () => {
   beforeEach(() => {
-    octokitRequest.mockReset();
+    execaMock.mockReset();
   });
 
   it("skips when the event payload lacks repository identity", async () => {
@@ -55,12 +50,13 @@ describe("syncQualityGateForRun", () => {
       attempted: false,
       skippedReason: "missing_repo_identity",
     });
+    expect(execaMock).not.toHaveBeenCalled();
   });
 
-  it("creates a check run and persists the checkRunId", async () => {
+  it("creates a check run via gh CLI and persists the checkRunId", async () => {
     const runStore = new InMemoryFabricaRunStore();
-    octokitRequest.mockResolvedValue({
-      data: { id: 9001 },
+    execaMock.mockResolvedValue({
+      stdout: JSON.stringify({ id: 9001 }),
     });
 
     const run = {
@@ -113,13 +109,19 @@ describe("syncQualityGateForRun", () => {
 
     const stored = await runStore.get("run-2");
     expect(stored?.checkRunId).toBe(9001);
-    expect(octokitRequest).toHaveBeenCalledTimes(1);
+    expect(execaMock).toHaveBeenCalledTimes(1);
+    // Verify gh CLI was called to create a check run (POST)
+    expect(execaMock).toHaveBeenCalledWith(
+      "gh",
+      expect.arrayContaining(["api", "repos/acme/demo/check-runs", "--method", "POST"]),
+      expect.any(Object),
+    );
   });
 
-  it("marks failed runs as action_required on an existing check run", async () => {
+  it("marks failed runs as action_required on an existing check run via gh CLI PATCH", async () => {
     const runStore = new InMemoryFabricaRunStore();
-    octokitRequest.mockResolvedValue({
-      data: { id: 9002 },
+    execaMock.mockResolvedValue({
+      stdout: JSON.stringify({ id: 9002 }),
     });
 
     const run = {
@@ -170,20 +172,23 @@ describe("syncQualityGateForRun", () => {
       attempted: true,
       checkRunId: 9002,
     });
-    expect(octokitRequest).toHaveBeenCalledWith(
-      "PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}",
-      expect.objectContaining({
-        check_run_id: 8123,
-        conclusion: "action_required",
-        status: "completed",
-      }),
+    // Verify gh CLI was called to PATCH the existing check run
+    expect(execaMock).toHaveBeenCalledWith(
+      "gh",
+      expect.arrayContaining(["api", "repos/acme/demo/check-runs/8123", "--method", "PATCH"]),
+      expect.any(Object),
     );
+    // Verify the body passed to gh includes action_required conclusion
+    const callArgs = execaMock.mock.calls[0];
+    const input = JSON.parse(callArgs[2].input as string) as Record<string, unknown>;
+    expect(input.conclusion).toBe("action_required");
+    expect(input.status).toBe("completed");
   });
 
-  it("marks gate-approved runs as success so they can satisfy branch protection before merge", async () => {
+  it("marks gate-approved runs as success via gh CLI so they satisfy branch protection", async () => {
     const runStore = new InMemoryFabricaRunStore();
-    octokitRequest.mockResolvedValue({
-      data: { id: 9003 },
+    execaMock.mockResolvedValue({
+      stdout: JSON.stringify({ id: 9003 }),
     });
 
     const run = {
@@ -230,13 +235,11 @@ describe("syncQualityGateForRun", () => {
       runStore,
     });
 
-    expect(octokitRequest).toHaveBeenCalledWith(
-      "PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}",
-      expect.objectContaining({
-        check_run_id: 9002,
-        conclusion: "success",
-        status: "completed",
-      }),
-    );
+    // Verify the body passed to gh includes success conclusion
+    const callArgs = execaMock.mock.calls[0];
+    expect(callArgs[1]).toContain("repos/acme/demo/check-runs/9002");
+    const input = JSON.parse(callArgs[2].input as string) as Record<string, unknown>;
+    expect(input.conclusion).toBe("success");
+    expect(input.status).toBe("completed");
   });
 });

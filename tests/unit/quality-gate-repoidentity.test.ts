@@ -28,8 +28,9 @@ describe("syncQualityGate (core, accepts RepoIdentity)", () => {
     expect(typeof mod.syncQualityGate).toBe("function");
   });
 
-  it("returns skipped when github app is unavailable (no pluginConfig)", async () => {
+  it("returns skipped with gh_cli_check_run_failed when gh CLI is unavailable", async () => {
     const { syncQualityGate } = await import("../../lib/github/quality-gate.js");
+    // gh CLI will fail in test env — expect graceful fallback
     const result = await syncQualityGate({
       pluginConfig: undefined,
       repoIdentity: {
@@ -45,7 +46,7 @@ describe("syncQualityGate (core, accepts RepoIdentity)", () => {
       deliveryId: "poll-12345-7",
     });
     expect(result.attempted).toBe(false);
-    expect(result.skippedReason).toBe("github_app_unavailable");
+    expect(result.skippedReason).toBe("gh_cli_check_run_failed");
   });
 
   it("syncQualityGateForRun (wrapper) still exported", async () => {
