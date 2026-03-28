@@ -56,8 +56,8 @@ export async function getRepoRemote(repoPath: string, runCommand?: RunCommand): 
  * and merges worker state (taking the most recent active worker).
  *
  * Example:
- *   Input: { "-5176490302": { name: "devclaw", ... }, "-1003843401024": { name: "devclaw", ... } }
- *   Output: { "devclaw": { slug: "devclaw", channels: [...], ... } }
+ *   Input: { "-5176490302": { name: "my-project", ... }, "-1003843401024": { name: "my-project", ... } }
+ *   Output: { "my-project": { slug: "my-project", channels: [...], ... } }
  */
 export async function migrateLegacySchema(data: any, runCommand?: RunCommand): Promise<ProjectsData> {
   const legacyProjects = data.projects as Record<string, LegacyProject>;

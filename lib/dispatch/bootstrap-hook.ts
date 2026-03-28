@@ -16,7 +16,6 @@ import type { PluginContext } from "../context.js";
 import { getSessionKeyRolePattern } from "../roles/index.js";
 import { recordIssueLifecycleBySessionKey } from "../projects/index.js";
 import { DATA_DIR } from "../setup/constants.js";
-import { LEGACY_DATA_DIR, resolveWorkspaceLayout } from "../setup/migrate-layout.js";
 import { DEFAULT_ROLE_INSTRUCTIONS } from "../setup/templates.js";
 
 /**
@@ -28,7 +27,6 @@ import { DEFAULT_ROLE_INSTRUCTIONS } from "../setup/templates.js";
  * Examples:
  *   - `agent:fabrica:subagent:my-project-developer-medior-ada`  → { projectName: "my-project", role: "developer" }
  *   - `agent:fabrica:subagent:my-project-developer-medior-0`    → { projectName: "my-project", role: "developer" }
- *   - `agent:devclaw:subagent:webapp-tester-medior`              -> { projectName: "webapp", role: "tester" } (legacy)
  *
  * Note: projectName may contain hyphens, so we match role from the end.
  */
@@ -49,9 +47,6 @@ export function parseFabricaSessionKey(
   return null;
 }
 
-/** @deprecated Use parseFabricaSessionKey. Kept for compatibility with existing tests and callers. */
-export const parseDevClawSessionKey = parseFabricaSessionKey;
-
 /**
  * Result of loading role instructions — includes the source for traceability.
  */
@@ -70,7 +65,7 @@ export type RoleInstructionsResult = {
  *   1. fabrica/projects/<project>/prompts/<role>.md  (project-specific override)
  *   2. projects/roles/<project>/<role>.md             (old project-specific)
  *   3. fabrica/prompts/<role>.md                      (workspace default)
- *   4. projects/roles/default/<role>.md               (old default)
+ *   4. projects/roles/default/<role>.md               (legacy default)
  *   5. Package default from templates.ts              (in-memory fallback)
  */
 export async function loadRoleInstructions(
@@ -90,18 +85,12 @@ export async function loadRoleInstructions(
   role: string,
   opts?: { withSource: true },
 ): Promise<string | RoleInstructionsResult> {
-  const layout = await resolveWorkspaceLayout(workspaceDir);
   const dataDir = path.join(workspaceDir, DATA_DIR);
-  const legacyDataDir = layout.dataDirName === LEGACY_DATA_DIR
-    ? layout.dataDirPath
-    : (layout.legacyDataDirPath ?? path.join(workspaceDir, LEGACY_DATA_DIR));
 
   const candidates = [
     path.join(dataDir, "projects", projectName, "prompts", `${role}.md`),
-    path.join(legacyDataDir, "projects", projectName, "prompts", `${role}.md`),
     path.join(workspaceDir, "projects", "roles", projectName, `${role}.md`),
     path.join(dataDir, "prompts", `${role}.md`),
-    path.join(legacyDataDir, "prompts", `${role}.md`),
     path.join(workspaceDir, "projects", "roles", "default", `${role}.md`),
   ];
 

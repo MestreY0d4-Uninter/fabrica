@@ -56,7 +56,6 @@ type CronJob = {
 
 const LEGACY_EXTENSION_PATH_PATTERNS = [
   "/extensions/secureclaw/",
-  "/extensions/devclaw/",
   "/extensions/genesis/",
 ];
 
@@ -137,7 +136,7 @@ export async function runSecurityDoctor(openclawHome: string): Promise<SecurityD
   });
 
   const enabledLegacyPlugins = Object.entries(config.plugins?.entries ?? {})
-    .filter(([id, entry]) => entry?.enabled && ["devclaw", "secureclaw", "genesis"].includes(id))
+    .filter(([id, entry]) => entry?.enabled && ["secureclaw", "genesis"].includes(id))
     .map(([id]) => id);
   checks.push({
     name: "plugins:legacy-enabled",

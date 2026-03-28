@@ -34,7 +34,6 @@ export async function writePluginConfig(
 
   // Clean up legacy models from openclaw.json (moved to workflow.yaml)
   delete (config as any).plugins.entries.fabrica.config.models;
-  delete (config as any).plugins.entries.devclaw;
 
   ensurePluginAllowed(config);
   ensureInternalHooks(config);
@@ -73,8 +72,6 @@ function ensurePluginAllowed(config: Record<string, unknown>): void {
   if (!Array.isArray(plugins.allow)) plugins.allow = [];
   const allow = plugins.allow as string[];
   if (!allow.includes("fabrica")) allow.push("fabrica");
-  const legacyIdx = allow.indexOf("devclaw");
-  if (legacyIdx !== -1) allow.splice(legacyIdx, 1);
 }
 
 function configureSubagentCleanup(config: Record<string, unknown>): void {

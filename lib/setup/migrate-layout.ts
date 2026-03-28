@@ -37,10 +37,8 @@ const ROLE_FILE_RENAMES: Record<string, string> = {
   "qa.md": "tester.md",
 };
 
-/** The preferred data directory name inside the workspace (alias for DATA_DIR). */
-const PRIMARY_DATA_DIR = DATA_DIR;
 /** Legacy data directory retained for compatibility and migration. */
-export const LEGACY_DATA_DIR = "devclaw";
+const LEGACY_DATA_DIR = "devclaw";
 
 export type WorkspaceLayoutVersion =
   | "fabrica-v1"
@@ -82,7 +80,7 @@ export async function ensureWorkspaceMigrated(workspaceDir: string): Promise<voi
  * 4. Empty workspace → no-op
  */
 export function resolveWorkspaceLayoutSync(workspaceDir: string): ResolvedWorkspaceLayout {
-  const dataDir = path.join(workspaceDir, PRIMARY_DATA_DIR);
+  const dataDir = path.join(workspaceDir, DATA_DIR);
   const legacyDataDir = path.join(workspaceDir, LEGACY_DATA_DIR);
   const hasPrimary = fsSync.existsSync(dataDir);
   const hasLegacy = fsSync.existsSync(legacyDataDir);
@@ -91,7 +89,7 @@ export function resolveWorkspaceLayoutSync(workspaceDir: string): ResolvedWorksp
 
   if (hasPrimary) {
     return {
-      dataDirName: PRIMARY_DATA_DIR,
+      dataDirName: DATA_DIR,
       dataDirPath: dataDir,
       legacyDataDirPath: hasLegacy ? legacyDataDir : undefined,
       layoutVersion: "fabrica-v1",
@@ -109,7 +107,7 @@ export function resolveWorkspaceLayoutSync(workspaceDir: string): ResolvedWorksp
 
   if (hasIntermediate) {
     return {
-      dataDirName: PRIMARY_DATA_DIR,
+      dataDirName: DATA_DIR,
       dataDirPath: dataDir,
       layoutVersion: "root-intermediate",
     };
@@ -117,14 +115,14 @@ export function resolveWorkspaceLayoutSync(workspaceDir: string): ResolvedWorksp
 
   if (hasOldProjects) {
     return {
-      dataDirName: PRIMARY_DATA_DIR,
+      dataDirName: DATA_DIR,
       dataDirPath: dataDir,
       layoutVersion: "projects-legacy",
     };
   }
 
   return {
-    dataDirName: PRIMARY_DATA_DIR,
+    dataDirName: DATA_DIR,
     dataDirPath: dataDir,
     layoutVersion: "empty",
   };
@@ -135,7 +133,7 @@ export async function resolveWorkspaceLayout(workspaceDir: string): Promise<Reso
 }
 
 export async function migrateWorkspaceLayout(workspaceDir: string): Promise<void> {
-  const dataDir = path.join(workspaceDir, PRIMARY_DATA_DIR);
+  const dataDir = path.join(workspaceDir, DATA_DIR);
   const legacyDataDir = path.join(workspaceDir, LEGACY_DATA_DIR);
   const newProjectsJson = path.join(dataDir, "projects.json");
 

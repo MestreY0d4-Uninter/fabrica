@@ -2,13 +2,13 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { DATA_DIR } from "./constants.js";
 import {
-  LEGACY_DATA_DIR,
   resolveWorkspaceLayout as resolveCanonicalWorkspaceLayout,
   type WorkspaceLayoutVersion,
 } from "./migrate-layout.js";
 
 export const PREFERRED_DATA_DIR = DATA_DIR;
-export { LEGACY_DATA_DIR };
+/** @deprecated Legacy devclaw data directory name; kept for test fixtures only. */
+export const LEGACY_DATA_DIR = "devclaw";
 export const WORKSPACE_LAYOUT_VERSION_FILE = ".layout-version";
 
 export type ResolvedWorkspaceLayout = {

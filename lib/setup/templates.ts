@@ -47,41 +47,11 @@ function loadDefault(filename: string): string {
 // ---------------------------------------------------------------------------
 
 function loadPromptDefault(filename: string): string {
-  const candidates = [
-    path.join("fabrica", "prompts", filename),
-    // Legacy packaged defaults kept as a compatibility fallback while old
-    // installations are migrated. New assets must live under fabrica/.
-    path.join("devclaw", "prompts", filename),
-  ];
-
-  for (const candidate of candidates) {
-    try {
-      return loadDefault(candidate);
-    } catch {
-      /* try next */
-    }
-  }
-
-  throw new Error(`Failed to load default prompt: ${filename}`);
+  return loadDefault(path.join("fabrica", "prompts", filename));
 }
 
 function loadWorkflowDefault(): string {
-  const candidates = [
-    path.join("fabrica", "workflow.yaml"),
-    // Legacy packaged defaults kept as a compatibility fallback while old
-    // installations are migrated. New assets must live under fabrica/.
-    path.join("devclaw", "workflow.yaml"),
-  ];
-
-  for (const candidate of candidates) {
-    try {
-      return loadDefault(candidate);
-    } catch {
-      /* try next */
-    }
-  }
-
-  throw new Error("Failed to load default workflow.yaml");
+  return loadDefault(path.join("fabrica", "workflow.yaml"));
 }
 
 const DEFAULT_DEV_INSTRUCTIONS = loadPromptDefault("developer.md");

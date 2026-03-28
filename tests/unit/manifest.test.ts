@@ -12,7 +12,6 @@ describe("fabrica manifest", () => {
 
     expect(manifest.layoutVersion).toBe("fabrica-v1");
     expect(manifest.layout.primaryDataDir).toBe("fabrica");
-    expect(manifest.layout.legacyDataDir).toBe("devclaw");
     expect(manifest.layout.versionFile).toBe(".layout-version");
 
     expect(manifest.assets.defaultsDir).toBe("defaults");

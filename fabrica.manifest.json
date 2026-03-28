@@ -18,7 +18,6 @@
   },
   "layout": {
     "primaryDataDir": "fabrica",
-    "legacyDataDir": "devclaw",
     "versionFile": ".layout-version"
   }
 }

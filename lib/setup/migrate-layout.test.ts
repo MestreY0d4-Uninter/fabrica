@@ -8,7 +8,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { DATA_DIR } from "./constants.js";
-import { LEGACY_DATA_DIR, migrateWorkspaceLayout } from "./migrate-layout.js";
+import { migrateWorkspaceLayout } from "./migrate-layout.js";
+
+const LEGACY_DATA_DIR = "devclaw";
 
 async function fileExists(p: string): Promise<boolean> {
   try { await fs.access(p); return true; } catch { return false; }
