@@ -20,8 +20,8 @@ export const ROLE_REGISTRY: Record<string, RoleConfig> = {
     levels: ["junior", "medior", "senior"],
     defaultLevel: "medior",
     models: {
-      junior: "openai-codex/gpt-5.3-codex-spark",
-      medior: "openai-codex/gpt-5.3-codex",
+      junior: "openai-codex/gpt-5.4-nano",
+      medior: "openai-codex/gpt-5.4-mini",
       senior: "openai-codex/gpt-5.4",
     },
     tiers: { junior: "fast", medior: "balanced", senior: "reasoning" },
@@ -43,7 +43,7 @@ export const ROLE_REGISTRY: Record<string, RoleConfig> = {
     levels: ["junior", "medior", "senior"],
     defaultLevel: "medior",
     models: {
-      junior: "openai-codex/gpt-5.3-codex-spark",
+      junior: "openai-codex/gpt-5.4-nano",
       medior: "openai-codex/gpt-5.4",
       senior: "openai-codex/gpt-5.4",
     },

@@ -145,7 +145,7 @@ describe("role selectors — levels", () => {
 describe("role selectors — models", () => {
   it("getDefaultModel returns model string", () => {
     const model = getDefaultModel("developer", "junior");
-    expect(model).toBe("openai-codex/gpt-5.3-codex-spark");
+    expect(model).toBe("openai-codex/gpt-5.4-nano");
   });
 
   it("getDefaultModel returns undefined for unknown level", () => {
@@ -155,7 +155,7 @@ describe("role selectors — models", () => {
   it("getAllDefaultModels returns nested structure", () => {
     const all = getAllDefaultModels();
     expect(all.developer).toBeDefined();
-    expect(all.developer.junior).toBe("openai-codex/gpt-5.3-codex-spark");
+    expect(all.developer.junior).toBe("openai-codex/gpt-5.4-nano");
     expect(all.tester).toBeDefined();
     expect(all.reviewer).toBeDefined();
     expect(all.architect).toBeDefined();
@@ -163,7 +163,7 @@ describe("role selectors — models", () => {
 
   it("resolveModel uses registry default when no config", () => {
     const model = resolveModel("developer", "junior");
-    expect(model).toBe("openai-codex/gpt-5.3-codex-spark");
+    expect(model).toBe("openai-codex/gpt-5.4-nano");
   });
 
   it("resolveModel uses resolved config when available", () => {
