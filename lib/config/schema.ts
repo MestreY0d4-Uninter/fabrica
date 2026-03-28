@@ -47,7 +47,7 @@ const ModelEntrySchema = z.union([
   }),
 ]);
 
-const EffortLevelSchema = z.enum(["minimal", "standard", "deep"]);
+export const EffortLevelSchema = z.enum(["minimal", "standard", "deep"]);
 
 const RoleOverrideSchema = z.union([
   z.literal(false),

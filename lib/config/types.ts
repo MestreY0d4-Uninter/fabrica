@@ -6,6 +6,7 @@
  */
 import type { WorkflowConfig } from "../workflow/index.js";
 import type { WorkflowResolutionMeta } from "./workflow-policy.js";
+import type { EffortLevel } from "../roles/types.js";
 
 /**
  * Role override in workflow.yaml. All fields optional — only override what you need.
@@ -21,7 +22,7 @@ export type RoleOverride = {
   models?: Record<string, ModelEntry>;
   emoji?: Record<string, string>;
   completionResults?: string[];
-  effort?: Record<string, import("../roles/types.js").EffortLevel>;
+  effort?: Record<string, EffortLevel>;
 };
 
 /**
@@ -163,5 +164,5 @@ export type ResolvedRoleConfig = {
   emoji: Record<string, string>;
   completionResults: string[];
   enabled: boolean;
-  effort: Record<string, import("../roles/types.js").EffortLevel>;
+  effort: Record<string, EffortLevel>;
 };
