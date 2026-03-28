@@ -54,6 +54,7 @@ import { registerBootstrapHook } from "./lib/dispatch/bootstrap-hook.js";
 import { registerAttachmentHook } from "./lib/dispatch/attachment-hook.js";
 import { registerTelegramBootstrapHook } from "./lib/dispatch/telegram-bootstrap-hook.js";
 import { registerGitHubWebhookRoute } from "./lib/github/register-webhook-route.js";
+import { registerGatewayLifecycleHook } from "./lib/setup/gateway-lifecycle-hook.js";
 
 const plugin = {
   id: "fabrica",
@@ -210,6 +211,7 @@ const plugin = {
     registerTelegramBootstrapHook(api, ctx);
     registerAttachmentHook(api, ctx);
     registerGitHubWebhookRoute(api, ctx);
+    registerGatewayLifecycleHook(api, ctx);
 
     ctx.logger.info(
       "Fabrica plugin registered (25 tools, 1 CLI command group, 1 service, 3 hooks total: bootstrap, telegram-dm bootstrap, attachment, optional GitHub webhook route)",
