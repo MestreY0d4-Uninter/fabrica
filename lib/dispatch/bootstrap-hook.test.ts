@@ -57,9 +57,9 @@ describe("parseFabricaSessionKey", () => {
 });
 
 describe("loadRoleInstructions", () => {
-  it("should load project-specific instructions from devclaw/projects/<project>/prompts/", async () => {
+  it("should load project-specific instructions from fabrica/projects/<project>/prompts/", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-test-"));
-    const projectDir = path.join(tmpDir, "devclaw", "projects", "test-project", "prompts");
+    const projectDir = path.join(tmpDir, "fabrica", "projects", "test-project", "prompts");
     await fs.mkdir(projectDir, { recursive: true });
     await fs.writeFile(path.join(projectDir, "developer.md"), "# Developer Instructions\nDo the thing.");
 
@@ -69,9 +69,9 @@ describe("loadRoleInstructions", () => {
     await fs.rm(tmpDir, { recursive: true });
   });
 
-  it("should fall back to default instructions from devclaw/prompts/", async () => {
+  it("should fall back to default instructions from fabrica/prompts/", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-test-"));
-    const promptsDir = path.join(tmpDir, "devclaw", "prompts");
+    const promptsDir = path.join(tmpDir, "fabrica", "prompts");
     await fs.mkdir(promptsDir, { recursive: true });
     await fs.writeFile(path.join(promptsDir, "tester.md"), "# Tester Default\nReview carefully.");
 
@@ -92,8 +92,8 @@ describe("loadRoleInstructions", () => {
 
   it("should prefer project-specific over default", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-test-"));
-    const projectPromptsDir = path.join(tmpDir, "devclaw", "projects", "my-project", "prompts");
-    const defaultPromptsDir = path.join(tmpDir, "devclaw", "prompts");
+    const projectPromptsDir = path.join(tmpDir, "fabrica", "projects", "my-project", "prompts");
+    const defaultPromptsDir = path.join(tmpDir, "fabrica", "prompts");
     await fs.mkdir(projectPromptsDir, { recursive: true });
     await fs.mkdir(defaultPromptsDir, { recursive: true });
     await fs.writeFile(path.join(projectPromptsDir, "developer.md"), "Project-specific instructions");

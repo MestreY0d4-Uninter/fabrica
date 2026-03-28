@@ -3,10 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  LEGACY_DATA_DIR,
   PREFERRED_DATA_DIR,
   resolveWorkspaceLayout,
 } from "../../lib/setup/workspace-layout.js";
+
+const LEGACY_DATA_DIR = "devclaw";
 
 describe("workspace layout resolver", () => {
   it("prefers fabrica when present", async () => {
