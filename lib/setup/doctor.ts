@@ -183,7 +183,7 @@ async function checkWorkflowYaml(dataDir: string): Promise<CheckResult> {
     if (!parsed || typeof parsed !== "object") {
       return { name: "yaml:workflow", severity: "error", message: "workflow.yaml is empty or not an object" };
     }
-    if (!parsed.roles) {
+    if (!parsed.roles && !parsed.workflow) {
       return { name: "yaml:workflow", severity: "warn", message: "workflow.yaml has no roles section (built-in defaults will be used)" };
     }
     return { name: "yaml:workflow", severity: "ok", message: "workflow.yaml is valid" };

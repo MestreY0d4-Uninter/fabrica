@@ -6,26 +6,25 @@
 #
 # To see what changed in a new version: config({ action: "diff" })
 # To reset to package defaults:         config({ action: "reset", scope: "workflow" })
-
-roles:
-  developer:
-    models:
-      junior: anthropic/claude-haiku-4-5
-      medior: anthropic/claude-sonnet-4-5
-      senior: anthropic/claude-opus-4-6
-  tester:
-    models:
-      junior: anthropic/claude-haiku-4-5
-      medior: anthropic/claude-sonnet-4-5
-      senior: anthropic/claude-opus-4-6
-  architect:
-    models:
-      junior: anthropic/claude-sonnet-4-5
-      senior: anthropic/claude-opus-4-6
-  reviewer:
-    models:
-      junior: anthropic/claude-haiku-4-5
-      senior: anthropic/claude-sonnet-4-5
+#
+# Models are auto-resolved from your authenticated providers.
+# To override, specify explicit models per role/level:
+#   roles:
+#     developer:
+#       models:
+#         junior: your-provider/model-name
+#
+# Tier defaults (used when no explicit model configured):
+#   junior  → fast tier (cheapest available model)
+#   medior  → balanced tier
+#   senior  → reasoning tier (most capable model)
+#
+# To configure thinking effort per role/level:
+#   roles:
+#     developer:
+#       effort:
+#         junior: minimal    # fast, direct execution
+#         senior: deep       # thorough analysis
 
 workflow:
   initial: planning
