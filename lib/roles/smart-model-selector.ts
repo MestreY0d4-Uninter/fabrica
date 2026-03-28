@@ -63,7 +63,8 @@ export async function assignModels(
     logger.warn({ err }, "LLM model selection failed, using registry defaults");
   }
 
-  // Heuristic fallback: use registry defaults if they're in the authenticated set
+  // Tier-based fallback: resolve model tiers from ROLE_REGISTRY against available models
+  const { resolveModelForTier } = await import("./tier-resolver.js");
   const modelSet = new Set(authenticated.map((m) => m.model));
   const result: ModelAssignment = {};
   const fallback = authenticated[0].model;
@@ -71,10 +72,16 @@ export async function assignModels(
   for (const [roleId, config] of Object.entries(ROLE_REGISTRY)) {
     result[roleId] = {};
     for (const level of config.levels) {
+      // 1. Check if registry default is available (backward compat)
       const registryDefault = config.models[level];
-      result[roleId][level] = registryDefault && modelSet.has(registryDefault)
-        ? registryDefault
-        : fallback;
+      if (registryDefault && modelSet.has(registryDefault)) {
+        result[roleId][level] = registryDefault;
+        continue;
+      }
+      // 2. Resolve via tier
+      const tier = config.tiers?.[level];
+      const tierMatch = tier ? resolveModelForTier(tier, authenticated) : undefined;
+      result[roleId][level] = tierMatch ?? fallback;
     }
   }
 
