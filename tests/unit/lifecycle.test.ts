@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { recordIssueLifecycle, recordIssueLifecycleBySessionKey } from "../../lib/projects/lifecycle.js";
 import { createTestHarness, type TestHarness } from "../../lib/testing/index.js";
-import { DATA_DIR } from "../../lib/setup/migrate-layout.js";
+import { DATA_DIR } from "../../lib/setup/constants.js";
 
 async function readAuditEvents(workspaceDir: string): Promise<Array<Record<string, unknown>>> {
   const filePath = path.join(workspaceDir, DATA_DIR, "log", "audit.log");

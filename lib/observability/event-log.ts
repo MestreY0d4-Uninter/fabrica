@@ -7,7 +7,7 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
-import { DATA_DIR } from "../setup/migrate-layout.js";
+import { DATA_DIR } from "../setup/constants.js";
 
 const EVENTS_FILE = "events.ndjson";
 const SNAPSHOT_FILE = "events-snapshot.json";

@@ -6,7 +6,7 @@ import { log } from "../../lib/audit.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { DATA_DIR } from "../../lib/setup/migrate-layout.js";
+import { DATA_DIR } from "../../lib/setup/constants.js";
 
 let tmpDir: string;
 

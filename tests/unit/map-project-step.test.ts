@@ -6,7 +6,7 @@ import { mapProjectStep } from "../../lib/intake/steps/map-project.js";
 import type { GenesisPayload, StepContext } from "../../lib/intake/types.js";
 import { writeProjects } from "../../lib/projects/io.js";
 import type { ProjectsData } from "../../lib/projects/types.js";
-import { DATA_DIR } from "../../lib/setup/migrate-layout.js";
+import { DATA_DIR } from "../../lib/setup/constants.js";
 
 const tempDirs: string[] = [];
 

@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DATA_DIR } from "../../lib/setup/migrate-layout.js";
+import { DATA_DIR } from "../../lib/setup/constants.js";
 import { validateConfig } from "../../lib/config/schema.js";
 import { createConfigTool } from "../../lib/tools/admin/config.js";
 import { WORKFLOW_YAML_TEMPLATE } from "../../lib/setup/templates.js";

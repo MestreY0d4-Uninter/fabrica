@@ -3,7 +3,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { DATA_DIR } from "../../setup/migrate-layout.js";
+import { DATA_DIR } from "../../setup/constants.js";
 
 // ---------------------------------------------------------------------------
 // Types

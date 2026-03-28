@@ -15,7 +15,7 @@ import { registerBootstrapHook } from "../dispatch/bootstrap-hook.js";
 import { TestProvider } from "./test-provider.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginContext } from "../context.js";
-import { DATA_DIR } from "../setup/migrate-layout.js";
+import { DATA_DIR } from "../setup/constants.js";
 
 // ---------------------------------------------------------------------------
 // Bootstrap result type — represents the agent:bootstrap hook outcome

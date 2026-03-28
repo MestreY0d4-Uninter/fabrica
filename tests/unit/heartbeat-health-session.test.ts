@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkWorkerHealth, isDispatchUnconfirmed } from "../../lib/services/heartbeat/health.js";
 import type { SessionLookup } from "../../lib/services/gateway-sessions.js";
 import { createTestHarness, type TestHarness } from "../../lib/testing/index.js";
-import { DATA_DIR } from "../../lib/setup/migrate-layout.js";
+import { DATA_DIR } from "../../lib/setup/constants.js";
 import { writeProjects } from "../../lib/projects/index.js";
 
 async function readAuditEvents(workspaceDir: string): Promise<Array<Record<string, unknown>>> {

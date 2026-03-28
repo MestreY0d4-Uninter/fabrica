@@ -29,6 +29,7 @@
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { DATA_DIR } from "./constants.js";
 
 /** Role file renames: old filename → new filename. */
 const ROLE_FILE_RENAMES: Record<string, string> = {
@@ -36,12 +37,10 @@ const ROLE_FILE_RENAMES: Record<string, string> = {
   "qa.md": "tester.md",
 };
 
-/** The preferred data directory name inside the workspace. */
-export const PRIMARY_DATA_DIR = "fabrica";
+/** The preferred data directory name inside the workspace (alias for DATA_DIR). */
+const PRIMARY_DATA_DIR = DATA_DIR;
 /** Legacy data directory retained for compatibility and migration. */
 export const LEGACY_DATA_DIR = "devclaw";
-/** Canonical data directory name for new writes. */
-export const DATA_DIR = PRIMARY_DATA_DIR;
 
 export type WorkspaceLayoutVersion =
   | "fabrica-v1"

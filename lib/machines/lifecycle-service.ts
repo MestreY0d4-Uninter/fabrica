@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createActor } from "xstate";
-import { DATA_DIR, ensureWorkspaceMigrated } from "../setup/migrate-layout.js";
+import { DATA_DIR } from "../setup/constants.js";
+import { ensureWorkspaceMigrated } from "../setup/migrate-layout.js";
 import { lifecycleMachine, type LifecycleMachineContext, type LifecycleMachineEvent } from "./LifecycleMachine.js";
 
 type LifecycleLogger = {

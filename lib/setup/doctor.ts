@@ -10,7 +10,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
-import { DATA_DIR, migrateWorkspaceLayout } from "./migrate-layout.js";
+import { DATA_DIR } from "./constants.js";
+import { migrateWorkspaceLayout } from "./migrate-layout.js";
 import { loadConfig } from "../config/index.js";
 import { getAllRoleIds } from "../roles/index.js";
 import type { ProjectsData } from "../projects/types.js";

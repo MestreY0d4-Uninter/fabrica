@@ -15,7 +15,7 @@ import type { PluginContext, RunCommand } from "../../context.js";
 import { getRoleWorker, recordIssueLifecycle, recordIssueLifecycleBySessionKey, resolveRepoPath, updateIssueRuntime, requireCanonicalPrSelector, deactivateWorker } from "../../projects/index.js";
 import { executeCompletion, getRule } from "../../services/pipeline.js";
 import { log as auditLog } from "../../audit.js";
-import { DATA_DIR } from "../../setup/migrate-layout.js";
+import { DATA_DIR } from "../../setup/constants.js";
 import { requireWorkspaceDir, resolveProjectFromContext, resolveProvider } from "../helpers.js";
 import { getAllRoleIds, isValidResult, getCompletionResults } from "../../roles/index.js";
 import { getQueueLabels, isFeedbackState } from "../../workflow/index.js";

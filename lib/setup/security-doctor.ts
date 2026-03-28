@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { DATA_DIR } from "./migrate-layout.js";
+import { DATA_DIR } from "./constants.js";
 
 export type SecurityDoctorSeverity = "ok" | "warn" | "error";
 

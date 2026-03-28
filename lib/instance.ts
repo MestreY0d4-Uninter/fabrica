@@ -11,7 +11,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { nameFromSeed } from "./names.js";
-import { DATA_DIR } from "./setup/migrate-layout.js";
+import { DATA_DIR } from "./setup/constants.js";
 
 export type InstanceIdentity = {
   name: string;

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { loadConfig } from "../../lib/config/index.js";
-import { DATA_DIR } from "../../lib/setup/migrate-layout.js";
+import { DATA_DIR } from "../../lib/setup/constants.js";
 
 describe("workflow policy normalization", () => {
   it("strips reviewer merge actions from resolved workflow and records metadata", async () => {

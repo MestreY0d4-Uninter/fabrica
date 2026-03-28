@@ -4,7 +4,7 @@ import YAML from "yaml";
 import type { FabricaConfig } from "../config/types.js";
 import { validateConfig } from "../config/schema.js";
 import { normalizeWorkflowDocument, type WorkflowNormalizationFix } from "../config/workflow-policy.js";
-import { DATA_DIR } from "./migrate-layout.js";
+import { DATA_DIR } from "./constants.js";
 
 export type WorkflowMigrationResult = {
   file: string;

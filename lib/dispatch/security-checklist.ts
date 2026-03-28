@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_SECURITY_CHECKLIST } from "../setup/templates.js";
-import { DATA_DIR } from "../setup/migrate-layout.js";
+import { DATA_DIR } from "../setup/constants.js";
 
 export async function loadSecurityChecklist(
   workspaceDir: string,

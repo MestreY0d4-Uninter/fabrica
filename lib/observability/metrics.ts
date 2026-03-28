@@ -6,7 +6,7 @@
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { DATA_DIR } from "../setup/migrate-layout.js";
+import { DATA_DIR } from "../setup/constants.js";
 
 export type FabricaMetrics = {
   /** Total number of audit log entries scanned */

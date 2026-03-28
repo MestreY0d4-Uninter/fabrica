@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { ensureDefaultFiles } from "../../lib/setup/workspace.js";
 import { migrateWorkspaceWorkflowFiles } from "../../lib/setup/workflow-migration.js";
-import { DATA_DIR } from "../../lib/setup/migrate-layout.js";
+import { DATA_DIR } from "../../lib/setup/constants.js";
 
 describe("workspace workflow migration", () => {
   it("backs up and removes reviewer merge actions from an existing workflow.yaml", async () => {

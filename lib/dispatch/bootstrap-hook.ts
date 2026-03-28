@@ -15,7 +15,8 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginContext } from "../context.js";
 import { getSessionKeyRolePattern } from "../roles/index.js";
 import { recordIssueLifecycleBySessionKey } from "../projects/index.js";
-import { DATA_DIR, LEGACY_DATA_DIR, resolveWorkspaceLayout } from "../setup/migrate-layout.js";
+import { DATA_DIR } from "../setup/constants.js";
+import { LEGACY_DATA_DIR, resolveWorkspaceLayout } from "../setup/migrate-layout.js";
 import { DEFAULT_ROLE_INSTRUCTIONS } from "../setup/templates.js";
 
 /**

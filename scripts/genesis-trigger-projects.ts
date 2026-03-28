@@ -1,5 +1,5 @@
 import { acquireLock, releaseLock } from "../lib/projects/io.js";
-import { DATA_DIR } from "../lib/setup/migrate-layout.js";
+import { DATA_DIR } from "../lib/setup/constants.js";
 import { readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 

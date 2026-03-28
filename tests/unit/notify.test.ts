@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { notify } from "../../lib/dispatch/notify.js";
-import { DATA_DIR } from "../../lib/setup/migrate-layout.js";
+import { DATA_DIR } from "../../lib/setup/constants.js";
 
 async function readAuditEvents(workspaceDir: string): Promise<Array<Record<string, unknown>>> {
   const filePath = path.join(workspaceDir, DATA_DIR, "log", "audit.log");

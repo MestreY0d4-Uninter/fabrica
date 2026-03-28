@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { loadSecurityChecklist } from "../../lib/dispatch/security-checklist.js";
-import { DATA_DIR } from "../../lib/setup/migrate-layout.js";
+import { DATA_DIR } from "../../lib/setup/constants.js";
 
 describe("loadSecurityChecklist", () => {
   let workspaceDir: string;

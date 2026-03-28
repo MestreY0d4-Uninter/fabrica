@@ -8,7 +8,7 @@
  */
 import { appendFile, mkdir, readFile, writeFile, rename, unlink, copyFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import { DATA_DIR } from "./setup/migrate-layout.js";
+import { DATA_DIR } from "./setup/constants.js";
 
 const MAX_LOG_LINES = 500;
 const MAX_BACKUPS = 3;

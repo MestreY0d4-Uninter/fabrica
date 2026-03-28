@@ -1,13 +1,13 @@
 import path from "node:path";
 import fs from "node:fs/promises";
+import { DATA_DIR } from "./constants.js";
 import {
-  PRIMARY_DATA_DIR,
   LEGACY_DATA_DIR,
   resolveWorkspaceLayout as resolveCanonicalWorkspaceLayout,
   type WorkspaceLayoutVersion,
 } from "./migrate-layout.js";
 
-export const PREFERRED_DATA_DIR = PRIMARY_DATA_DIR;
+export const PREFERRED_DATA_DIR = DATA_DIR;
 export { LEGACY_DATA_DIR };
 export const WORKSPACE_LAYOUT_VERSION_FILE = ".layout-version";
 
@@ -26,7 +26,7 @@ export async function resolveWorkspaceLayout(workspaceDir: string): Promise<Reso
     workspaceDir,
     dataDirName: resolved.dataDirName,
     dataDir: resolved.dataDirPath,
-    preferredDataDir: path.join(workspaceDir, PRIMARY_DATA_DIR),
+    preferredDataDir: path.join(workspaceDir, DATA_DIR),
     legacyDataDir: path.join(workspaceDir, LEGACY_DATA_DIR),
     layoutVersion: resolved.layoutVersion,
   };

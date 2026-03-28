@@ -13,7 +13,7 @@ import { requireWorkspaceDir } from "../helpers.js";
 import { backupAndWrite } from "../../setup/workspace.js";
 import { WORKFLOW_YAML_TEMPLATE, DEFAULT_ROLE_INSTRUCTIONS } from "../../setup/templates.js";
 import { getAllRoleIds } from "../../roles/index.js";
-import { DATA_DIR } from "../../setup/migrate-layout.js";
+import { DATA_DIR } from "../../setup/constants.js";
 import { log as auditLog } from "../../audit.js";
 
 export function createConfigResetTool(_ctx: PluginContext) {

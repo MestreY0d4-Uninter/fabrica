@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import type { RunCommand } from "../../lib/context.js";
 import { validatePrExistsForDeveloper } from "../../lib/tools/worker/work-finish.js";
 import { TestProvider } from "../../lib/testing/test-provider.js";
-import { DATA_DIR } from "../../lib/setup/migrate-layout.js";
+import { DATA_DIR } from "../../lib/setup/constants.js";
 
 describe("issue/PR canonical binding", () => {
   let tempDir: string;

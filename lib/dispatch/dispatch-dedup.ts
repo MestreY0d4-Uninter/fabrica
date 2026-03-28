@@ -7,7 +7,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { DATA_DIR } from "../setup/migrate-layout.js";
+import { DATA_DIR } from "../setup/constants.js";
 
 const DEDUP_FILE = "dispatch-dedup.ndjson";
 const BUCKET_MS = 5 * 60_000; // 5 minutes

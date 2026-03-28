@@ -16,7 +16,8 @@ import { DEFAULT_WORKFLOW, type WorkflowConfig } from "../workflow/index.js";
 import { mergeConfig, mergeConfigWithTrace, type MergeTrace } from "./merge.js";
 import type { FabricaConfig, ResolvedConfig, ResolvedRoleConfig, ResolvedTimeouts, RoleOverride, ModelEntry } from "./types.js";
 import { validateConfig, validateWorkflowIntegrity } from "./schema.js";
-import { DATA_DIR, migrateWorkspaceLayout } from "../setup/migrate-layout.js";
+import { DATA_DIR } from "../setup/constants.js";
+import { migrateWorkspaceLayout } from "../setup/migrate-layout.js";
 import { buildWorkflowResolutionMeta, normalizeWorkflowSemantics } from "./workflow-policy.js";
 
 /**

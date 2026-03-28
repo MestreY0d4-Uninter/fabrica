@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { log } from "../../lib/audit.js";
 import { validatePrExistsForDeveloper } from "../../lib/tools/worker/work-finish.js";
 import { TestProvider } from "../../lib/testing/test-provider.js";
-import { DATA_DIR } from "../../lib/setup/migrate-layout.js";
+import { DATA_DIR } from "../../lib/setup/constants.js";
 import type { RunCommand } from "../../lib/context.js";
 
 const AUDIT_LOG_MAX_LINES = 500;

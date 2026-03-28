@@ -24,7 +24,8 @@ import {
   DEFAULT_SECURITY_CHECKLIST,
 } from "./templates.js";
 import { getAllRoleIds } from "../roles/index.js";
-import { migrateWorkspaceLayout, DATA_DIR } from "./migrate-layout.js";
+import { DATA_DIR } from "./constants.js";
+import { migrateWorkspaceLayout } from "./migrate-layout.js";
 import { writeWorkspaceLayoutVersion } from "./workspace-layout.js";
 import { writeVersionFile, detectUpgrade } from "./version.js";
 import { log as auditLog } from "../audit.js";

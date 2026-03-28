@@ -13,7 +13,7 @@ import type { ToolContext } from "../../types.js";
 import type { PluginContext } from "../../context.js";
 import { writeAllDefaults, backupAndWrite, fileExists } from "../../setup/workspace.js";
 import { WORKFLOW_YAML_TEMPLATE, DEFAULT_ROLE_INSTRUCTIONS } from "../../setup/templates.js";
-import { DATA_DIR } from "../../setup/migrate-layout.js";
+import { DATA_DIR } from "../../setup/constants.js";
 import { getCurrentVersion, readVersionFile } from "../../setup/version.js";
 import { loadConfig } from "../../config/loader.js";
 

@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../../lib/config/index.js";
-import { DATA_DIR, LEGACY_DATA_DIR } from "../../lib/setup/migrate-layout.js";
+import { DATA_DIR } from "../../lib/setup/constants.js";
+import { LEGACY_DATA_DIR } from "../../lib/setup/migrate-layout.js";
 
 let tempDir: string | null = null;
 

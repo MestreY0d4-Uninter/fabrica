@@ -7,7 +7,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { getRootLogger } from "../../observability/logger.js";
-import { DATA_DIR } from "../../setup/migrate-layout.js";
+import { DATA_DIR } from "../../setup/constants.js";
 
 const STALE_THRESHOLD_MS = 5 * 60_000; // 5 minutes
 const STALE_STATUSES = new Set(["pending_classify", "classifying"]);

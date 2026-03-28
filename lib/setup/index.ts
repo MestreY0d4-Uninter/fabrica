@@ -14,7 +14,7 @@ import { migrateChannelBinding } from "./binding-manager.js";
 import { createAgent, ensureGenesisAgent, resolveWorkspacePath } from "./agent.js";
 import { writePluginConfig } from "./config.js";
 import { scaffoldWorkspace } from "./workspace.js";
-import { DATA_DIR } from "./migrate-layout.js";
+import { DATA_DIR } from "./constants.js";
 import type { ExecutionMode } from "../workflow/index.js";
 
 export type ModelConfig = Record<string, Record<string, string>>;

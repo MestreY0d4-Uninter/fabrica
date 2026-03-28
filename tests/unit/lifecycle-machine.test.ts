@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createActor, transition } from "xstate";
 import { lifecycleMachine } from "../../lib/machines/LifecycleMachine.js";
 import { getLifecycleService } from "../../lib/machines/lifecycle-service.js";
-import { DATA_DIR } from "../../lib/setup/migrate-layout.js";
+import { DATA_DIR } from "../../lib/setup/constants.js";
 
 let tempDir: string | null = null;
 

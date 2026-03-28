@@ -9,7 +9,7 @@ import {
   type StructuredEvent,
 } from "../../lib/observability/event-log.js";
 
-import { DATA_DIR } from "../../lib/setup/migrate-layout.js";
+import { DATA_DIR } from "../../lib/setup/constants.js";
 
 let tmpDir: string;
 

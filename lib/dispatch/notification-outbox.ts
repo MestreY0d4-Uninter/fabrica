@@ -7,7 +7,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { DATA_DIR } from "../setup/migrate-layout.js";
+import { DATA_DIR } from "../setup/constants.js";
 
 const OUTBOX_FILE = "notifications-outbox.ndjson";
 const DEFAULT_TTL_MS = 60 * 60_000; // 1 hour
