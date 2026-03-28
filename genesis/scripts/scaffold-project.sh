@@ -442,6 +442,146 @@ generate_node_lockfile() {
   fi
 }
 
+# --- Node.js CLI ---
+scaffold_node_cli() {
+  scaffold_gitignore_node
+  scaffold_env_example "node-cli"
+
+  cat > package.json <<'EOF'
+{
+  "name": "REPO_NAME_PLACEHOLDER",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "REPO_NAME_PLACEHOLDER": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "commander": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.7.0",
+    "tsx": "^4.0.0",
+    "vitest": "^3.0.0",
+    "@vitest/coverage-v8": "^3.0.0"
+  }
+}
+EOF
+  jq --arg name "$REPO_NAME" '.name = $name | .bin = {($name): "dist/index.js"}' package.json > package.json.tmp && mv package.json.tmp package.json
+  FILES_CREATED+=("package.json")
+  generate_node_lockfile
+
+  cat > tsconfig.json <<'EOF'
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": true
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist", "tests"]
+}
+EOF
+  FILES_CREATED+=("tsconfig.json")
+
+  mkdir -p src
+  cat > src/index.ts <<'EOF'
+#!/usr/bin/env node
+import { Command } from 'commander';
+
+const program = new Command();
+
+program
+  .name(process.env.npm_package_name ?? 'cli')
+  .version(process.env.npm_package_version ?? '0.1.0')
+  .description('CLI tool')
+  .argument('[args...]', 'arguments')
+  .action((args: string[]) => {
+    console.log('Hello from CLI', args.length ? args.join(' ') : '');
+  });
+
+program.parse();
+EOF
+  FILES_CREATED+=("src/index.ts")
+
+  mkdir -p tests
+  cat > tests/main.test.ts <<'EOF'
+import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
+
+const cli = resolve(__dirname, '../src/index.ts');
+
+function run(...args: string[]): string {
+  return execFileSync('npx', ['tsx', cli, ...args], {
+    encoding: 'utf-8',
+    env: { ...process.env, NODE_NO_WARNINGS: '1' },
+  }).trim();
+}
+
+describe('CLI', () => {
+  it('should print hello message', () => {
+    const output = run();
+    expect(output).toContain('Hello from CLI');
+  });
+
+  it('should show version with --version', () => {
+    const output = run('--version');
+    expect(output).toMatch(/\d+\.\d+\.\d+/);
+  });
+});
+EOF
+  FILES_CREATED+=("tests/main.test.ts")
+
+  mkdir -p scripts
+  cat > scripts/qa.sh <<'QAEOF'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "=== QA Gate ==="
+FAIL=0
+
+echo "--- Lint ---"
+npx eslint src/ 2>&1 || { echo "LINT FAILED"; FAIL=1; }
+
+echo "--- TypeScript ---"
+npx tsc --noEmit 2>&1 || { echo "TSC FAILED"; FAIL=1; }
+
+echo "--- Tests ---"
+npx vitest run 2>&1 || { echo "TESTS FAILED"; FAIL=1; }
+
+echo "--- Coverage (>=80%) ---"
+npx vitest run --coverage --coverage.thresholds.lines=80 2>&1 || { echo "COVERAGE FAILED"; FAIL=1; }
+
+echo "--- Secrets scan ---"
+if grep -rn 'password\s*=\s*"[^"]\+"\|api_key\s*=\s*"[^"]\+"\|secret\s*=\s*"[^"]\+"' --include="*.ts" --include="*.js" src/ 2>/dev/null; then
+  echo "SECRETS FOUND — FAIL"; FAIL=1
+else
+  echo "No hardcoded secrets found"
+fi
+
+exit $FAIL
+QAEOF
+  chmod +x scripts/qa.sh
+  FILES_CREATED+=("scripts/qa.sh")
+}
+
 # --- Next.js ---
 scaffold_nextjs() {
   scaffold_gitignore_node
@@ -1346,8 +1486,9 @@ if [[ -z "$OBJECTIVE" ]]; then
 fi
 
 case "$STACK" in
-  nextjs)   scaffold_nextjs ;;
-  express)  scaffold_express ;;
+  nextjs)    scaffold_nextjs ;;
+  node-cli)  scaffold_node_cli ;;
+  express)   scaffold_express ;;
   fastapi)  scaffold_fastapi ;;
   flask)    scaffold_flask ;;
   django)      scaffold_django ;;

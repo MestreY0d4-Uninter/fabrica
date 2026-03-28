@@ -12,12 +12,12 @@ fi
 # genesis_detect_stack_from_hint <stack_hint>
 # Maps a raw stack hint (from GENESIS_STACK, scaffold.stack, etc.) to a
 # canonical stack name, or returns empty string if unknown.
-# Canonical stacks: nextjs, express, fastapi, flask, django, python-cli
+# Canonical stacks: nextjs, node-cli, express, fastapi, flask, django, python-cli
 genesis_normalize_stack_hint() {
   local hint="${1:-}"
   hint="$(echo "$hint" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
   case "$hint" in
-    nextjs|express|fastapi|flask|django|python-cli)
+    nextjs|express|node-cli|fastapi|flask|django|python-cli)
       printf '%s\n' "$hint"
       ;;
     *)
@@ -43,6 +43,8 @@ genesis_detect_stack_from_text() {
     echo "flask"
   elif echo "$text" | grep -qiE '\bdjango\b'; then
     echo "django"
+  elif echo "$text" | grep -qiE '\bnode\.?js\b.*\bcli\b|\bcli\b.*\bnode\.?js\b|\btypescript\b.*\bcli\b|\bcli\b.*\btypescript\b|\bcommander\b'; then
+    echo "node-cli"
   elif echo "$text" | grep -qiE '\bpython\b.*\bcli\b|\bcli\b.*\bpython\b|\bclick\b|\bargparse\b|\btyper\b'; then
     echo "python-cli"
   elif echo "$text" | grep -qiE '\bpython\b'; then
@@ -75,7 +77,7 @@ genesis_stack_flags() {
     fastapi|flask|django|python-cli|python)
       echo "true false false"
       ;;
-    nextjs|express|node|javascript|typescript)
+    nextjs|express|node|node-cli|javascript|typescript)
       echo "false true false"
       ;;
     go|golang)
@@ -100,7 +102,7 @@ genesis_detect_stack_flags_from_context() {
   # Priority 1: explicit scaffold stack
   case "$stack_hint" in
     fastapi|flask|django|python|python-cli) IS_PY=true ;;
-    nextjs|express|node|javascript|typescript) IS_JS=true ;;
+    nextjs|express|node|node-cli|javascript|typescript) IS_JS=true ;;
     go|golang) IS_GO=true ;;
   esac
 
