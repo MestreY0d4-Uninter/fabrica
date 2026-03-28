@@ -64,6 +64,67 @@ export async function cleanupWorkspace(workspacePath: string): Promise<void> {
   try { await fs.unlink(path.join(workspacePath, "BOOTSTRAP.md")); } catch { /* may not exist */ }
 }
 
+/**
+ * Ensure a dedicated genesis agent exists for Telegram DM bootstrap.
+ *
+ * Uses `openclaw agents add` directly (not createAgent) because genesis
+ * shares the main workspace — no workspace resolution or cleanup needed.
+ * Safe to call multiple times — idempotent.
+ */
+export async function ensureGenesisAgent(
+  runtime: PluginRuntime,
+  runCommand: RunCommand,
+  opts?: { forumGroupId?: string },
+): Promise<{ created: boolean; agentId: string }> {
+  const config = runtime.config.loadConfig();
+  const agents = (config as any).agents?.list ?? [];
+
+  if (agents.some((a: any) => a.id === "genesis")) {
+    return { created: false, agentId: "genesis" };
+  }
+
+  // Create genesis agent — shares main's workspace, bound to telegram
+  const defaultWorkspace = (config as any).agents?.defaults?.workspace;
+  const args = ["openclaw", "agents", "add", "genesis", "--non-interactive", "--bind", "telegram"];
+  if (defaultWorkspace) args.push("--workspace", defaultWorkspace);
+  await runCommand(args, { timeoutMs: 30_000 });
+
+  // Reload config after CLI modified it on disk
+  const updatedConfig = runtime.config.loadConfig();
+
+  // Update bindings: remove channel-wide telegram from main (if any)
+  const bindings = ((updatedConfig as any).bindings ?? []).filter(
+    (b: any) => !(b.match?.channel === "telegram" && !b.match?.peer && b.agentId === "main"),
+  );
+
+  // Ensure genesis has channel-wide telegram binding
+  if (!bindings.some((b: any) => b.agentId === "genesis" && b.match?.channel === "telegram" && !b.match?.peer)) {
+    bindings.push({ agentId: "genesis", match: { channel: "telegram" } });
+  }
+
+  // Add group-specific binding for main (Telegram forum notifications)
+  if (opts?.forumGroupId) {
+    bindings.push({
+      agentId: "main",
+      match: { channel: "telegram", peer: { kind: "group", id: opts.forumGroupId } },
+    });
+  }
+
+  (updatedConfig as any).bindings = bindings;
+  await runtime.config.writeConfigFile(updatedConfig);
+
+  const logger = getRootLogger().child({ phase: "genesis-setup" });
+  logger.info("[fabrica] genesis-agent-created: telegram DMs routed to genesis");
+
+  return { created: true, agentId: "genesis" };
+}
+
+/** Check if a genesis agent is configured in the runtime. */
+export function hasGenesisAgent(runtime: PluginRuntime): boolean {
+  const config = runtime.config.loadConfig();
+  return ((config as any).agents?.list ?? []).some((a: any) => a.id === "genesis");
+}
+
 async function updateAgentDisplayName(runtime: PluginRuntime, agentId: string, name: string): Promise<void> {
   const logger = getRootLogger().child({ agentId, phase: "agent-setup" });
   if (name === agentId) return;
