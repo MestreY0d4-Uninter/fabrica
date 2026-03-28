@@ -1,5 +1,4 @@
-import { FABRICA_QUALITY_GATE_NAME } from "./quality-gate.js";
-import { getGitHubRepoInstallationOctokit } from "./app-auth.js";
+import { FABRICA_QUALITY_GATE_NAME as _FABRICA_QUALITY_GATE_NAME } from "./quality-gate.js";
 
 export type GitHubGovernanceResult = {
   attempted: boolean;
@@ -10,7 +9,17 @@ export type GitHubGovernanceResult = {
   skippedReason?: string;
 };
 
-export async function syncGitHubMergeGovernance(params: {
+/**
+ * GitHub App removed (distribution concern). Governance requires manual branch
+ * protection setup. This function is intentionally a no-op.
+ *
+ * To configure merge governance manually, set the following branch protection rules
+ * for your default branch in GitHub Settings > Branches:
+ *   - Required status checks: "Fabrica / Quality Gate"
+ *   - Require conversation resolution
+ *   - Required approving reviews: 1+
+ */
+export async function syncGitHubMergeGovernance(_params: {
   pluginConfig?: Record<string, unknown>;
   owner: string;
   repo: string;
@@ -20,60 +29,12 @@ export async function syncGitHubMergeGovernance(params: {
   enableAutomerge?: boolean;
   enableMergeQueue?: boolean;
 }): Promise<GitHubGovernanceResult> {
-  const installation = await getGitHubRepoInstallationOctokit(params.pluginConfig, {
-    owner: params.owner,
-    repo: params.repo,
-  });
-  if (!installation?.octokit) {
-    return {
-      attempted: false,
-      requiredCheckConfigured: false,
-      automergePrepared: false,
-      mergeQueuePrepared: false,
-      skippedReason: "github_app_unavailable",
-    };
-  }
-
-  const octokit = installation.octokit;
-  await octokit.request("PUT /repos/{owner}/{repo}/branches/{branch}/protection", {
-    owner: params.owner,
-    repo: params.repo,
-    branch: params.branch,
-    required_status_checks: {
-      strict: true,
-      contexts: [FABRICA_QUALITY_GATE_NAME],
-    },
-    enforce_admins: false,
-    required_pull_request_reviews: {
-      dismiss_stale_reviews: false,
-      require_code_owner_reviews: false,
-      required_approving_review_count: params.requiredApprovingReviewCount ?? 1,
-      require_last_push_approval: false,
-    },
-    restrictions: null,
-    allow_force_pushes: false,
-    allow_deletions: false,
-    block_creations: false,
-    required_conversation_resolution: params.requireConversationResolution ?? true,
-    required_linear_history: false,
-  });
-
-  if (params.enableAutomerge) {
-    await octokit.request("PATCH /repos/{owner}/{repo}", {
-      owner: params.owner,
-      repo: params.repo,
-      allow_auto_merge: true,
-    });
-  }
-
-  // Merge queue still depends on repository rulesets/admin capabilities.
-  // We surface the intent here so operators can wire the same gate name into
-  // the repository ruleset when the feature is available.
+  // GitHub App removed — branch protection must be configured manually.
   return {
-    attempted: true,
-    requiredCheckConfigured: true,
-    automergePrepared: params.enableAutomerge === true,
-    mergeQueuePrepared: params.enableMergeQueue === true,
-    installationId: installation.installationId,
+    attempted: false,
+    requiredCheckConfigured: false,
+    automergePrepared: false,
+    mergeQueuePrepared: false,
+    skippedReason: "github_app_removed",
   };
 }

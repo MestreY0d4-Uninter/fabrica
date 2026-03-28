@@ -1,4 +1,3 @@
-import { getGitHubRepoInstallationOctokit } from "../../github/app-auth.js";
 import { ensureFabricaRun, transitionFabricaRun, syncQualityGateFromInput } from "../../github/pr-event-source.js";
 import { log as auditLog } from "../../audit.js";
 import type { IssueProvider } from "../../providers/provider.js";
@@ -71,21 +70,11 @@ export async function runPrDiscoveryPass(params: {
         continue;
       }
 
-      // Step 2: get installationId via GitHub App
-      const appResult = await getGitHubRepoInstallationOctokit(params.pluginConfig, {
-        owner: prDetails.owner,
-        repo: prDetails.repo,
-      });
-      if (!appResult) {
-        result.skipped++;
-        params.logger.warn(
-          `PR discovery: cannot get installationId for ${prDetails.owner}/${prDetails.repo} (issue #${issueId}) — skipping`,
-        );
-        continue;
-      }
-
+      // Step 2: build repoIdentity. GitHub App removed (distribution concern) —
+      // use repositoryId as a stable sentinel for installationId so dedup logic
+      // (findByPr / buildRunId) works consistently across polling ticks.
       const repoIdentity = {
-        installationId: appResult.installationId,
+        installationId: prDetails.repositoryId,
         repositoryId: prDetails.repositoryId,
         owner: prDetails.owner,
         repo: prDetails.repo,

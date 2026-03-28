@@ -1,7 +1,6 @@
 import { z } from "zod";
 import type { FabricaRunStore } from "./event-store.js";
 import type { FabricaRun, GitHubEventRecord, RepoIdentity } from "./types.js";
-import { getGitHubInstallationOctokit } from "./app-auth.js";
 import { withCorrelationContext } from "../observability/context.js";
 import { withTelemetrySpan } from "../observability/telemetry.js";
 
@@ -144,6 +143,59 @@ function renderOutput(run: FabricaRun, eventInfo?: { eventName?: string; action?
   }
 }
 
+async function createOrUpdateCheckRunViaGhCli(
+  owner: string,
+  repo: string,
+  opts: {
+    name: string;
+    headSha: string;
+    status: string;
+    conclusion?: string;
+    completedAt?: string;
+    output?: { title: string; summary: string };
+    detailsUrl?: string;
+    checkRunId?: number | null;
+  },
+): Promise<number | null> {
+  try {
+    const body: Record<string, unknown> = {
+      name: opts.name,
+      head_sha: opts.headSha,
+      status: opts.status,
+    };
+    if (opts.conclusion) body.conclusion = opts.conclusion;
+    if (opts.completedAt) body.completed_at = opts.completedAt;
+    if (opts.output) body.output = opts.output;
+    if (opts.detailsUrl) body.details_url = opts.detailsUrl;
+
+    const { execa } = await import("execa");
+
+    let stdout: string;
+    if (opts.checkRunId) {
+      // Update existing check run
+      const result = await execa(
+        "gh",
+        ["api", `repos/${owner}/${repo}/check-runs/${opts.checkRunId}`, "--method", "PATCH", "--input", "-"],
+        { input: JSON.stringify(body) },
+      );
+      stdout = result.stdout;
+    } else {
+      // Create new check run
+      const result = await execa(
+        "gh",
+        ["api", `repos/${owner}/${repo}/check-runs`, "--method", "POST", "--input", "-"],
+        { input: JSON.stringify(body) },
+      );
+      stdout = result.stdout;
+    }
+
+    const parsed = JSON.parse(stdout) as { id?: number };
+    return parsed.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function syncQualityGate(params: {
   pluginConfig?: Record<string, unknown>;
   repoIdentity: RepoIdentity;
@@ -173,51 +225,32 @@ export async function syncQualityGate(params: {
       checkRunId: params.run.checkRunId ?? undefined,
       phase: "quality-gate",
     }, async () => {
-      const octokit = await getGitHubInstallationOctokit(params.pluginConfig, repoIdentity.installationId);
-      if (!octokit) {
-        return { attempted: false, skippedReason: "github_app_unavailable" };
-      }
-
       const rendered = renderOutput(params.run, params.source === "polling" ? { eventName: "polling" } : undefined);
 
-      if (params.run.checkRunId) {
-        const response = await octokit.request(
-          "PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}",
-          {
-            owner: repoIdentity.owner,
-            repo: repoIdentity.repo,
-            check_run_id: params.run.checkRunId,
-            name: FABRICA_QUALITY_GATE_NAME,
-            status: rendered.status,
-            conclusion: rendered.conclusion,
-            completed_at: rendered.status === "completed" ? new Date().toISOString() : undefined,
-            output: rendered.output,
-          },
-        );
-        const nextRun = { ...params.run, checkRunId: response.data.id, updatedAt: new Date().toISOString() };
-        await params.runStore.save(nextRun);
-        params.logger?.info?.({ runId: params.run.runId, checkRunId: response.data.id }, "Updated Fabrica quality gate");
-        return { attempted: true, checkRunId: response.data.id };
-      }
-
-      const response = await octokit.request(
-        "POST /repos/{owner}/{repo}/check-runs",
+      const checkRunId = await createOrUpdateCheckRunViaGhCli(
+        repoIdentity.owner,
+        repoIdentity.repo,
         {
-          owner: repoIdentity.owner,
-          repo: repoIdentity.repo,
           name: FABRICA_QUALITY_GATE_NAME,
-          head_sha: repoIdentity.headSha,
+          headSha: repoIdentity.headSha,
           status: rendered.status,
           conclusion: rendered.conclusion,
-          completed_at: rendered.status === "completed" ? new Date().toISOString() : undefined,
+          completedAt: rendered.status === "completed" ? new Date().toISOString() : undefined,
           output: rendered.output,
-          details_url: repoIdentity.prUrl ?? undefined,
+          detailsUrl: repoIdentity.prUrl ?? undefined,
+          checkRunId: params.run.checkRunId,
         },
       );
-      const nextRun = { ...params.run, checkRunId: response.data.id, updatedAt: new Date().toISOString() };
+
+      if (checkRunId === null) {
+        return { attempted: false, skippedReason: "gh_cli_check_run_failed" };
+      }
+
+      const nextRun = { ...params.run, checkRunId, updatedAt: new Date().toISOString() };
       await params.runStore.save(nextRun);
-      params.logger?.info?.({ runId: params.run.runId, checkRunId: response.data.id }, "Created Fabrica quality gate");
-      return { attempted: true, checkRunId: response.data.id };
+      const action = params.run.checkRunId ? "Updated" : "Created";
+      params.logger?.info?.({ runId: params.run.runId, checkRunId }, `${action} Fabrica quality gate`);
+      return { attempted: true, checkRunId };
     }),
   );
 }
