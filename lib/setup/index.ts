@@ -11,7 +11,7 @@ import type { PluginRuntime } from "openclaw/plugin-sdk";
 import type { RunCommand } from "../context.js";
 import { getAllDefaultModels } from "../roles/index.js";
 import { migrateChannelBinding } from "./binding-manager.js";
-import { createAgent, resolveWorkspacePath } from "./agent.js";
+import { createAgent, ensureGenesisAgent, resolveWorkspacePath } from "./agent.js";
 import { writePluginConfig } from "./config.js";
 import { scaffoldWorkspace } from "./workspace.js";
 import { DATA_DIR } from "./migrate-layout.js";
@@ -38,6 +38,10 @@ export type SetupOpts = {
   projectExecution?: ExecutionMode;
   /** Injected runCommand for dependency injection. */
   runCommand?: RunCommand;
+  /** If true, ensure a genesis agent exists for Telegram DM bootstrap. */
+  ensureGenesis?: boolean;
+  /** Telegram forum group ID for genesis setup — main agent gets a group-specific binding. */
+  forumGroupId?: string;
 };
 
 export type SetupResult = {
@@ -74,6 +78,15 @@ export async function runSetup(opts: SetupOpts): Promise<SetupResult> {
 
   const models = buildModelConfig(opts.models);
   await writeModelsToWorkflow(workspacePath, models);
+
+  // Ensure genesis agent exists for DM bootstrap (idempotent, no-op if already created)
+  if (opts.ensureGenesis && opts.runCommand) {
+    try {
+      await ensureGenesisAgent(opts.runtime, opts.runCommand, { forumGroupId: opts.forumGroupId });
+    } catch (err) {
+      warnings.push(`genesis agent setup failed: ${(err as Error).message}`);
+    }
+  }
 
   return { agentId, agentCreated, workspacePath, models, filesWritten, warnings, bindingMigrated };
 }
