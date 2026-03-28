@@ -8,6 +8,9 @@
 /** Capability tier for model resolution. Provider-agnostic. */
 export type ModelTier = "fast" | "balanced" | "reasoning";
 
+/** Thinking effort level for subagent dispatch. */
+export type EffortLevel = "minimal" | "standard" | "deep";
+
 /** Configuration for a single worker role. */
 export type RoleConfig = {
   /** Unique role identifier (e.g., "developer", "tester", "architect"). */
@@ -30,6 +33,8 @@ export type RoleConfig = {
   sessionKeyPattern: string;
   /** Capability tier per level. Smart-selector uses this to pick best available model. */
   tiers?: Record<string, ModelTier>;
+  /** Default effort per level. Calibrates thinking depth for subagent dispatch. */
+  effort?: Record<string, EffortLevel>;
   /** Notification config per event type. */
   notifications: {
     onStart: boolean;

@@ -47,6 +47,8 @@ const ModelEntrySchema = z.union([
   }),
 ]);
 
+const EffortLevelSchema = z.enum(["minimal", "standard", "deep"]);
+
 const RoleOverrideSchema = z.union([
   z.literal(false),
   z.object({
@@ -56,6 +58,7 @@ const RoleOverrideSchema = z.union([
     models: z.record(z.string(), ModelEntrySchema).optional(),
     emoji: z.record(z.string(), z.string()).optional(),
     completionResults: z.array(z.string()).optional(),
+    effort: z.record(z.string(), EffortLevelSchema).optional(),
   }),
 ]);
 

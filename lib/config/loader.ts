@@ -170,6 +170,7 @@ function resolve(config: FabricaConfig, sourceLayers: string[], trace?: MergeTra
           emoji: reg ? { ...reg.emoji } : {},
           completionResults: reg ? [...reg.completionResults] : [],
           enabled: false,
+          effort: reg?.effort ?? {},
         };
         continue;
       }
@@ -187,6 +188,7 @@ function resolve(config: FabricaConfig, sourceLayers: string[], trace?: MergeTra
         emoji: { ...(reg?.emoji ?? {}), ...(override.emoji ?? {}) },
         completionResults: override.completionResults ?? (reg ? [...reg.completionResults] : []),
         enabled: true,
+        effort: { ...(reg?.effort ?? {}), ...(override.effort ?? {}) },
       };
     }
   }
@@ -203,6 +205,7 @@ function resolve(config: FabricaConfig, sourceLayers: string[], trace?: MergeTra
         emoji: { ...reg.emoji },
         completionResults: [...reg.completionResults],
         enabled: true,
+        effort: reg.effort ?? {},
       };
     }
   }

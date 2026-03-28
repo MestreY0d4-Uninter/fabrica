@@ -21,6 +21,7 @@ export type RoleOverride = {
   models?: Record<string, ModelEntry>;
   emoji?: Record<string, string>;
   completionResults?: string[];
+  effort?: Record<string, import("../roles/types.js").EffortLevel>;
 };
 
 /**
@@ -162,4 +163,5 @@ export type ResolvedRoleConfig = {
   emoji: Record<string, string>;
   completionResults: string[];
   enabled: boolean;
+  effort: Record<string, import("../roles/types.js").EffortLevel>;
 };
