@@ -295,15 +295,15 @@ if [[ -n "$PROJECT_SLUG" ]]; then
     echo "WARNING: Requested channel '$REQUESTED_CHANNEL_ID' is not valid for '$PROJECT_SLUG'; using '$PROJECT_CHANNEL_ID' from projects.json." >&2
   fi
 fi
-USE_DEVCLAW_TASKS=false
-if [[ -n "$PROJECT_SLUG" && -n "$PROJECT_CHANNEL_ID" ]] && genesis_openclaw_bin >/dev/null 2>&1 && genesis_openclaw_supports devclaw task; then
-  USE_DEVCLAW_TASKS=true
+USE_FABRICA_TASKS=false
+if [[ -n "$PROJECT_SLUG" && -n "$PROJECT_CHANNEL_ID" ]] && genesis_openclaw_bin >/dev/null 2>&1 && genesis_openclaw_supports fabrica task; then
+  USE_FABRICA_TASKS=true
 fi
 
 echo "Target: $OWNER/$REPO" >&2
 
 # Lock by repo+session to avoid duplicate issue creation under concurrent runs.
-CREATE_LOCK_DIR="$HOME/.openclaw/workspace/devclaw/log"
+CREATE_LOCK_DIR="$HOME/.openclaw/workspace/$FABRICA_DATA_DIR/log"
 LOCK_SAFE_KEY="$(printf '%s_%s_%s' "$OWNER" "$REPO" "$SESSION_ID" | tr -c 'A-Za-z0-9._-' '_')"
 CREATE_LOCK_FILE="$CREATE_LOCK_DIR/create-task-${LOCK_SAFE_KEY}.lock"
 mkdir -p "$CREATE_LOCK_DIR"
@@ -502,7 +502,7 @@ fi
 
 BODY="$BODY
 
-<!-- devclaw-backlog: $BACKLOG_METADATA_JSON -->"
+<!-- fabrica-backlog: $BACKLOG_METADATA_JSON -->"
 
 # Add risks if present
 RISKS="$(echo "$SPEC" | jq -r '.risks // [] | .[]')"
@@ -558,7 +558,7 @@ echo "Creating issue: '$TITLE' with labels: $LABELS" >&2
 
 ISSUE_NUMBER="0"
 ISSUE_URL=""
-if [[ "$USE_DEVCLAW_TASKS" == "true" ]]; then
+if [[ "$USE_FABRICA_TASKS" == "true" ]]; then
   echo "Creating issue via deterministic DevClaw task_create..." >&2
   BODY_FILE="$(mktemp)"
   printf '%s\n' "$BODY" > "$BODY_FILE"
@@ -570,7 +570,7 @@ if [[ "$USE_DEVCLAW_TASKS" == "true" ]]; then
     TASK_CREATE_CMD+=("${FACTORY_CHANGE_FLAG[@]}")
   fi
   TASK_CREATE_JSON="$(
-    genesis_devclaw_task_json \
+    genesis_fabrica_task_json \
       "${TASK_CREATE_CMD[@]}" \
       2>>"$GENESIS_LOG"
   )" || {
@@ -591,7 +591,7 @@ if [[ "$USE_DEVCLAW_TASKS" == "true" ]]; then
     if [[ "${#FACTORY_CHANGE_FLAG[@]}" -gt 0 ]]; then
       TASK_LABELS_CMD+=("${FACTORY_CHANGE_FLAG[@]}")
     fi
-    genesis_devclaw_task_json \
+    genesis_fabrica_task_json \
       "${TASK_LABELS_CMD[@]}" \
       >/dev/null 2>>"$GENESIS_LOG" || {
         echo "ERROR: DevClaw task labels failed" >&2
@@ -654,7 +654,7 @@ $QA_SCRIPT
 **Gates:** $(echo "$QA_CONTRACT" | jq -r '.gates // [] | join(", ")')
 **Coverage threshold:** $(echo "$QA_CONTRACT" | jq -r '.coverage_threshold // 80')%"
 
-  if [[ "$USE_DEVCLAW_TASKS" == "true" ]]; then
+  if [[ "$USE_FABRICA_TASKS" == "true" ]]; then
     echo "QA comment via DevClaw task_comment..." >&2
     QA_COMMENT_FILE="$(mktemp)"
     printf '%s\n' "$QA_COMMENT" > "$QA_COMMENT_FILE"
@@ -662,7 +662,7 @@ $QA_SCRIPT
     if [[ -n "$PROJECT_CHANNEL_ID" ]]; then
       TASK_COMMENT_QA_CMD+=(--channel-id "$PROJECT_CHANNEL_ID")
     fi
-    genesis_devclaw_task_json \
+    genesis_fabrica_task_json \
       "${TASK_COMMENT_QA_CMD[@]}" \
       >/dev/null 2>>"$GENESIS_LOG" || echo "WARNING: Failed to attach QA comment via task_comment" >&2
     rm -f "$QA_COMMENT_FILE"
@@ -731,7 +731,7 @@ $MAP_LINES
 $IMPACT_LINES
 $LIST_BLOCKS"
 
-  if [[ "$USE_DEVCLAW_TASKS" == "true" ]]; then
+  if [[ "$USE_FABRICA_TASKS" == "true" ]]; then
     echo "Map/impact comment via DevClaw task_comment..." >&2
     IMPACT_COMMENT_FILE="$(mktemp)"
     printf '%s\n' "$IMPACT_COMMENT" > "$IMPACT_COMMENT_FILE"
@@ -739,7 +739,7 @@ $LIST_BLOCKS"
     if [[ -n "$PROJECT_CHANNEL_ID" ]]; then
       TASK_COMMENT_IMPACT_CMD+=(--channel-id "$PROJECT_CHANNEL_ID")
     fi
-    genesis_devclaw_task_json \
+    genesis_fabrica_task_json \
       "${TASK_COMMENT_IMPACT_CMD[@]}" \
       >/dev/null 2>>"$GENESIS_LOG" || echo "WARNING: Failed to attach impact/map comment via task_comment" >&2
     rm -f "$IMPACT_COMMENT_FILE"

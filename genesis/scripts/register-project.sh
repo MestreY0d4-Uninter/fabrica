@@ -66,14 +66,14 @@ REPO_REMOTE="https://github.com/$OWNER_REPO.git"
 
 echo "Registering project: $SLUG (stack=$STACK)" >&2
 
-PROJECTS_JSON="$WORKSPACE/devclaw/projects.json"
-USE_DEVCLAW_PROJECT_REGISTER_CLI=false
-USE_DEVCLAW_PROJECT_LABELS_CLI=false
-if genesis_openclaw_supports devclaw project register; then
-  USE_DEVCLAW_PROJECT_REGISTER_CLI=true
+PROJECTS_JSON="$WORKSPACE/fabrica/projects.json"
+USE_FABRICA_PROJECT_REGISTER_CLI=false
+USE_FABRICA_PROJECT_LABELS_CLI=false
+if genesis_openclaw_supports fabrica project register; then
+  USE_FABRICA_PROJECT_REGISTER_CLI=true
 fi
-if genesis_openclaw_supports devclaw project ensure-labels; then
-  USE_DEVCLAW_PROJECT_LABELS_CLI=true
+if genesis_openclaw_supports fabrica project ensure-labels; then
+  USE_FABRICA_PROJECT_LABELS_CLI=true
 fi
 
 # Shared-channel policy guard: avoid silent collisions
@@ -114,9 +114,9 @@ if jq -e --arg slug "$SLUG" '.projects[$slug]' "$PROJECTS_JSON" &>/dev/null; the
     ' "$PROJECTS_JSON" 2>/dev/null || echo "false")"
     if [[ "$PROJECT_HAS_CHANNEL" != "true" ]]; then
       CHANNEL_LINKED=false
-      if genesis_openclaw_supports devclaw channel register; then
+      if genesis_openclaw_supports fabrica channel register; then
         echo "Linking channelId $TELEGRAM_CHAT to existing project $SLUG..." >&2
-        if genesis_openclaw_exec devclaw channel register \
+        if genesis_openclaw_exec fabrica channel register \
           --project "$SLUG" \
           --channel-id "$TELEGRAM_CHAT" \
           --type "telegram" >/dev/null 2>>"$GENESIS_LOG"; then
@@ -154,9 +154,9 @@ else
   if [[ -z "$TELEGRAM_CHAT" ]]; then
     echo "No TELEGRAM_CHAT_ID available — skipping registration until a channel is linked." >&2
     PROJECT_REGISTRATION_PENDING="missing_channel"
-  elif [[ "$USE_DEVCLAW_PROJECT_REGISTER_CLI" == "true" ]]; then
+  elif [[ "$USE_FABRICA_PROJECT_REGISTER_CLI" == "true" ]]; then
     echo "Registering project via deterministic DevClaw project_register..." >&2
-    genesis_openclaw_exec devclaw project register \
+    genesis_openclaw_exec fabrica project register \
       --name "$SLUG" \
       --repo "$REPO_LOCAL" \
       --base-branch "main" \
@@ -284,7 +284,7 @@ if [[ "$PROJECT_REGISTERED" != "true" ]]; then
 fi
 
 # --- Create workflow.yaml ---
-WORKFLOW_DIR="$WORKSPACE/devclaw/projects/$SLUG"
+WORKFLOW_DIR="$WORKSPACE/fabrica/projects/$SLUG"
 mkdir -p "$WORKFLOW_DIR"
 
 if [[ -f "$WORKFLOW_DIR/workflow.yaml" ]]; then
@@ -310,8 +310,8 @@ fi
 # --- Copy role prompts ---
 ROLES_SRC="$WORKSPACE/projects/roles/devclaw-automation"
 ROLES_DEFAULT="$WORKSPACE/projects/roles/default"
-ROLES_WORKSPACE_DEFAULT="$WORKSPACE/devclaw/prompts"
-ROLES_DST="$WORKSPACE/devclaw/projects/$SLUG/prompts"
+ROLES_WORKSPACE_DEFAULT="$WORKSPACE/fabrica/prompts"
+ROLES_DST="$WORKSPACE/fabrica/projects/$SLUG/prompts"
 mkdir -p "$ROLES_DST"
 
 for ROLE in developer reviewer tester; do
@@ -350,8 +350,8 @@ if [[ -f "$LABELS_JSON" ]]; then
   fi
 
   echo "Ensuring labels in $OWNER_REPO..." >&2
-  if [[ "$USE_DEVCLAW_PROJECT_LABELS_CLI" == "true" ]]; then
-    ENSURE_LABELS_CMD=(devclaw project ensure-labels --project "$SLUG" --labels-file "$LABELS_JSON")
+  if [[ "$USE_FABRICA_PROJECT_LABELS_CLI" == "true" ]]; then
+    ENSURE_LABELS_CMD=(fabrica project ensure-labels --project "$SLUG" --labels-file "$LABELS_JSON")
     if [[ -n "$TELEGRAM_CHAT" ]]; then
       ENSURE_LABELS_CMD+=(--notify-channel-id "$TELEGRAM_CHAT")
     fi

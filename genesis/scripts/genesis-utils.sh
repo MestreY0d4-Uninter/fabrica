@@ -16,6 +16,8 @@ _GENESIS_UTILS_LOADED=1
 
 set -euo pipefail
 
+FABRICA_DATA_DIR="fabrica"
+
 # === Category A: Stateless Parsing & Validation ===
 
 genesis_trim() {
@@ -135,7 +137,7 @@ genesis_extract_answer_value() {
 
 genesis_find_project_slug_by_repo() {
   local raw_repo="${1:-}"
-  local projects_file="${2:-$HOME/.openclaw/workspace/devclaw/projects.json}"
+  local projects_file="${2:-$HOME/.openclaw/workspace/$FABRICA_DATA_DIR/projects.json}"
   local wanted line slug remote remote_key
   local -a matches=()
   wanted="$(genesis_repo_key "$raw_repo" 2>/dev/null || true)"
@@ -161,7 +163,7 @@ genesis_find_project_slug_by_repo() {
 
 genesis_project_primary_channel_id() {
   local slug="${1:-}"
-  local projects_file="${2:-$HOME/.openclaw/workspace/devclaw/projects.json}"
+  local projects_file="${2:-$HOME/.openclaw/workspace/$FABRICA_DATA_DIR/projects.json}"
   [[ -n "$slug" ]] || return 1
   [[ -f "$projects_file" ]] || return 1
   jq -r --arg slug "$slug" '.projects[$slug].channels // [] | map(select((.channelId // "") != "")) | .[0].channelId // empty' "$projects_file" 2>/dev/null
@@ -169,14 +171,14 @@ genesis_project_primary_channel_id() {
 
 genesis_project_exists() {
   local slug="${1:-}"
-  local projects_file="${2:-$HOME/.openclaw/workspace/devclaw/projects.json}"
+  local projects_file="${2:-$HOME/.openclaw/workspace/$FABRICA_DATA_DIR/projects.json}"
   [[ -n "$slug" && -f "$projects_file" ]] || return 1
   jq -e --arg slug "$slug" '.projects[$slug] != null' "$projects_file" >/dev/null 2>&1
 }
 
 genesis_project_remote() {
   local slug="${1:-}"
-  local projects_file="${2:-$HOME/.openclaw/workspace/devclaw/projects.json}"
+  local projects_file="${2:-$HOME/.openclaw/workspace/$FABRICA_DATA_DIR/projects.json}"
   [[ -n "$slug" && -f "$projects_file" ]] || return 1
   jq -r --arg slug "$slug" '.projects[$slug].repoRemote // .projects[$slug].remote // .projects[$slug].remoteUrl // empty' "$projects_file" 2>/dev/null
 }
@@ -184,7 +186,7 @@ genesis_project_remote() {
 genesis_project_channel_id() {
   local slug="${1:-}"
   local requested_channel_id="${2:-}"
-  local projects_file="${3:-$HOME/.openclaw/workspace/devclaw/projects.json}"
+  local projects_file="${3:-$HOME/.openclaw/workspace/$FABRICA_DATA_DIR/projects.json}"
   local requested
 
   requested="$(genesis_trim "$requested_channel_id")"
@@ -212,7 +214,7 @@ genesis_project_channel_id() {
 
 genesis_project_resolve_ref() {
   local ref="${1:-}"
-  local projects_file="${2:-$HOME/.openclaw/workspace/devclaw/projects.json}"
+  local projects_file="${2:-$HOME/.openclaw/workspace/$FABRICA_DATA_DIR/projects.json}"
   local normalized
 
   normalized="$(genesis_trim "$ref")"
@@ -265,14 +267,14 @@ genesis_project_resolve_ref() {
 
 genesis_project_kind() {
   local slug="${1:-}"
-  local projects_file="${2:-$HOME/.openclaw/workspace/devclaw/projects.json}"
+  local projects_file="${2:-$HOME/.openclaw/workspace/$FABRICA_DATA_DIR/projects.json}"
   [[ -n "$slug" && -f "$projects_file" ]] || return 1
   jq -r --arg slug "$slug" '.projects[$slug].projectKind // "implementation"' "$projects_file" 2>/dev/null
 }
 
 genesis_project_archived() {
   local slug="${1:-}"
-  local projects_file="${2:-$HOME/.openclaw/workspace/devclaw/projects.json}"
+  local projects_file="${2:-$HOME/.openclaw/workspace/$FABRICA_DATA_DIR/projects.json}"
   [[ -n "$slug" && -f "$projects_file" ]] || return 1
   jq -r --arg slug "$slug" '
     (
@@ -285,7 +287,7 @@ genesis_project_archived() {
 
 genesis_project_default_notify_channel() {
   local slug="${1:-}"
-  local projects_file="${2:-$HOME/.openclaw/workspace/devclaw/projects.json}"
+  local projects_file="${2:-$HOME/.openclaw/workspace/$FABRICA_DATA_DIR/projects.json}"
   [[ -n "$slug" && -f "$projects_file" ]] || return 1
   jq -r --arg slug "$slug" '.projects[$slug].defaultNotifyChannel // empty' "$projects_file" 2>/dev/null
 }
@@ -333,7 +335,7 @@ genesis_repo_target_candidate() {
 
 genesis_resolve_canonical_target() {
   local input_json="${1:-}"
-  local projects_file="${2:-$HOME/.openclaw/workspace/devclaw/projects.json}"
+  local projects_file="${2:-$HOME/.openclaw/workspace/$FABRICA_DATA_DIR/projects.json}"
   local explicit_repo candidate_slug repo_target_raw repo_target_candidate
   local resolved_repo="" resolved_slug="" resolved_name="" source=""
   local project_ref resolved_remote owner_repo
@@ -560,21 +562,21 @@ genesis_openclaw_supports() {
   return 0
 }
 
-genesis_devclaw_task_json() {
+genesis_fabrica_task_json() {
   local attempts delay try status
   attempts="$(genesis_openclaw_retries)"
   delay="$(genesis_openclaw_retry_delay_sec)"
   try=1
 
   while true; do
-    if genesis_openclaw_exec devclaw task "$@" --json; then
+    if genesis_openclaw_exec fabrica task "$@" --json; then
       return 0
     fi
     status=$?
     if [[ "$try" -ge "$attempts" ]]; then
       return "$status"
     fi
-    echo "WARN: DevClaw task call failed (attempt $try/$attempts, exit=$status). Retrying in ${delay}s..." >&2
+    echo "WARN: Fabrica task call failed (attempt $try/$attempts, exit=$status). Retrying in ${delay}s..." >&2
     sleep "$delay"
     try=$((try + 1))
   done

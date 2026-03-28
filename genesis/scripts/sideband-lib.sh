@@ -20,7 +20,7 @@ source "$_SIDEBAND_LIB_DIR/genesis-utils.sh"
 # === Category C: Sideband IPC Protocol (Secure Envelope Exchange) ===
 
 genesis_sideband_dir() {
-  local dir="${GENESIS_SIDEBAND_DIR:-$HOME/.openclaw/workspace/devclaw/sideband}"
+  local dir="${GENESIS_SIDEBAND_DIR:-$HOME/.openclaw/workspace/fabrica/sideband}"
 
   if [[ -L "$dir" ]]; then
     echo "ERROR: Sideband dir must not be a symlink: $dir" >&2

@@ -173,9 +173,9 @@ if [[ -n "$PROJECT_SLUG" ]]; then
     echo "WARNING: Requested channel '$REQUESTED_CHANNEL_ID' is not valid for '$PROJECT_SLUG'; using '$PROJECT_CHANNEL_ID' from projects.json." >&2
   fi
 fi
-USE_DEVCLAW_TASKS=false
-if [[ -n "$PROJECT_SLUG" && -n "$PROJECT_CHANNEL_ID" ]] && genesis_openclaw_bin >/dev/null 2>&1 && genesis_openclaw_supports devclaw task; then
-  USE_DEVCLAW_TASKS=true
+USE_FABRICA_TASKS=false
+if [[ -n "$PROJECT_SLUG" && -n "$PROJECT_CHANNEL_ID" ]] && genesis_openclaw_bin >/dev/null 2>&1 && genesis_openclaw_supports fabrica task; then
+  USE_FABRICA_TASKS=true
 fi
 
 if [[ ! -f "$TRIAGE_MATRIX" ]]; then
@@ -362,7 +362,7 @@ fi
 
 echo "Applying labels to issue #$ISSUE_NUMBER: $ALL_LABELS" >&2
 
-if [[ "$USE_DEVCLAW_TASKS" == "true" ]]; then
+if [[ "$USE_FABRICA_TASKS" == "true" ]]; then
   TASK_LABELS_CMD=(labels --project "$PROJECT_SLUG" --issue-id "$ISSUE_NUMBER" --add "$ALL_LABELS")
   if [[ -n "$PROJECT_CHANNEL_ID" ]]; then
     TASK_LABELS_CMD+=(--channel-id "$PROJECT_CHANNEL_ID")
@@ -370,7 +370,7 @@ if [[ "$USE_DEVCLAW_TASKS" == "true" ]]; then
   if [[ "$FACTORY_CHANGE" == "true" ]]; then
     TASK_LABELS_CMD+=(--factory-change)
   fi
-  if ! genesis_devclaw_task_json "${TASK_LABELS_CMD[@]}" >/dev/null 2>>"$GENESIS_LOG"; then
+  if ! genesis_fabrica_task_json "${TASK_LABELS_CMD[@]}" >/dev/null 2>>"$GENESIS_LOG"; then
     READY_FOR_DISPATCH=false
     TRIAGE_ERRORS+=("apply_labels_failed")
   fi
@@ -391,14 +391,14 @@ if [[ "$READY_FOR_DISPATCH" != "true" ]]; then
 The issue stayed in **Planning** because required fields are missing:
 $(printf '%s\n' "${TRIAGE_ERRORS[@]}" | sed 's/^/- /')
 "
-  if [[ "$USE_DEVCLAW_TASKS" == "true" ]]; then
+  if [[ "$USE_FABRICA_TASKS" == "true" ]]; then
     DOR_COMMENT_FILE="$(mktemp)"
     printf '%s\n' "$DOR_COMMENT" > "$DOR_COMMENT_FILE"
     TASK_DOR_CMD=(comment --project "$PROJECT_SLUG" --issue-id "$ISSUE_NUMBER" --body-file "$DOR_COMMENT_FILE")
     if [[ -n "$PROJECT_CHANNEL_ID" ]]; then
       TASK_DOR_CMD+=(--channel-id "$PROJECT_CHANNEL_ID")
     fi
-    genesis_devclaw_task_json "${TASK_DOR_CMD[@]}" >/dev/null 2>>"$GENESIS_LOG" || true
+    genesis_fabrica_task_json "${TASK_DOR_CMD[@]}" >/dev/null 2>>"$GENESIS_LOG" || true
     rm -f "$DOR_COMMENT_FILE"
   else
     gh issue comment "$ISSUE_NUMBER" --repo "$OWNER_REPO" --body "$DOR_COMMENT" >/dev/null 2>&1 || true
@@ -419,7 +419,7 @@ if [[ "$TARGET_QUEUE_LABEL" == "To Research" && "$LEVEL" == "medior" ]]; then
   LEVEL="junior"
 fi
 
-if [[ "$READY_FOR_DISPATCH" == "true" && "$TARGET_QUEUE_LABEL" == "To Do" && "$USE_DEVCLAW_TASKS" == "true" ]]; then
+if [[ "$READY_FOR_DISPATCH" == "true" && "$TARGET_QUEUE_LABEL" == "To Do" && "$USE_FABRICA_TASKS" == "true" ]]; then
   echo "Dispatching via deterministic DevClaw task_start (Planning → To Do, level=$LEVEL)..." >&2
   TASK_START_CMD=(start --project "$PROJECT_SLUG" --issue-id "$ISSUE_NUMBER" --level "$LEVEL")
   if [[ -n "$PROJECT_CHANNEL_ID" ]]; then
@@ -428,7 +428,7 @@ if [[ "$READY_FOR_DISPATCH" == "true" && "$TARGET_QUEUE_LABEL" == "To Do" && "$U
   if [[ "$FACTORY_CHANGE" == "true" ]]; then
     TASK_START_CMD+=(--factory-change)
   fi
-  if ! genesis_devclaw_task_json "${TASK_START_CMD[@]}" >/dev/null 2>>"$GENESIS_LOG"; then
+  if ! genesis_fabrica_task_json "${TASK_START_CMD[@]}" >/dev/null 2>>"$GENESIS_LOG"; then
     READY_FOR_DISPATCH=false
     TRIAGE_ERRORS+=("task_start_failed")
   else
@@ -436,7 +436,7 @@ if [[ "$READY_FOR_DISPATCH" == "true" && "$TARGET_QUEUE_LABEL" == "To Do" && "$U
     LEVEL_LABEL_APPLIED=true
     DISPATCH_STAGE_APPLIED=true
   fi
-elif [[ "$READY_FOR_DISPATCH" == "true" && "$USE_DEVCLAW_TASKS" == "true" ]]; then
+elif [[ "$READY_FOR_DISPATCH" == "true" && "$USE_FABRICA_TASKS" == "true" ]]; then
   echo "Routing deterministically via DevClaw task route (Planning → $TARGET_QUEUE_LABEL, level=$LEVEL)..." >&2
   TASK_ROUTE_CMD=(route --project "$PROJECT_SLUG" --issue-id "$ISSUE_NUMBER" --to-label "$TARGET_QUEUE_LABEL")
   if [[ -n "$PROJECT_CHANNEL_ID" ]]; then
@@ -448,7 +448,7 @@ elif [[ "$READY_FOR_DISPATCH" == "true" && "$USE_DEVCLAW_TASKS" == "true" ]]; th
   if [[ "$FACTORY_CHANGE" == "true" ]]; then
     TASK_ROUTE_CMD+=(--factory-change)
   fi
-  if ! genesis_devclaw_task_json "${TASK_ROUTE_CMD[@]}" >/dev/null 2>>"$GENESIS_LOG"; then
+  if ! genesis_fabrica_task_json "${TASK_ROUTE_CMD[@]}" >/dev/null 2>>"$GENESIS_LOG"; then
     READY_FOR_DISPATCH=false
     TRIAGE_ERRORS+=("task_route_failed")
   else
@@ -502,7 +502,7 @@ else
 fi
 
 if [[ "$READY_FOR_DISPATCH" == "true" ]]; then
-  if [[ "$USE_DEVCLAW_TASKS" == "true" ]]; then
+  if [[ "$USE_FABRICA_TASKS" == "true" ]]; then
     TASK_CLEAR_NEEDS_HUMAN_CMD=(labels --project "$PROJECT_SLUG" --issue-id "$ISSUE_NUMBER" --remove "needs-human")
     if [[ -n "$PROJECT_CHANNEL_ID" ]]; then
       TASK_CLEAR_NEEDS_HUMAN_CMD+=(--channel-id "$PROJECT_CHANNEL_ID")
@@ -510,14 +510,14 @@ if [[ "$READY_FOR_DISPATCH" == "true" ]]; then
     if [[ "$FACTORY_CHANGE" == "true" ]]; then
       TASK_CLEAR_NEEDS_HUMAN_CMD+=(--factory-change)
     fi
-    genesis_devclaw_task_json "${TASK_CLEAR_NEEDS_HUMAN_CMD[@]}" >/dev/null 2>>"$GENESIS_LOG" || true
+    genesis_fabrica_task_json "${TASK_CLEAR_NEEDS_HUMAN_CMD[@]}" >/dev/null 2>>"$GENESIS_LOG" || true
   else
     gh issue edit "$ISSUE_NUMBER" --repo "$OWNER_REPO" --remove-label "needs-human" >/dev/null 2>&1 || true
   fi
   echo "Issue #$ISSUE_NUMBER dispatched to $TARGET_QUEUE_LABEL (level=$LEVEL)" >&2
 else
   echo "Issue #$ISSUE_NUMBER NOT dispatched; triage failed closed: ${TRIAGE_ERRORS[*]}" >&2
-  if [[ "$USE_DEVCLAW_TASKS" == "true" ]]; then
+  if [[ "$USE_FABRICA_TASKS" == "true" ]]; then
     TASK_SET_NEEDS_HUMAN_CMD=(labels --project "$PROJECT_SLUG" --issue-id "$ISSUE_NUMBER" --add "needs-human")
     if [[ -n "$PROJECT_CHANNEL_ID" ]]; then
       TASK_SET_NEEDS_HUMAN_CMD+=(--channel-id "$PROJECT_CHANNEL_ID")
@@ -525,7 +525,7 @@ else
     if [[ "$FACTORY_CHANGE" == "true" ]]; then
       TASK_SET_NEEDS_HUMAN_CMD+=(--factory-change)
     fi
-    if ! genesis_devclaw_task_json "${TASK_SET_NEEDS_HUMAN_CMD[@]}" >/dev/null 2>>"$GENESIS_LOG"; then
+    if ! genesis_fabrica_task_json "${TASK_SET_NEEDS_HUMAN_CMD[@]}" >/dev/null 2>>"$GENESIS_LOG"; then
       TRIAGE_ERRORS+=("mark_needs_human_failed")
     fi
   elif ! gh issue edit "$ISSUE_NUMBER" --repo "$OWNER_REPO" --add-label "needs-human" >/dev/null 2>&1; then
