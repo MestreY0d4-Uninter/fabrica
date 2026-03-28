@@ -19,7 +19,6 @@ export type FabricaManifest = {
   };
   layout: {
     primaryDataDir: string;
-    legacyDataDir: string;
     versionFile: string;
   };
 };
