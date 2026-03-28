@@ -4,7 +4,7 @@ set -euo pipefail
 # Step 9: Create GitHub issue from session state
 # Input: stdin JSON (complete session state)
 # Output: JSON with issue data to stdout
-# Requires: openclaw CLI + DevClaw plugin (deterministic path),
+# Requires: openclaw CLI + Fabrica plugin (deterministic path),
 #           gh CLI authenticated (idempotency checks/fallback),
 #           GENESIS_REPO_URL in env or metadata
 
@@ -559,7 +559,7 @@ echo "Creating issue: '$TITLE' with labels: $LABELS" >&2
 ISSUE_NUMBER="0"
 ISSUE_URL=""
 if [[ "$USE_FABRICA_TASKS" == "true" ]]; then
-  echo "Creating issue via deterministic DevClaw task_create..." >&2
+  echo "Creating issue via deterministic Fabrica task_create..." >&2
   BODY_FILE="$(mktemp)"
   printf '%s\n' "$BODY" > "$BODY_FILE"
   TASK_CREATE_CMD=(create --project "$PROJECT_SLUG" --title "$TITLE" --body-file "$BODY_FILE")
@@ -575,7 +575,7 @@ if [[ "$USE_FABRICA_TASKS" == "true" ]]; then
       2>>"$GENESIS_LOG"
   )" || {
     rm -f "$BODY_FILE"
-    echo "ERROR: DevClaw task_create failed" >&2
+    echo "ERROR: Fabrica task_create failed" >&2
     exit 1
   }
   rm -f "$BODY_FILE"
@@ -583,7 +583,7 @@ if [[ "$USE_FABRICA_TASKS" == "true" ]]; then
   ISSUE_NUMBER="$(echo "$TASK_CREATE_JSON" | jq -r '.issue.id // 0' 2>/dev/null || echo 0)"
   ISSUE_URL="$(echo "$TASK_CREATE_JSON" | jq -r '.issue.url // ""' 2>/dev/null || echo "")"
   if [[ "$ISSUE_NUMBER" != "0" && -n "$EXTRA_LABELS" ]]; then
-    echo "Applying extra labels via deterministic DevClaw task labels: $EXTRA_LABELS" >&2
+    echo "Applying extra labels via deterministic Fabrica task labels: $EXTRA_LABELS" >&2
     TASK_LABELS_CMD=(labels --project "$PROJECT_SLUG" --issue-id "$ISSUE_NUMBER" --add "$EXTRA_LABELS")
     if [[ -n "$PROJECT_CHANNEL_ID" ]]; then
       TASK_LABELS_CMD+=(--channel-id "$PROJECT_CHANNEL_ID")
@@ -594,12 +594,12 @@ if [[ "$USE_FABRICA_TASKS" == "true" ]]; then
     genesis_fabrica_task_json \
       "${TASK_LABELS_CMD[@]}" \
       >/dev/null 2>>"$GENESIS_LOG" || {
-        echo "ERROR: DevClaw task labels failed" >&2
+        echo "ERROR: Fabrica task labels failed" >&2
         exit 1
       }
   fi
 else
-  echo "DevClaw deterministic mode unavailable (missing project slug/channel or openclaw bin); falling back to gh issue create." >&2
+  echo "Fabrica deterministic mode unavailable (missing project slug/channel or openclaw bin); falling back to gh issue create." >&2
   gh label create "$DELIVERY_LABEL" --repo "$OWNER/$REPO" --color 5319E7 --force >/dev/null 2>>"$GENESIS_LOG" || true
   gh label create "$BACKLOG_LABEL" --repo "$OWNER/$REPO" --color BFD4F2 --force >/dev/null 2>>"$GENESIS_LOG" || true
   if [[ "$TYPE" == "research" ]]; then
@@ -655,7 +655,7 @@ $QA_SCRIPT
 **Coverage threshold:** $(echo "$QA_CONTRACT" | jq -r '.coverage_threshold // 80')%"
 
   if [[ "$USE_FABRICA_TASKS" == "true" ]]; then
-    echo "QA comment via DevClaw task_comment..." >&2
+    echo "QA comment via Fabrica task_comment..." >&2
     QA_COMMENT_FILE="$(mktemp)"
     printf '%s\n' "$QA_COMMENT" > "$QA_COMMENT_FILE"
     TASK_COMMENT_QA_CMD=(comment --project "$PROJECT_SLUG" --issue-id "$ISSUE_NUMBER" --body-file "$QA_COMMENT_FILE")
@@ -732,7 +732,7 @@ $IMPACT_LINES
 $LIST_BLOCKS"
 
   if [[ "$USE_FABRICA_TASKS" == "true" ]]; then
-    echo "Map/impact comment via DevClaw task_comment..." >&2
+    echo "Map/impact comment via Fabrica task_comment..." >&2
     IMPACT_COMMENT_FILE="$(mktemp)"
     printf '%s\n' "$IMPACT_COMMENT" > "$IMPACT_COMMENT_FILE"
     TASK_COMMENT_IMPACT_CMD=(comment --project "$PROJECT_SLUG" --issue-id "$ISSUE_NUMBER" --body-file "$IMPACT_COMMENT_FILE")

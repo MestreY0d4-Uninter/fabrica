@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Step 10: Triage — prioritize and dispatch issue to DevClaw pipeline
+# Step 10: Triage — prioritize and dispatch issue to Fabrica pipeline
 # Input: stdin JSON (issue data + spec)
 # Output: JSON with triage decision to stdout
-# Applies labels + workflow transitions to dispatch DevClaw safely
+# Applies labels + workflow transitions to dispatch Fabrica safely
 
 GENESIS_LOG="${GENESIS_LOG:-$HOME/.openclaw/workspace/logs/genesis.log}"
 mkdir -p "$(dirname "$GENESIS_LOG")"
@@ -420,7 +420,7 @@ if [[ "$TARGET_QUEUE_LABEL" == "To Research" && "$LEVEL" == "medior" ]]; then
 fi
 
 if [[ "$READY_FOR_DISPATCH" == "true" && "$TARGET_QUEUE_LABEL" == "To Do" && "$USE_FABRICA_TASKS" == "true" ]]; then
-  echo "Dispatching via deterministic DevClaw task_start (Planning → To Do, level=$LEVEL)..." >&2
+  echo "Dispatching via deterministic Fabrica task_start (Planning → To Do, level=$LEVEL)..." >&2
   TASK_START_CMD=(start --project "$PROJECT_SLUG" --issue-id "$ISSUE_NUMBER" --level "$LEVEL")
   if [[ -n "$PROJECT_CHANNEL_ID" ]]; then
     TASK_START_CMD+=(--channel-id "$PROJECT_CHANNEL_ID")
@@ -437,7 +437,7 @@ if [[ "$READY_FOR_DISPATCH" == "true" && "$TARGET_QUEUE_LABEL" == "To Do" && "$U
     DISPATCH_STAGE_APPLIED=true
   fi
 elif [[ "$READY_FOR_DISPATCH" == "true" && "$USE_FABRICA_TASKS" == "true" ]]; then
-  echo "Routing deterministically via DevClaw task route (Planning → $TARGET_QUEUE_LABEL, level=$LEVEL)..." >&2
+  echo "Routing deterministically via Fabrica task route (Planning → $TARGET_QUEUE_LABEL, level=$LEVEL)..." >&2
   TASK_ROUTE_CMD=(route --project "$PROJECT_SLUG" --issue-id "$ISSUE_NUMBER" --to-label "$TARGET_QUEUE_LABEL")
   if [[ -n "$PROJECT_CHANNEL_ID" ]]; then
     TASK_ROUTE_CMD+=(--channel-id "$PROJECT_CHANNEL_ID")

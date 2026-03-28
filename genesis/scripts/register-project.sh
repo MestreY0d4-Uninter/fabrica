@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Step: Register scaffolded project in DevClaw
+# Step: Register scaffolded project in Fabrica
 # Input: stdin JSON (from scaffold.stdout)
 # Output: JSON with registration data + sideband file
 # Creates: projects.json entry, workflow.yaml, role prompts, repository labels
@@ -155,7 +155,7 @@ else
     echo "No TELEGRAM_CHAT_ID available — skipping registration until a channel is linked." >&2
     PROJECT_REGISTRATION_PENDING="missing_channel"
   elif [[ "$USE_FABRICA_PROJECT_REGISTER_CLI" == "true" ]]; then
-    echo "Registering project via deterministic DevClaw project_register..." >&2
+    echo "Registering project via deterministic Fabrica project_register..." >&2
     genesis_openclaw_exec fabrica project register \
       --name "$SLUG" \
       --repo "$REPO_LOCAL" \
@@ -168,7 +168,7 @@ else
       --json >/dev/null 2>>"$GENESIS_LOG"
     PROJECT_REGISTERED=true
   else
-    echo "DevClaw project CLI unavailable/incompatible — using local fallback registration." >&2
+    echo "Fabrica project CLI unavailable/incompatible — using local fallback registration." >&2
     echo "Adding $SLUG to projects.json..." >&2
 
     # Build the new project entry
@@ -357,7 +357,7 @@ if [[ -f "$LABELS_JSON" ]]; then
     fi
     genesis_openclaw_exec "${ENSURE_LABELS_CMD[@]}" --json >/dev/null 2>>"$GENESIS_LOG"
   else
-    echo "DevClaw ensure-labels CLI unavailable/incompatible — falling back to gh for custom repo labels." >&2
+    echo "Fabrica ensure-labels CLI unavailable/incompatible — falling back to gh for custom repo labels." >&2
     LABEL_COUNT=0
     LABEL_TOTAL="$(jq 'length' "$LABELS_JSON")"
     while IFS= read -r label_line; do

@@ -17,7 +17,7 @@ genesis_normalize_stack_hint() {
   local hint="${1:-}"
   hint="$(echo "$hint" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
   case "$hint" in
-    nextjs|express|node-cli|fastapi|flask|django|python-cli)
+    nextjs|node-cli|express|fastapi|flask|django|python-cli)
       printf '%s\n' "$hint"
       ;;
     *)
