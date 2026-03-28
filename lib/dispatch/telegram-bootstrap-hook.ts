@@ -812,6 +812,10 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
   });
   } // end if (!hasGenesis)
 
+  // When genesis agent exists, it handles DM bootstrapping exclusively —
+  // do NOT process message_received here to avoid double-processing.
+  if (hasGenesis) return;
+
   api.on("message_received", async (event, eventCtx) => {
     if (eventCtx.channelId !== "telegram") return;
     const telegramConfig = readFabricaTelegramConfig(ctx.pluginConfig);

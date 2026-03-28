@@ -48,13 +48,13 @@ describe("registerTelegramBootstrapHook — conditional suppress", () => {
     expect(api._onCalls).toContain("message_received");
   });
 
-  it("registers ONLY message_received when genesis agent exists", () => {
+  it("registers NO hooks when genesis agent exists (genesis handles DMs)", () => {
     const api = makeApi([{ id: "main" }, { id: "genesis" }]);
 
     registerTelegramBootstrapHook(api as any, makeCtx() as any);
 
     expect(api._onCalls).not.toContain("before_prompt_build");
     expect(api._onCalls).not.toContain("message_sending");
-    expect(api._onCalls).toContain("message_received");
+    expect(api._onCalls).not.toContain("message_received");
   });
 });
