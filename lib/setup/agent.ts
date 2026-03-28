@@ -87,7 +87,11 @@ export async function ensureGenesisAgent(
   const defaultWorkspace = (config as any).agents?.defaults?.workspace;
   const args = ["openclaw", "agents", "add", "genesis", "--non-interactive", "--bind", "telegram"];
   if (defaultWorkspace) args.push("--workspace", defaultWorkspace);
-  await runCommand(args, { timeoutMs: 30_000 });
+  try {
+    await runCommand(args, { timeoutMs: 30_000 });
+  } catch (err) {
+    throw new Error(`Failed to create genesis agent: ${(err as Error).message}`);
+  }
 
   // Reload config after CLI modified it on disk
   const updatedConfig = runtime.config.loadConfig();
