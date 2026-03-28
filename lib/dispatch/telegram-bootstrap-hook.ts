@@ -97,6 +97,7 @@ function normalizeUserResponse(text: string): string {
 function detectStackHint(text: string): string | undefined {
   const lower = text.toLowerCase();
   if (/\b(nextjs|next\.js)\b/.test(lower)) return "nextjs";
+  if (/\bnode\.?js\b/.test(lower)) return "node-cli";
   if (/\b(node-cli|typescript cli|ts cli|cli em typescript|typescript command line|typescript terminal cli)\b/.test(lower)) return "node-cli";
   if (/\bexpress\b/.test(lower)) return "express";
   if (/\b(fastapi)\b/.test(lower)) return "fastapi";
@@ -256,7 +257,11 @@ function parseClarificationResponse(text: string, session: TelegramBootstrapSess
   // Try direct stack hint detection on the whole message
   const detectedStack = detectStackHint(text);
   if (detectedStack) {
-    return { recognized: true, stackHint: detectedStack };
+    // Also try to extract inline project name (e.g. "Node.js, name it disk-usage-cli")
+    const projectNameFromField = parseField(text, ["project name", "nome do projeto", "nome", "name"]);
+    const nameItMatch = !projectNameFromField ? text.match(/(?:name|call|chamar?)\s+(?:it\s+)?([\w-]{2,64})/i) : null;
+    const inlineName = projectNameFromField ?? (nameItMatch ? (nameItMatch[1].toLowerCase().replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-") || undefined) : undefined);
+    return { recognized: true, stackHint: detectedStack, projectName: inlineName };
   }
   // Detect bare language names as stack hints
   const lower = normalizeUserResponse(text);

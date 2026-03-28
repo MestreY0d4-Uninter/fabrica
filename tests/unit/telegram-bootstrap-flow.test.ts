@@ -469,6 +469,34 @@ describe("telegram bootstrap clarification flow", () => {
     expect(payload.metadata.project_name).toBeTruthy();
   });
 
+  it("recognizes 'Node.js, and name it disk-usage-cli' as stack+name and proceeds to pipeline", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: { channel_id: "-1003709213169", message_thread_id: 910, project_slug: "disk-usage-cli" },
+      },
+    });
+
+    // Step 1: trigger stack_and_name clarification
+    await handler?.(
+      { content: "Crie um projeto CLI sem especificar stack", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(2); // ack + clarification
+    sendMessageTelegram.mockClear();
+
+    // Step 2: user replies with inline stack + project name
+    await handler?.(
+      { content: "Node.js, and name it disk-usage-cli", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    const pipelinePayload = mockRunPipeline.mock.calls[0]?.[0];
+    expect(pipelinePayload.metadata.stack_hint).toBe("node-cli");
+    expect(pipelinePayload.metadata.project_name).toBe("disk-usage-cli");
+  });
+
   it("continueBootstrap generates fallback slug when rawIdea empty and name was already asked (Bug J level 2)", async () => {
     // Seed a session with pendingClarification: "name" so level 2 guard fires
     // when continueBootstrap is called with projectName: null and rawIdea that
