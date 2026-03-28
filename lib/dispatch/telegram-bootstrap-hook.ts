@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginContext } from "../context.js";
 import { resolveWorkspaceDir } from "./attachment-hook.js";
+import { hasGenesisAgent } from "../setup/agent.js";
 import { runPipeline, type GenesisPayload, type StepContext } from "../intake/index.js";
 import { createProvider } from "../providers/index.js";
 import { readFabricaTelegramConfig } from "../telegram/config.js";
@@ -738,7 +739,13 @@ async function continueBootstrap(
 }
 
 export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: PluginContext): void {
-  api.on("before_prompt_build", async (_event, eventCtx) => {
+  // When genesis agent exists, it handles DMs exclusively — main never receives them.
+  // Suppress hooks (before_prompt_build + message_sending) are unnecessary in that case.
+  const apiRuntime = (api as any).runtime;
+  const hasGenesis = apiRuntime ? hasGenesisAgent(apiRuntime) : false;
+
+  if (!hasGenesis) {
+    api.on("before_prompt_build", async (_event, eventCtx) => {
     const hookCtx = eventCtx as { channelId?: string; sessionKey?: string };
     if (hookCtx.channelId !== "telegram") return {};
     // before_prompt_build receives PluginHookAgentContext which does NOT have conversationId.
@@ -798,6 +805,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       return { cancel: true };
     }
   });
+  } // end if (!hasGenesis)
 
   api.on("message_received", async (event, eventCtx) => {
     if (eventCtx.channelId !== "telegram") return;
