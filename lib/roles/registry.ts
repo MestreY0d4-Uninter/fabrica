@@ -25,6 +25,7 @@ export const ROLE_REGISTRY: Record<string, RoleConfig> = {
       senior: "openai-codex/gpt-5.4",
     },
     tiers: { junior: "fast", medior: "balanced", senior: "reasoning" },
+    effort: { junior: "minimal", medior: "standard", senior: "deep" },
     emoji: {
       junior: "⚡",
       medior: "🔧",
@@ -47,6 +48,7 @@ export const ROLE_REGISTRY: Record<string, RoleConfig> = {
       senior: "openai-codex/gpt-5.4",
     },
     tiers: { junior: "fast", medior: "reasoning", senior: "reasoning" },
+    effort: { junior: "minimal", medior: "standard", senior: "deep" },
     emoji: {
       junior: "⚡",
       medior: "🔍",
@@ -68,6 +70,7 @@ export const ROLE_REGISTRY: Record<string, RoleConfig> = {
       senior: "openai-codex/gpt-5.4",
     },
     tiers: { junior: "reasoning", senior: "reasoning" },
+    effort: { junior: "deep", senior: "deep" },
     emoji: {
       junior: "📐",
       senior: "🏗️",
@@ -88,6 +91,7 @@ export const ROLE_REGISTRY: Record<string, RoleConfig> = {
       senior: "openai-codex/gpt-5.4",
     },
     tiers: { junior: "reasoning", senior: "reasoning" },
+    effort: { junior: "standard", senior: "deep" },
     emoji: {
       junior: "👁️",
       senior: "🔬",
