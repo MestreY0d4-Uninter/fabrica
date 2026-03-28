@@ -28,7 +28,7 @@ vi.mock("../../lib/tools/helpers.js", () => ({
               {
                 active: true,
                 issueId: "1",
-                sessionKey: "agent:devclaw:subagent:demo-reviewer-senior-cassandre",
+                sessionKey: "agent:main:subagent:demo-reviewer-senior-cassandre",
                 startTime: "2026-03-13T00:00:00.000Z",
               },
             ],
@@ -78,7 +78,7 @@ describe("task_comment", () => {
       logger: console,
     } as any)({
       workspaceDir: "/tmp/workspace",
-      sessionKey: "agent:devclaw:subagent:demo-reviewer-senior-cassandre",
+      sessionKey: "agent:main:subagent:demo-reviewer-senior-cassandre",
     });
 
     await expect(tool.execute("1", {
@@ -98,7 +98,7 @@ describe("task_comment", () => {
       logger: console,
     } as any)({
       workspaceDir: "/tmp/workspace",
-      sessionKey: "agent:devclaw:subagent:demo-developer-senior-ada",
+      sessionKey: "agent:main:subagent:demo-developer-senior-ada",
     });
 
     await expect(tool.execute("1", {

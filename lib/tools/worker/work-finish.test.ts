@@ -28,10 +28,10 @@ import type { RunCommand } from "../../context.js";
 
 // Helper to create a mock audit log with a merge_conflict transition
 async function createMockAuditLog(workspaceDir: string, issueId: number, hasMergeConflict: boolean): Promise<void> {
-  const logDir = join(workspaceDir, "devclaw", "log");
+  const logDir = join(workspaceDir, "fabrica", "log");
   await mkdir(logDir, { recursive: true });
   
-  const auditPath = join(workspaceDir, "devclaw", "log", "audit.log");
+  const auditPath = join(workspaceDir, "fabrica", "log", "audit.log");
   const entries = [];
   
   // Add some dummy entries
@@ -39,7 +39,7 @@ async function createMockAuditLog(workspaceDir: string, issueId: number, hasMerg
     timestamp: "2026-03-01T10:00:00Z",
     event: "issue_created",
     issueId,
-    project: "devclaw",
+    project: "fabrica",
   }));
   
   if (hasMergeConflict) {
@@ -51,7 +51,7 @@ async function createMockAuditLog(workspaceDir: string, issueId: number, hasMerg
       to: "To Improve",
       reason: "merge_conflict",
       reviewer: "system",
-      project: "devclaw",
+      project: "fabrica",
     }));
   }
   
@@ -61,7 +61,7 @@ async function createMockAuditLog(workspaceDir: string, issueId: number, hasMerg
     event: "work_started",
     issueId,
     role: "developer",
-    project: "devclaw",
+    project: "fabrica",
   }));
   
   const content = entries.join("\n") + "\n";
@@ -91,7 +91,7 @@ describe("work_finish: PR validation and conflict resolution", () => {
       
       // Import the helper (we'll need to test via integration since it's not exported)
       // For now, we'll test the behavior indirectly through validatePrExistsForDeveloper
-      const auditPath = join(tempDir, "devclaw", "log", "audit.log");
+      const auditPath = join(tempDir, "fabrica", "log", "audit.log");
       const content = await readFile(auditPath, "utf-8");
       const lines = content.split("\n").filter(Boolean);
       
@@ -115,7 +115,7 @@ describe("work_finish: PR validation and conflict resolution", () => {
       const issueId = 456;
       await createMockAuditLog(tempDir, issueId, false);
       
-      const auditPath = join(tempDir, "devclaw", "log", "audit.log");
+      const auditPath = join(tempDir, "fabrica", "log", "audit.log");
       const content = await readFile(auditPath, "utf-8");
       const lines = content.split("\n").filter(Boolean);
       
@@ -146,7 +146,7 @@ describe("work_finish: PR validation and conflict resolution", () => {
     });
 
     it("should skip malformed JSON lines in audit log", async () => {
-      const auditPath = join(tempDir, "devclaw", "log", "audit.log");
+      const auditPath = join(tempDir, "fabrica", "log", "audit.log");
       const entries = [
         JSON.stringify({ event: "valid", issueId: 999 }),
         "{ invalid json",
@@ -328,7 +328,7 @@ describe("work_finish: PR validation and conflict resolution", () => {
     it("should log rejection with correct fields", async () => {
       const rejectionLog = {
         event: "work_finish_rejected",
-        project: "devclaw",
+        project: "fabrica",
         issue: 123,
         reason: "pr_still_conflicting",
         prUrl: "https://github.com/test/repo/pull/123",
@@ -343,7 +343,7 @@ describe("work_finish: PR validation and conflict resolution", () => {
     it("should log successful conflict resolution with correct fields", async () => {
       const successLog = {
         event: "conflict_resolution_verified",
-        project: "devclaw",
+        project: "fabrica",
         issue: 123,
         prUrl: "https://github.com/test/repo/pull/123",
         mergeable: true,

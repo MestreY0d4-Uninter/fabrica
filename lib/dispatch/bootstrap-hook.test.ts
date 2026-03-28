@@ -11,32 +11,32 @@ import os from "node:os";
 
 describe("parseFabricaSessionKey", () => {
   it("should parse a standard developer session key", () => {
-    const result = parseFabricaSessionKey("agent:devclaw:subagent:my-project-developer-medior");
+    const result = parseFabricaSessionKey("agent:main:subagent:my-project-developer-medior");
     assert.deepStrictEqual(result, { projectName: "my-project", role: "developer" });
   });
 
   it("should parse a tester session key", () => {
-    const result = parseFabricaSessionKey("agent:devclaw:subagent:webapp-tester-medior");
+    const result = parseFabricaSessionKey("agent:main:subagent:webapp-tester-medior");
     assert.deepStrictEqual(result, { projectName: "webapp", role: "tester" });
   });
 
   it("should handle project names with hyphens", () => {
-    const result = parseFabricaSessionKey("agent:devclaw:subagent:my-cool-project-developer-junior");
+    const result = parseFabricaSessionKey("agent:main:subagent:my-cool-project-developer-junior");
     assert.deepStrictEqual(result, { projectName: "my-cool-project", role: "developer" });
   });
 
   it("should handle project names with multiple hyphens and tester role", () => {
-    const result = parseFabricaSessionKey("agent:devclaw:subagent:a-b-c-d-tester-junior");
+    const result = parseFabricaSessionKey("agent:main:subagent:a-b-c-d-tester-junior");
     assert.deepStrictEqual(result, { projectName: "a-b-c-d", role: "tester" });
   });
 
   it("should return null for non-subagent session keys", () => {
-    const result = parseFabricaSessionKey("agent:devclaw:main");
+    const result = parseFabricaSessionKey("agent:main");
     assert.strictEqual(result, null);
   });
 
   it("should return null for session keys without role", () => {
-    const result = parseFabricaSessionKey("agent:devclaw:subagent:project-unknown-level");
+    const result = parseFabricaSessionKey("agent:main:subagent:project-unknown-level");
     assert.strictEqual(result, null);
   });
 
@@ -46,12 +46,12 @@ describe("parseFabricaSessionKey", () => {
   });
 
   it("should parse senior developer level", () => {
-    const result = parseFabricaSessionKey("agent:devclaw:subagent:devclaw-developer-senior");
-    assert.deepStrictEqual(result, { projectName: "devclaw", role: "developer" });
+    const result = parseFabricaSessionKey("agent:main:subagent:fabrica-developer-senior");
+    assert.deepStrictEqual(result, { projectName: "fabrica", role: "developer" });
   });
 
   it("should parse simple project name", () => {
-    const result = parseFabricaSessionKey("agent:devclaw:subagent:api-developer-junior");
+    const result = parseFabricaSessionKey("agent:main:subagent:api-developer-junior");
     assert.deepStrictEqual(result, { projectName: "api", role: "developer" });
   });
 });

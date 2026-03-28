@@ -5,13 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../../lib/config/index.js";
 import { DATA_DIR } from "../../lib/setup/constants.js";
 
-const LEGACY_DATA_DIR = "devclaw";
-
 let tempDir: string | null = null;
 
 async function makeWorkspace(): Promise<string> {
   tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-config-loader-"));
-  await fs.mkdir(path.join(tempDir, LEGACY_DATA_DIR), { recursive: true });
+  await fs.mkdir(path.join(tempDir, DATA_DIR), { recursive: true });
   return tempDir;
 }
 

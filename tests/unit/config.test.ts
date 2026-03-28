@@ -15,7 +15,7 @@ let tmpDir: string;
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-config-test-"));
   // Create minimal workspace structure
-  const dataDir = path.join(tmpDir, "devclaw");
+  const dataDir = path.join(tmpDir, "fabrica");
   await fs.mkdir(path.join(dataDir, "projects"), { recursive: true });
   await fs.mkdir(path.join(dataDir, "prompts"), { recursive: true });
   await fs.mkdir(path.join(dataDir, "log"), { recursive: true });
@@ -84,7 +84,7 @@ describe("config loader — workspace overrides", () => {
         },
       },
     });
-    await fs.writeFile(path.join(tmpDir, "devclaw", "workflow.yaml"), yaml);
+    await fs.writeFile(path.join(tmpDir, "fabrica", "workflow.yaml"), yaml);
 
     const config = await loadConfig(tmpDir);
     expect(config.roles.developer.models.junior).toBe("custom/fast-model");
@@ -101,7 +101,7 @@ describe("config loader — workspace overrides", () => {
         testPolicy: "agent",
       },
     });
-    await fs.writeFile(path.join(tmpDir, "devclaw", "workflow.yaml"), yaml);
+    await fs.writeFile(path.join(tmpDir, "fabrica", "workflow.yaml"), yaml);
 
     const config = await loadConfig(tmpDir);
     expect(config.workflow.reviewPolicy).toBe("agent");
@@ -114,7 +114,7 @@ describe("config loader — workspace overrides", () => {
         architect: false,
       },
     });
-    await fs.writeFile(path.join(tmpDir, "devclaw", "workflow.yaml"), yaml);
+    await fs.writeFile(path.join(tmpDir, "fabrica", "workflow.yaml"), yaml);
 
     const config = await loadConfig(tmpDir);
     expect(config.roles.architect.enabled).toBe(false);
@@ -135,10 +135,10 @@ describe("config loader — project overrides", () => {
         },
       },
     });
-    await fs.writeFile(path.join(tmpDir, "devclaw", "workflow.yaml"), wsYaml);
+    await fs.writeFile(path.join(tmpDir, "fabrica", "workflow.yaml"), wsYaml);
 
     // Project config
-    const projDir = path.join(tmpDir, "devclaw", "projects", "my-project");
+    const projDir = path.join(tmpDir, "fabrica", "projects", "my-project");
     await fs.mkdir(projDir, { recursive: true });
     const projYaml = YAML.stringify({
       roles: {
@@ -164,10 +164,10 @@ describe("config loader — project overrides", () => {
         },
       },
     });
-    await fs.writeFile(path.join(tmpDir, "devclaw", "workflow.yaml"), wsYaml);
+    await fs.writeFile(path.join(tmpDir, "fabrica", "workflow.yaml"), wsYaml);
 
     // Project only overrides junior
-    const projDir = path.join(tmpDir, "devclaw", "projects", "my-project");
+    const projDir = path.join(tmpDir, "fabrica", "projects", "my-project");
     await fs.mkdir(projDir, { recursive: true });
     const projYaml = YAML.stringify({
       roles: {
