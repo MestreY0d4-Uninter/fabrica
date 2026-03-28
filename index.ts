@@ -201,7 +201,7 @@ const plugin = {
     // Intake (Genesis)
     api.registerTool(createGenesisTool(ctx), { names: ["genesis"] });
 
-    // CLI (fabrica instead of devclaw), services & hooks
+    // CLI (fabrica), services & hooks
     api.registerCli(({ program }: { program: any }) => registerCli(program, ctx), {
       commands: ["fabrica"],
     });
