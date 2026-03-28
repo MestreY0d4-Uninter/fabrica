@@ -132,17 +132,17 @@ gh pr edit "$PR_NUM" --body "$(printf '%s\n\n## QA Evidence\n\n```\n%s\n```\n\nE
 
 **Do NOT post QA evidence only as a comment.** PR comments are not canonical QA evidence; the reviewer and the workflow both validate the PR description body.
 
-### 5. Call work_finish
+### 5. Call work_finish (API tool — NOT a shell command)
 
-```
-work_finish({ role: "developer", result: "done", channelId: "<project slug from 'Project:' field in task message>", summary: "<what you did>" })
-```
+`work_finish` is a **Fabrica API tool**. You must invoke it as a **tool call** (tool_use), the same way you call any other tool like `task_create` or `gh`. Do **NOT** run it as a bash command — it is not on your PATH, and attempting to execute it in a shell will fail with "command not found".
 
-If blocked: `work_finish({ role: "developer", result: "blocked", channelId: "<project slug from 'Project:' field in task message>", summary: "<what you need>" })`
+Use the `work_finish` tool with these arguments:
+- `role`: `"developer"`
+- `result`: `"done"` (or `"blocked"` if stuck)
+- `channelId`: the project slug from the `"Project: <name>"` line in your task message (e.g., `"gestao-notas"`)
+- `summary`: brief description of what you did
 
-> **IMPORTANT:** The `channelId` parameter accepts the project slug (e.g., "gestao-notas").
-> Extract it from the "Project: <name>" line in your task message. Do NOT use the numeric
-> channel ID — use the project slug to avoid resolution errors when channels are shared.
+**If blocked:** call `work_finish` with `result: "blocked"` and explain why in `summary`.
 
 **Always call work_finish** — even if you hit errors or can't complete the task.
 

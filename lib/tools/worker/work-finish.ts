@@ -320,7 +320,7 @@ export function createWorkFinishTool(ctx: PluginContext) {
       type: "object",
       required: ["channelId", "role", "result"],
       properties: {
-        channelId: { type: "string", description: "YOUR chat/group ID — the numeric ID of the chat you are in right now (e.g. '-1003844794417'). Do NOT guess; use the ID of the conversation this message came from." },
+        channelId: { type: "string", description: "Project slug (e.g. 'my-project'). Use the value from the 'Channel:' or 'Project:' line in your task message. Do NOT use a numeric Telegram chat ID." },
         role: { type: "string", enum: getAllRoleIds(), description: "Worker role" },
         result: { type: "string", enum: ["done", "pass", "fail", "fail_infra", "refine", "blocked", "approve", "reject"], description: "Completion result. Use fail_infra (tester only) when the test toolchain is missing or broken — this keeps the issue in the test queue instead of routing it to the developer." },
         summary: { type: "string", description: "Brief summary" },

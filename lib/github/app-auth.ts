@@ -51,14 +51,36 @@ export async function getGitHubRepoInstallationOctokit(
   const app = getGitHubApp(pluginConfig);
   if (!app) return null;
 
-  const response = await app.octokit.request("GET /repos/{owner}/{repo}/installation", repo);
-  const installationId = Number(response.data?.id);
-  if (!Number.isInteger(installationId) || installationId <= 0) return null;
+  // Try repo-level installation first (most specific)
+  try {
+    const response = await app.octokit.request("GET /repos/{owner}/{repo}/installation", repo);
+    const installationId = Number(response.data?.id);
+    if (Number.isInteger(installationId) && installationId > 0) {
+      return {
+        installationId,
+        octokit: await app.getInstallationOctokit(installationId),
+      };
+    }
+  } catch {
+    // Repo-level installation not found — fall through to org-level fallback
+  }
 
-  return {
-    installationId,
-    octokit: await app.getInstallationOctokit(installationId),
-  };
+  // Fallback: try org-level installation (covers repos created after the App was installed
+  // at the org level with "All repositories" or when the repo was added later)
+  try {
+    const orgResponse = await app.octokit.request("GET /orgs/{org}/installation", { org: repo.owner });
+    const installationId = Number(orgResponse.data?.id);
+    if (Number.isInteger(installationId) && installationId > 0) {
+      return {
+        installationId,
+        octokit: await app.getInstallationOctokit(installationId),
+      };
+    }
+  } catch {
+    // Org-level installation not found either
+  }
+
+  return null;
 }
 
 export async function getGitHubInstallationOctokit(
