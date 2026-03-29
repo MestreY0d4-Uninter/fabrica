@@ -60,6 +60,11 @@ export type IssueRuntimeState = {
   parentIssueId?: number | null;
   childIssueIds?: number[];
   infraFailCount?: number;
+  // Diagnostic-first escalation tracking (v0.2.0)
+  dispatchAttemptCount?: number;
+  lastDispatchedLevel?: string | null;
+  lastFailureReason?: "stall" | "infra" | "complexity" | null;
+  lastDiagnosticResult?: string | null;
 };
 
 /**
