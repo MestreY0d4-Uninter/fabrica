@@ -26,6 +26,11 @@ export function getSpawnTime(sessionKey: string): number | undefined {
   return spawnTimes.get(sessionKey);
 }
 
+/** Removes the spawn time entry for a session key. Call after consuming the value to prevent Map growth. */
+export function clearSpawnTime(sessionKey: string): void {
+  spawnTimes.delete(sessionKey);
+}
+
 export function registerReactiveDispatchHooks(
   api: OpenClawPluginApi,
   ctx: PluginContext,

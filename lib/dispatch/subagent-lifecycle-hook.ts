@@ -14,7 +14,7 @@ import type { PluginContext } from "../context.js";
 import { log as auditLog } from "../audit.js";
 import { resolveWorkspaceDir } from "./attachment-hook.js";
 import { parseFabricaSessionKey } from "./bootstrap-hook.js";
-import { getSpawnTime } from "./reactive-dispatch-hook.js";
+import { clearSpawnTime, getSpawnTime } from "./reactive-dispatch-hook.js";
 
 export function registerSubagentLifecycleHook(
   api: OpenClawPluginApi,
@@ -33,9 +33,9 @@ export function registerSubagentLifecycleHook(
 
     const { projectName, role } = parsed;
 
-    // Note: using undefined when spawn time is missing (rather than ?? Date.now() which
-    // would produce a fake near-zero duration). undefined is omitted from the audit log via spread.
+    // Consume spawn time (delete after read to prevent unbounded Map growth in long-running gateway).
     const spawnTime = getSpawnTime(sessionKey);
+    clearSpawnTime(sessionKey);
     const durationMs = spawnTime != null ? Date.now() - spawnTime : undefined;
 
     // Log the subagent end event for immediate diagnostic visibility
