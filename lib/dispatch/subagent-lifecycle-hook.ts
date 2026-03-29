@@ -14,6 +14,7 @@ import type { PluginContext } from "../context.js";
 import { log as auditLog } from "../audit.js";
 import { resolveWorkspaceDir } from "./attachment-hook.js";
 import { parseFabricaSessionKey } from "./bootstrap-hook.js";
+import { getSpawnTime } from "./reactive-dispatch-hook.js";
 
 export function registerSubagentLifecycleHook(
   api: OpenClawPluginApi,
@@ -32,16 +33,20 @@ export function registerSubagentLifecycleHook(
 
     const { projectName, role } = parsed;
 
+    // Note: using undefined when spawn time is missing (rather than ?? Date.now() which
+    // would produce a fake near-zero duration). undefined is omitted from the audit log via spread.
+    const spawnTime = getSpawnTime(sessionKey);
+    const durationMs = spawnTime != null ? Date.now() - spawnTime : undefined;
+
     // Log the subagent end event for immediate diagnostic visibility
     await auditLog(workspaceDir, "subagent_ended", {
       sessionKey,
       project: projectName,
       role,
       outcome: event.outcome ?? "unknown",
+      ...(durationMs != null ? { durationMs } : {}),
     }).catch(() => {});
 
-    // Note: Task 12-13 will integrate diagnoseStall() here when outcome indicates
-    // an incomplete run (i.e. worker ended without calling work_finish).
     ctx.logger.info(
       `subagent_ended: worker ${role} in "${projectName}" ended with outcome=${event.outcome ?? "unknown"} (session=${sessionKey})`,
     );

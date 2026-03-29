@@ -57,6 +57,8 @@ import { registerGitHubWebhookRoute } from "./lib/github/register-webhook-route.
 import { registerGatewayLifecycleHook } from "./lib/setup/gateway-lifecycle-hook.js";
 import { registerSubagentLifecycleHook } from "./lib/dispatch/subagent-lifecycle-hook.js";
 import { registerModelResolveHook } from "./lib/dispatch/model-resolve-hook.js";
+import { registerWorkerContextHook } from "./lib/dispatch/worker-context-hook.js";
+import { registerReactiveDispatchHooks } from "./lib/dispatch/reactive-dispatch-hook.js";
 
 const plugin = {
   id: "fabrica",
@@ -216,9 +218,11 @@ const plugin = {
     registerGatewayLifecycleHook(api, ctx);
     registerSubagentLifecycleHook(api, ctx);
     registerModelResolveHook(api, ctx);
+    registerWorkerContextHook(api, ctx);
+    registerReactiveDispatchHooks(api, ctx);
 
     ctx.logger.info(
-      "Fabrica plugin registered (25 tools, 1 CLI command group, 1 service, 7 hooks total: bootstrap, telegram-dm bootstrap, attachment, gateway lifecycle, subagent lifecycle, model-resolve, optional GitHub webhook route)",
+      "Fabrica plugin registered (25 tools, 1 CLI command group, 1 service, 9 hooks total: bootstrap, telegram-dm bootstrap, attachment, gateway lifecycle, subagent lifecycle, model-resolve, worker-context, reactive-dispatch, optional GitHub webhook route)",
     );
   },
 };
