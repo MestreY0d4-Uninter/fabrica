@@ -32,11 +32,9 @@ import {
   getProject,
   getIssueRuntime,
   updateSlot,
-  updateIssueRuntime,
   deactivateWorker,
   type Project,
 } from "../../projects/index.js";
-import { diagnoseStall } from "./diagnostic.js";
 import { log as auditLog } from "../../audit.js";
 import {
   DEFAULT_WORKFLOW,
@@ -53,7 +51,6 @@ import {
   type Role,
 } from "../../workflow/index.js";
 import { isSessionAlive, type SessionLookup } from "../gateway-sessions.js";
-import { sendToAgent } from "../../dispatch/session.js";
 import type { PluginRuntime } from "openclaw/plugin-sdk";
 import type { RunCommand } from "../../context.js";
 import { withCorrelationContext } from "../../observability/context.js";
@@ -70,17 +67,6 @@ export const GRACE_PERIOD_MS = 5 * 60 * 1_000; // 5 minutes (enough for dispatch
 /** Dispatch confirm timeout: flag dispatches that were never acknowledged by the worker.
  * Now configurable via resolvedConfig.timeouts.dispatchConfirmTimeoutMs — fallback default preserved for callers without config. */
 export const DISPATCH_CONFIRMATION_TIMEOUT_MS = 2 * 60 * 1_000; // 2 minutes
-
-/** Message sent to nudge a stalled session back to life. */
-const NUDGE_MESSAGE = `You appear to have stalled. Continue working on your current task. If you are blocked or unable to proceed, call work_finish with result "blocked".`;
-
-/**
- * Maximum consecutive stall nudges before treating the slot as model-unresponsive.
- * When a model provider is quota-exhausted or returning empty responses, the session
- * receives nudges but never produces output. After MAX_STALL_NUDGES the slot is
- * deactivated and the issue is requeued, preventing an infinite stall-nudge loop.
- */
-const MAX_STALL_NUDGES = 3;
 
 /**
  * Maximum dispatch attempts before the issue is moved to a HOLD state.
@@ -104,17 +90,8 @@ export type HealthIssue = {
     | "orphaned_label"       // Case 7: active label but no worker tracking it
     | "context_overflow"     // Case 1c: active worker but session hit context limit (abortedLastRun)
     | "session_exhausted"   // Case 1d: active worker session near 100% context without work_finish
-    | "session_stalled"     // Active worker but session inactive for >stallTimeoutMinutes
     | "dispatch_unconfirmed" // Active worker never reached agent bootstrap/activity after dispatch
-    | "stateless_issue"      // Case 8: open managed issue with no state label (#473)
-    | "model_unresponsive"   // Slot deactivated after MAX_STALL_NUDGES — model/provider quota exhausted
-    | "diagnostic_transition_to_review"   // Diagnostic-first: PR exists + QA passing → move to review
-    | "diagnostic_redispatch_same_level"  // Diagnostic-first: PR exists but QA failing → redispatch
-    | "diagnostic_nudge_open_pr"          // Diagnostic-first: branch commits but no PR → nudge
-    | "diagnostic_log_infra"              // Diagnostic-first: session dead, no artifacts → log infra
-    | "diagnostic_escalate_level"         // Diagnostic-first: active session without commits → escalate
-    | "diagnostic_retry_infra"            // Diagnostic-first: infra issue, retry
-    | "diagnostic_needs_human_review";    // Diagnostic-first: repeated stall, no artifacts → human review
+    | "stateless_issue";     // Case 8: open managed issue with no state label (#473)
   severity: "critical" | "warning";
   project: string;
   projectSlug: string;
@@ -290,13 +267,13 @@ export async function checkWorkerHealth(opts: {
   workflow?: WorkflowConfig;
   /** Hours after which an active worker is considered stale (default: 2) */
   staleWorkerHours?: number;
-  /** Minutes of session inactivity before stall detection (default: 15) */
+  /** @deprecated Stall detection removed — kept for callers compatibility */
   stallTimeoutMinutes?: number;
-  /** Required for sending nudge messages to stalled sessions */
-  runCommand: RunCommand;
-  /** Plugin runtime for in-process agent dispatch (bypasses WS) */
+  /** @deprecated Stall detection removed — kept for callers compatibility */
+  runCommand?: RunCommand;
+  /** @deprecated Stall detection removed — kept for callers compatibility */
   runtime?: PluginRuntime;
-  /** Agent ID for sendToAgent calls */
+  /** @deprecated Stall detection removed — kept for callers compatibility */
   agentId?: string;
   /** Configurable dispatch confirmation timeout in ms (default: DISPATCH_CONFIRMATION_TIMEOUT_MS) */
   dispatchConfirmTimeoutMs?: number;
@@ -637,250 +614,6 @@ export async function checkWorkerHealth(opts: {
         }
         fixes.push(fix);
         continue;
-      }
-
-      // Case: Active with alive session but no recent activity (stalled)
-      if (slot.active && sessionKey && sessions && !withinGracePeriod && isSessionAlive(sessionKey, sessions)) {
-        const session = sessions.get(sessionKey)!;
-        const stallThresholdMs = (opts.stallTimeoutMinutes ?? 5) * 60_000;
-        if (session.updatedAt == null) continue;
-        const sessionIdleMs = Date.now() - session.updatedAt;
-
-        if (sessionIdleMs > stallThresholdMs) {
-          const idleMinutes = Math.round(sessionIdleMs / 60_000);
-
-          // --- Diagnostic-first stall detection (v0.2.0) ---
-          // Always run diagnostic on first stall detection.  Workers spawned via
-          // runtime.subagent.run() may not have access to plugin tools like
-          // work_finish, so nudging them is often ineffective.  Instead, check for
-          // real deliverables (PR, commits, CI status) and act on evidence.
-          // Extract owner/repo from repoRemote URL (e.g. "https://github.com/Org/repo.git")
-          const repoRemote: string = (project as any).repoRemote ?? "";
-          const remoteMatch = repoRemote.match(/github\.com\/([^/]+)\/([^/.]+)/);
-          const diagnostic = await diagnoseStall({
-            projectSlug,
-            owner: remoteMatch?.[1] ?? "",
-            repo: remoteMatch?.[2] ?? "",
-            issueId: issueIdNum ?? 0,
-            sessionKey,
-            slotStartTime: slot.startTime ? new Date(slot.startTime).getTime() : Date.now() - sessionIdleMs,
-            sessionUpdatedAt: session.updatedAt,
-            dispatchAttemptCount: issueRuntime?.dispatchAttemptCount ?? 0,
-          });
-
-          // Actions that indicate the worker produced deliverables — act immediately
-          const evidenceActions = ["transition_to_review", "nudge_open_pr"];
-          const hasActionableEvidence = evidenceActions.includes(diagnostic.action);
-
-          // Model-unresponsive check: after MAX_STALL_NUDGES intervals, escalate
-          // regardless of diagnostic result (infinite nudge loop prevention).
-          const modelUnresponsiveMs = stallThresholdMs * MAX_STALL_NUDGES;
-          const slotAgeMs = slot.startTime ? Date.now() - new Date(slot.startTime).getTime() : sessionIdleMs;
-          const isModelUnresponsive = slotAgeMs > modelUnresponsiveMs;
-
-          // Circuit breaker: after MAX_DISPATCH_ATTEMPTS, move to HOLD state
-          // to prevent infinite dispatch loops when workers consistently fail.
-          const currentAttempts = issueRuntime?.dispatchAttemptCount ?? 0;
-          if (currentAttempts >= MAX_DISPATCH_ATTEMPTS && !hasActionableEvidence) {
-            const fix: HealthFix = {
-              issue: {
-                type: "diagnostic_needs_human_review",
-                severity: "critical",
-                project: project.name,
-                projectSlug,
-                role,
-                level,
-                sessionKey,
-                issueId: slot.issueId,
-                slotIndex,
-                message: `${role.toUpperCase()} ${level}[${slotIndex}] circuit breaker: ${currentAttempts} dispatch attempts without completion — moving to Refining`,
-              },
-              fixed: false,
-            };
-            if (autoFix) {
-              await revertLabel(fix, expectedLabel, "Refining");
-              await deactivateSlot();
-              fix.fixed = true;
-            }
-            await auditLog(workspaceDir, "dispatch_circuit_breaker", {
-              project: project.name, projectSlug, role, level, sessionKey,
-              issueId: slot.issueId, slotIndex, dispatchAttemptCount: currentAttempts,
-              diagnostic: diagnostic.action, evidence: diagnostic.evidence,
-            }).catch(() => {});
-            fixes.push(fix);
-            continue;
-          }
-
-          if (hasActionableEvidence || isModelUnresponsive) {
-            // Act on diagnostic — either evidence-based or timeout-escalation
-
-            // Update issue runtime state with diagnostic result.
-            // If a PR was discovered, auto-bind it so queue_pr_guard passes.
-            // This is necessary because workers may not have access to work_finish
-            // and the PR would otherwise remain unbound.
-            if (issueIdNum) {
-              const runtimeUpdate: Record<string, unknown> = {
-                lastDiagnosticResult: diagnostic.evidence,
-                lastFailureReason: diagnostic.reason,
-                dispatchAttemptCount: (issueRuntime?.dispatchAttemptCount ?? 0) + 1,
-              };
-              if (diagnostic.prNumber) {
-                const prOwner = remoteMatch?.[1] ?? "";
-                const prRepo = remoteMatch?.[2] ?? "";
-                runtimeUpdate.currentPrNumber = diagnostic.prNumber;
-                runtimeUpdate.currentPrUrl = `https://github.com/${prOwner}/${prRepo}/pull/${diagnostic.prNumber}`;
-                runtimeUpdate.currentPrState = "open";
-                runtimeUpdate.bindingSource = "diagnostic";
-                runtimeUpdate.bindingConfidence = "high";
-                runtimeUpdate.boundAt = new Date().toISOString();
-              }
-              await updateIssueRuntime(workspaceDir, projectSlug, String(issueIdNum), runtimeUpdate).catch(() => {});
-            }
-
-            const diagnosticType = `diagnostic_${diagnostic.action}` as HealthIssue["type"];
-            const fix: HealthFix = {
-              issue: {
-                type: diagnosticType,
-                severity: diagnostic.action === "needs_human_review" ? "critical" : "warning",
-                project: project.name,
-                projectSlug,
-                role,
-                level,
-                sessionKey,
-                issueId: slot.issueId,
-                slotIndex,
-                message: `${role.toUpperCase()} ${level}[${slotIndex}] stall diagnosed: ${diagnostic.action} — ${diagnostic.evidence}`,
-              },
-              fixed: false,
-            };
-
-            if (autoFix) {
-              switch (diagnostic.action) {
-                case "transition_to_review": {
-                  // Role-aware transition: diagnostic says "PR exists, QA passing"
-                  // but the correct next state depends on WHO stalled:
-                  //   developer → "To Review" (standard: dev done, send to reviewer)
-                  //   reviewer  → "To Test"   (reviewer done, advance to tester)
-                  //   tester    → "Done"       (tester done, pipeline complete)
-                  const targetLabel =
-                    role === "tester" ? "Done" :
-                    role === "reviewer" ? "To Test" :
-                    "To Review";
-                  await revertLabel(fix, expectedLabel, targetLabel);
-                  if (!fix.labelRevertFailed) {
-                    await deactivateSlot();
-                    // If tester completed, close the issue (terminal transition)
-                    if (role === "tester" && issueIdNum) {
-                      await provider.closeIssue(issueIdNum).catch(() => {});
-                    }
-                    fix.fixed = true;
-                  }
-                  break;
-                }
-
-                case "redispatch_same_level":
-                case "nudge_open_pr":
-                case "retry_infra":
-                  await revertLabel(fix, expectedLabel, slotQueueLabel);
-                  if (!fix.labelRevertFailed) {
-                    await deactivateSlot();
-                    fix.fixed = true;
-                  }
-                  break;
-
-                case "escalate_level":
-                  await revertLabel(fix, expectedLabel, slotQueueLabel);
-                  if (!fix.labelRevertFailed) {
-                    await deactivateSlot();
-                    fix.fixed = true;
-                  }
-                  break;
-
-                case "needs_human_review":
-                  // Move to HOLD state to prevent re-dispatch loop.
-                  // Without label change, heartbeat would see active label
-                  // with no worker and re-dispatch indefinitely.
-                  await revertLabel(fix, expectedLabel, "Refining");
-                  await deactivateSlot();
-                  fix.fixed = true;
-                  break;
-
-                case "log_infra":
-                  // Move to HOLD state — infrastructure issue, no artifacts.
-                  await revertLabel(fix, expectedLabel, "Refining");
-                  await deactivateSlot();
-                  fix.fixed = true;
-                  break;
-              }
-            }
-
-            await auditLog(workspaceDir, "stall_diagnostic", {
-              project: project.name, projectSlug, role, level, sessionKey,
-              issueId: slot.issueId, slotIndex, idleMinutes,
-              diagnostic: diagnostic.action,
-              reason: diagnostic.reason,
-              evidence: diagnostic.evidence,
-              fastPath: hasActionableEvidence,
-              dispatchAttemptCount: (issueRuntime?.dispatchAttemptCount ?? 0) + 1,
-            }).catch(() => {});
-
-            fixes.push(fix);
-            continue;
-          }
-
-          // No deliverables found yet — nudge the worker as fallback
-          const fix: HealthFix = {
-            issue: {
-              type: "session_stalled",
-              severity: "critical",
-              project: project.name,
-              projectSlug,
-              role,
-              level,
-              sessionKey,
-              issueId: slot.issueId,
-              slotIndex,
-              message: `${role.toUpperCase()} ${level}[${slotIndex}] session idle ${idleMinutes}m — no deliverables yet, sending nudge`,
-            },
-            fixed: false,
-          };
-
-          if (autoFix) {
-            sendToAgent(sessionKey, NUDGE_MESSAGE, {
-              agentId: opts.agentId,
-              projectName: project.name,
-              issueId: issueIdNum!,
-              role,
-              level,
-              slotIndex,
-              workspaceDir,
-              runCommand: opts.runCommand,
-              runtime: opts.runtime,
-            });
-            fix.nudgeSent = true;
-            fix.fixed = true;
-            await auditHealthFixApplied(workspaceDir, fix, {
-              action: "nudge_session",
-              idleMinutes,
-              deliveryState,
-            });
-          }
-
-          await auditLog(workspaceDir, "session_stalled", {
-            project: project.name,
-            projectSlug,
-            role,
-            level,
-            sessionKey,
-            issueId: slot.issueId,
-            slotIndex,
-            idleMinutes,
-            deliveryState,
-            action: "nudge",
-          }).catch(() => {});
-          fixes.push(fix);
-          continue;
-        }
       }
 
       // Case 3: Active with correct label and alive session — check for staleness
