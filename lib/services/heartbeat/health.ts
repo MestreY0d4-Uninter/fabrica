@@ -82,6 +82,12 @@ const NUDGE_MESSAGE = `You appear to have stalled. Continue working on your curr
  */
 const MAX_STALL_NUDGES = 3;
 
+/**
+ * Maximum dispatch attempts before the issue is moved to a HOLD state.
+ * Prevents infinite dispatch loops when workers consistently fail to complete.
+ */
+const MAX_DISPATCH_ATTEMPTS = 5;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -672,6 +678,39 @@ export async function checkWorkerHealth(opts: {
           const slotAgeMs = slot.startTime ? Date.now() - new Date(slot.startTime).getTime() : sessionIdleMs;
           const isModelUnresponsive = slotAgeMs > modelUnresponsiveMs;
 
+          // Circuit breaker: after MAX_DISPATCH_ATTEMPTS, move to HOLD state
+          // to prevent infinite dispatch loops when workers consistently fail.
+          const currentAttempts = issueRuntime?.dispatchAttemptCount ?? 0;
+          if (currentAttempts >= MAX_DISPATCH_ATTEMPTS && !hasActionableEvidence) {
+            const fix: HealthFix = {
+              issue: {
+                type: "diagnostic_needs_human_review",
+                severity: "critical",
+                project: project.name,
+                projectSlug,
+                role,
+                level,
+                sessionKey,
+                issueId: slot.issueId,
+                slotIndex,
+                message: `${role.toUpperCase()} ${level}[${slotIndex}] circuit breaker: ${currentAttempts} dispatch attempts without completion — moving to Refining`,
+              },
+              fixed: false,
+            };
+            if (autoFix) {
+              await revertLabel(fix, expectedLabel, "Refining");
+              await deactivateSlot();
+              fix.fixed = true;
+            }
+            await auditLog(workspaceDir, "dispatch_circuit_breaker", {
+              project: project.name, projectSlug, role, level, sessionKey,
+              issueId: slot.issueId, slotIndex, dispatchAttemptCount: currentAttempts,
+              diagnostic: diagnostic.action, evidence: diagnostic.evidence,
+            }).catch(() => {});
+            fixes.push(fix);
+            continue;
+          }
+
           if (hasActionableEvidence || isModelUnresponsive) {
             // Act on diagnostic — either evidence-based or timeout-escalation
 
@@ -717,13 +756,19 @@ export async function checkWorkerHealth(opts: {
 
             if (autoFix) {
               switch (diagnostic.action) {
-                case "transition_to_review":
-                  await revertLabel(fix, expectedLabel, "To Review");
+                case "transition_to_review": {
+                  // Role-aware transition: if the current role is already the
+                  // reviewer, "transition_to_review" is wrong — the reviewer
+                  // stalled with a PR present.  Advance FORWARD to "To Test"
+                  // instead of looping back to "To Review".
+                  const targetLabel = role === "reviewer" ? "To Test" : "To Review";
+                  await revertLabel(fix, expectedLabel, targetLabel);
                   if (!fix.labelRevertFailed) {
                     await deactivateSlot();
                     fix.fixed = true;
                   }
                   break;
+                }
 
                 case "redispatch_same_level":
                 case "nudge_open_pr":
@@ -744,11 +789,17 @@ export async function checkWorkerHealth(opts: {
                   break;
 
                 case "needs_human_review":
+                  // Move to HOLD state to prevent re-dispatch loop.
+                  // Without label change, heartbeat would see active label
+                  // with no worker and re-dispatch indefinitely.
+                  await revertLabel(fix, expectedLabel, "Refining");
                   await deactivateSlot();
                   fix.fixed = true;
                   break;
 
                 case "log_infra":
+                  // Move to HOLD state — infrastructure issue, no artifacts.
+                  await revertLabel(fix, expectedLabel, "Refining");
                   await deactivateSlot();
                   fix.fixed = true;
                   break;
