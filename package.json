@@ -1,6 +1,6 @@
 {
   "name": "@mestreyoda/fabrica",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Autonomous software engineering pipeline for OpenClaw. Turns ideas into deployed code via intake, dispatch, review, test, and merge.",
   "type": "module",
   "main": "./dist/index.js",
@@ -22,6 +22,7 @@
   ],
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
+    "json5": "^2.2.3",
     "@opentelemetry/auto-instrumentations-node": "^0.71.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.213.0",
     "@opentelemetry/sdk-node": "^0.213.0",

@@ -168,31 +168,60 @@ export async function projectTick(opts: {
 
     if (role === "reviewer" || role === "tester") {
       const issueRuntime = getIssueRuntime(fresh, issue.iid);
-      const prSelector = getCanonicalPrSelector(fresh, issue.iid);
+      let prSelector = getCanonicalPrSelector(fresh, issue.iid);
       if (!prSelector?.prNumber) {
-        const feedbackLabel = getFeedbackQueueLabel(workflow);
-        if (!dryRun && feedbackLabel && feedbackLabel !== currentLabel) {
-          try {
-            await provider.transitionLabel(issue.iid, currentLabel, feedbackLabel);
-            await auditLog(workspaceDir, "queue_pr_guard", {
-              project: project.name,
-              projectSlug,
-              issueId: issue.iid,
-              role,
-              from: currentLabel,
-              to: feedbackLabel,
-              prState: issueRuntime?.currentPrState ?? null,
-              prUrl: issueRuntime?.currentPrUrl ?? null,
-              prNumber: null,
-              currentIssueMatch: null,
-              reason: "missing_canonical_pr",
-            });
-          } catch {
-            // Best-effort — keep the issue in queue if the guard transition fails.
+        // No canonical PR bound (work_finish may not have been called).
+        // Fall back to direct PR lookup so reviewer/tester can still be dispatched.
+        const fallbackStatus = await provider.getPrStatus(issue.iid).catch(() => null);
+        const hasFallbackPr = !!fallbackStatus?.url &&
+          !!fallbackStatus.number &&
+          fallbackStatus.state !== PrState.MERGED &&
+          fallbackStatus.state !== PrState.CLOSED &&
+          fallbackStatus.currentIssueMatch !== false;
+        if (hasFallbackPr && fallbackStatus?.number) {
+          if (!dryRun) {
+            await updateIssueRuntime(workspaceDir, projectSlug, issue.iid, {
+              currentPrNumber: fallbackStatus.number,
+              currentPrUrl: fallbackStatus.url,
+              currentPrState: fallbackStatus.state ?? null,
+            }).catch(() => {});
           }
+          // Also update fresh in-memory so dispatchTask (which uses requireCanonicalPrSelector)
+          // can find the binding without needing another disk read.
+          const runtimeKey = String(issue.iid);
+          fresh.issueRuntime = fresh.issueRuntime ?? {};
+          fresh.issueRuntime[runtimeKey] = {
+            ...(fresh.issueRuntime[runtimeKey] ?? {}),
+            currentPrNumber: fallbackStatus.number,
+            currentPrUrl: fallbackStatus.url ?? null,
+            currentPrState: fallbackStatus.state ?? null,
+          };
+          prSelector = { prNumber: fallbackStatus.number };
+        } else {
+          const feedbackLabel = getFeedbackQueueLabel(workflow);
+          if (!dryRun && feedbackLabel && feedbackLabel !== currentLabel) {
+            try {
+              await provider.transitionLabel(issue.iid, currentLabel, feedbackLabel);
+              await auditLog(workspaceDir, "queue_pr_guard", {
+                project: project.name,
+                projectSlug,
+                issueId: issue.iid,
+                role,
+                from: currentLabel,
+                to: feedbackLabel,
+                prState: issueRuntime?.currentPrState ?? null,
+                prUrl: issueRuntime?.currentPrUrl ?? null,
+                prNumber: null,
+                currentIssueMatch: null,
+                reason: "missing_canonical_pr",
+              });
+            } catch {
+              // Best-effort — keep the issue in queue if the guard transition fails.
+            }
+          }
+          skipped.push({ role, reason: "No canonical bound PR for review/test cycle" });
+          continue;
         }
-        skipped.push({ role, reason: "No canonical bound PR for review/test cycle" });
-        continue;
       }
       const prStatus = await provider.getPrStatus(issue.iid, prSelector);
       const hasReviewablePr = !!prStatus.url &&

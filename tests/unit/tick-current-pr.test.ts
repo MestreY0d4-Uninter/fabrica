@@ -5,7 +5,7 @@ import { writeProjects } from "../../lib/projects/index.js";
 import { DEFAULT_WORKFLOW, ReviewPolicy } from "../../lib/workflow/index.js";
 
 describe("projectTick canonical PR binding", () => {
-  it("moves reviewer work back to follow-up when there is no canonical PR bound", async () => {
+  it("dispatches reviewer and binds PR via fallback when no canonical PR bound but PR exists", async () => {
     const h = await createTestHarness({
       workflow: {
         ...DEFAULT_WORKFLOW,
@@ -20,6 +20,39 @@ describe("projectTick canonical PR binding", () => {
         url: "https://example.com/pr/70",
         currentIssueMatch: true,
       });
+
+      const result = await projectTick({
+        workspaceDir: h.workspaceDir,
+        projectSlug: h.project.slug,
+        provider: h.provider,
+        targetRole: "reviewer",
+        workflow: {
+          ...DEFAULT_WORKFLOW,
+          reviewPolicy: ReviewPolicy.AGENT,
+        },
+        runCommand: h.runCommand,
+      });
+
+      // PR found via fallback — reviewer dispatched, issue stays in review queue
+      expect(result.pickups).toHaveLength(1);
+      expect(result.pickups[0]?.role).toBe("reviewer");
+      const issue = await h.provider.getIssue(7);
+      expect(issue.labels).not.toContain("To Improve");
+    } finally {
+      await h.cleanup();
+    }
+  });
+
+  it("moves reviewer work back to follow-up when no canonical PR bound and no PR exists", async () => {
+    const h = await createTestHarness({
+      workflow: {
+        ...DEFAULT_WORKFLOW,
+        reviewPolicy: ReviewPolicy.AGENT,
+      },
+    });
+    try {
+      h.provider.seedIssue({ iid: 7, title: "Needs review", labels: ["To Review", "review:agent"] });
+      // No setPrStatus call — no PR exists for this issue
 
       const result = await projectTick({
         workspaceDir: h.workspaceDir,
