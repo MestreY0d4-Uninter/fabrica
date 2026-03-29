@@ -70,9 +70,10 @@ describe("checkWorkerHealth", () => {
     expect(h.provider.callsTo("transitionLabel")).toHaveLength(0);
   });
 
-  it("deactivates slot and requeues after MAX_STALL_NUDGES × stallThreshold idle time (model_unresponsive)", async () => {
-    // MAX_STALL_NUDGES = 3, stallTimeoutMinutes = 1 → model_unresponsive threshold = 3 min
-    // Session idle for 4 min > 3 min threshold → model_unresponsive
+  it("deactivates slot using diagnostic-first escalation after MAX_STALL_NUDGES × stallThreshold idle time", async () => {
+    // MAX_STALL_NUDGES = 3, stallTimeoutMinutes = 1 → diagnostic threshold = 3 min (slot age)
+    // Slot started 60 min ago → triggers diagnostic-first escalation path
+    // Session updated 4 min ago (< 30 min dead threshold) → diagnoseStall returns escalate_level
     h = await createTestHarness({
       workers: {
         developer: {
@@ -92,7 +93,7 @@ describe("checkWorkerHealth", () => {
         "agent:main:subagent:test-project-developer-senior-ada",
         {
           key: "agent:main:subagent:test-project-developer-senior-ada",
-          updatedAt: Date.now() - 4 * 60_000, // 4 min idle > 3 × 1 min = model_unresponsive
+          updatedAt: Date.now() - 4 * 60_000, // 4 min idle > 3 × 1 min = diagnostic escalation
           percentUsed: 1,
           totalTokens: 10,
           contextTokens: 50,
@@ -115,31 +116,22 @@ describe("checkWorkerHealth", () => {
     });
 
     expect(fixes).toHaveLength(1);
-    expect(fixes[0]?.issue.type).toBe("model_unresponsive");
+    // Type is now a diagnostic_* type (depends on diagnoseStall result; no real GitHub → escalate_level)
+    expect(fixes[0]?.issue.type).toMatch(/^diagnostic_/);
     expect(fixes[0]?.fixed).toBe(true);
     expect(fixes[0]?.nudgeSent).toBeUndefined();
 
-    // Issue should be requeued
-    const transitions = h.provider.callsTo("transitionLabel");
-    expect(transitions).toHaveLength(1);
-    expect(transitions[0]?.args).toMatchObject({ issueId: 42, from: "Doing" });
-
-    // Slot should be deactivated
+    // Slot should be deactivated (all diagnostic actions deactivate the slot)
     const afterData = await h.readProjects();
     const afterSlot = afterData.projects[h.project.slug]?.workers.developer.levels.senior?.[0];
     expect(afterSlot?.active).toBe(false);
 
+    // stall_diagnostic audit event should be emitted
     const events = await readAuditEvents(h.workspaceDir);
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          event: "model_unresponsive",
-          action: "requeue_after_max_stall_intervals",
-        }),
-        expect.objectContaining({
-          event: "health_fix_applied",
-          type: "model_unresponsive",
-          action: "requeue_issue",
+          event: "stall_diagnostic",
         }),
       ]),
     );

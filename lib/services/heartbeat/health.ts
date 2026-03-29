@@ -32,9 +32,11 @@ import {
   getProject,
   getIssueRuntime,
   updateSlot,
+  updateIssueRuntime,
   deactivateWorker,
   type Project,
 } from "../../projects/index.js";
+import { diagnoseStall } from "./diagnostic.js";
 import { log as auditLog } from "../../audit.js";
 import {
   DEFAULT_WORKFLOW,
@@ -99,7 +101,14 @@ export type HealthIssue = {
     | "session_stalled"     // Active worker but session inactive for >stallTimeoutMinutes
     | "dispatch_unconfirmed" // Active worker never reached agent bootstrap/activity after dispatch
     | "stateless_issue"      // Case 8: open managed issue with no state label (#473)
-    | "model_unresponsive";  // Slot deactivated after MAX_STALL_NUDGES — model/provider quota exhausted
+    | "model_unresponsive"   // Slot deactivated after MAX_STALL_NUDGES — model/provider quota exhausted
+    | "diagnostic_transition_to_review"   // Diagnostic-first: PR exists + QA passing → move to review
+    | "diagnostic_redispatch_same_level"  // Diagnostic-first: PR exists but QA failing → redispatch
+    | "diagnostic_nudge_open_pr"          // Diagnostic-first: branch commits but no PR → nudge
+    | "diagnostic_log_infra"              // Diagnostic-first: session dead, no artifacts → log infra
+    | "diagnostic_escalate_level"         // Diagnostic-first: active session without commits → escalate
+    | "diagnostic_retry_infra"            // Diagnostic-first: infra issue, retry
+    | "diagnostic_needs_human_review";    // Diagnostic-first: repeated stall, no artifacts → human review
   severity: "critical" | "warning";
   project: string;
   projectSlug: string;
@@ -634,19 +643,40 @@ export async function checkWorkerHealth(opts: {
         if (sessionIdleMs > stallThresholdMs) {
           const idleMinutes = Math.round(sessionIdleMs / 60_000);
 
-          // After MAX_STALL_NUDGES stall intervals the model/provider is likely
-          // quota-exhausted or persistently unresponsive. Deactivate and requeue
-          // rather than looping forever.
+          // After MAX_STALL_NUDGES stall intervals, run diagnostic-first escalation
+          // instead of blindly deactivating and requeueing.
           // Use slot.startTime (wall-clock age) instead of sessionIdleMs because
           // nudges reset session.updatedAt, which would prevent this threshold from
           // ever being reached (infinite nudge loop bug — E2E #5 Round B).
           const modelUnresponsiveMs = stallThresholdMs * MAX_STALL_NUDGES;
           const slotAgeMs = slot.startTime ? Date.now() - new Date(slot.startTime).getTime() : sessionIdleMs;
           if (slotAgeMs > modelUnresponsiveMs) {
+            // --- Diagnostic-first escalation (v0.2.0) ---
+            const diagnostic = await diagnoseStall({
+              projectSlug,
+              owner: (project as any).remote?.owner ?? "",
+              repo: (project as any).remote?.repo ?? "",
+              issueId: issueIdNum ?? 0,
+              sessionKey,
+              slotStartTime: slot.startTime ? new Date(slot.startTime).getTime() : Date.now() - sessionIdleMs,
+              sessionUpdatedAt: session.updatedAt,
+              dispatchAttemptCount: issueRuntime?.dispatchAttemptCount ?? 0,
+            });
+
+            // Update issue runtime state with diagnostic result
+            if (issueIdNum) {
+              await updateIssueRuntime(workspaceDir, projectSlug, String(issueIdNum), {
+                lastDiagnosticResult: diagnostic.evidence,
+                lastFailureReason: diagnostic.reason,
+                dispatchAttemptCount: (issueRuntime?.dispatchAttemptCount ?? 0) + 1,
+              }).catch(() => {});
+            }
+
+            const diagnosticType = `diagnostic_${diagnostic.action}` as HealthIssue["type"];
             const fix: HealthFix = {
               issue: {
-                type: "model_unresponsive",
-                severity: "critical",
+                type: diagnosticType,
+                severity: diagnostic.action === "needs_human_review" ? "critical" : "warning",
                 project: project.name,
                 projectSlug,
                 role,
@@ -654,35 +684,60 @@ export async function checkWorkerHealth(opts: {
                 sessionKey,
                 issueId: slot.issueId,
                 slotIndex,
-                message: `${role.toUpperCase()} ${level}[${slotIndex}] model unresponsive for ${idleMinutes}m (>${MAX_STALL_NUDGES} stall intervals) — deactivating and requeueing`,
+                message: `${role.toUpperCase()} ${level}[${slotIndex}] stall diagnosed: ${diagnostic.action} — ${diagnostic.evidence}`,
               },
               fixed: false,
             };
+
             if (autoFix) {
-              await revertLabel(fix, expectedLabel, slotQueueLabel);
-              if (!fix.labelRevertFailed) {
-                await deactivateSlot();
-                fix.fixed = true;
-                await auditHealthFixApplied(workspaceDir, fix, {
-                  action: "requeue_issue",
-                  fromLabel: expectedLabel,
-                  toLabel: slotQueueLabel,
-                  idleMinutes,
-                });
+              switch (diagnostic.action) {
+                case "transition_to_review":
+                  await revertLabel(fix, expectedLabel, "To Review");
+                  if (!fix.labelRevertFailed) {
+                    await deactivateSlot();
+                    fix.fixed = true;
+                  }
+                  break;
+
+                case "redispatch_same_level":
+                case "nudge_open_pr":
+                case "retry_infra":
+                  await revertLabel(fix, expectedLabel, slotQueueLabel);
+                  if (!fix.labelRevertFailed) {
+                    await deactivateSlot();
+                    fix.fixed = true;
+                  }
+                  break;
+
+                case "escalate_level":
+                  await revertLabel(fix, expectedLabel, slotQueueLabel);
+                  if (!fix.labelRevertFailed) {
+                    await deactivateSlot();
+                    fix.fixed = true;
+                  }
+                  break;
+
+                case "needs_human_review":
+                  await deactivateSlot();
+                  fix.fixed = true;
+                  break;
+
+                case "log_infra":
+                  await deactivateSlot();
+                  fix.fixed = true;
+                  break;
               }
             }
-            await auditLog(workspaceDir, "model_unresponsive", {
-              project: project.name,
-              projectSlug,
-              role,
-              level,
-              sessionKey,
-              issueId: slot.issueId,
-              slotIndex,
-              idleMinutes,
-              deliveryState,
-              action: "requeue_after_max_stall_intervals",
+
+            await auditLog(workspaceDir, "stall_diagnostic", {
+              project: project.name, projectSlug, role, level, sessionKey,
+              issueId: slot.issueId, slotIndex, idleMinutes,
+              diagnostic: diagnostic.action,
+              reason: diagnostic.reason,
+              evidence: diagnostic.evidence,
+              dispatchAttemptCount: (issueRuntime?.dispatchAttemptCount ?? 0) + 1,
             }).catch(() => {});
+
             fixes.push(fix);
             continue;
           }
