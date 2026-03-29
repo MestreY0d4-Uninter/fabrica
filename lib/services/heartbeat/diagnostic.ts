@@ -31,6 +31,8 @@ export interface StallDiagnostic {
   action: StallAction;
   reason: StallReason;
   evidence: string;
+  /** PR number found during diagnostic (if any), used for auto-binding. */
+  prNumber?: number;
 }
 
 export async function diagnoseStall(input: StallDiagnosticInput): Promise<StallDiagnostic> {
@@ -49,9 +51,9 @@ export async function diagnoseStall(input: StallDiagnosticInput): Promise<StallD
   if (pr) {
     const qaStatus = await checkPrQaStatus(owner, repo, pr.number);
     if (qaStatus === "pass") {
-      return { action: "transition_to_review", reason: "stall", evidence: `PR #${pr.number} exists, QA passing` };
+      return { action: "transition_to_review", reason: "stall", evidence: `PR #${pr.number} exists, QA passing`, prNumber: pr.number };
     }
-    return { action: "redispatch_same_level", reason: "stall", evidence: `PR #${pr.number} exists, QA ${qaStatus}` };
+    return { action: "redispatch_same_level", reason: "stall", evidence: `PR #${pr.number} exists, QA ${qaStatus}`, prNumber: pr.number };
   }
 
   // Check for commits on branch

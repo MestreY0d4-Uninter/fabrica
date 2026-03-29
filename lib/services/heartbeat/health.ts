@@ -675,13 +675,27 @@ export async function checkWorkerHealth(opts: {
           if (hasActionableEvidence || isModelUnresponsive) {
             // Act on diagnostic — either evidence-based or timeout-escalation
 
-            // Update issue runtime state with diagnostic result
+            // Update issue runtime state with diagnostic result.
+            // If a PR was discovered, auto-bind it so queue_pr_guard passes.
+            // This is necessary because workers may not have access to work_finish
+            // and the PR would otherwise remain unbound.
             if (issueIdNum) {
-              await updateIssueRuntime(workspaceDir, projectSlug, String(issueIdNum), {
+              const runtimeUpdate: Record<string, unknown> = {
                 lastDiagnosticResult: diagnostic.evidence,
                 lastFailureReason: diagnostic.reason,
                 dispatchAttemptCount: (issueRuntime?.dispatchAttemptCount ?? 0) + 1,
-              }).catch(() => {});
+              };
+              if (diagnostic.prNumber) {
+                const prOwner = remoteMatch?.[1] ?? "";
+                const prRepo = remoteMatch?.[2] ?? "";
+                runtimeUpdate.currentPrNumber = diagnostic.prNumber;
+                runtimeUpdate.currentPrUrl = `https://github.com/${prOwner}/${prRepo}/pull/${diagnostic.prNumber}`;
+                runtimeUpdate.currentPrState = "open";
+                runtimeUpdate.bindingSource = "diagnostic";
+                runtimeUpdate.bindingConfidence = "high";
+                runtimeUpdate.boundAt = new Date().toISOString();
+              }
+              await updateIssueRuntime(workspaceDir, projectSlug, String(issueIdNum), runtimeUpdate).catch(() => {});
             }
 
             const diagnosticType = `diagnostic_${diagnostic.action}` as HealthIssue["type"];
