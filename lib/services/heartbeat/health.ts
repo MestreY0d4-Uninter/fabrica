@@ -104,7 +104,6 @@ export type HealthFix = {
   fixed: boolean;
   labelReverted?: string;
   labelRevertFailed?: boolean;
-  nudgeSent?: boolean;
 };
 
 type HealthFixAppliedDetails = {
@@ -151,7 +150,6 @@ async function auditHealthFixApplied(
       idleMinutes: details.idleMinutes ?? null,
       deliveryState: details.deliveryState ?? null,
       labelReverted: fix.labelReverted ?? null,
-      nudgeSent: fix.nudgeSent ?? false,
     }).catch(() => {});
   }));
 }
