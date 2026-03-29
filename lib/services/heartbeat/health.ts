@@ -757,14 +757,22 @@ export async function checkWorkerHealth(opts: {
             if (autoFix) {
               switch (diagnostic.action) {
                 case "transition_to_review": {
-                  // Role-aware transition: if the current role is already the
-                  // reviewer, "transition_to_review" is wrong — the reviewer
-                  // stalled with a PR present.  Advance FORWARD to "To Test"
-                  // instead of looping back to "To Review".
-                  const targetLabel = role === "reviewer" ? "To Test" : "To Review";
+                  // Role-aware transition: diagnostic says "PR exists, QA passing"
+                  // but the correct next state depends on WHO stalled:
+                  //   developer → "To Review" (standard: dev done, send to reviewer)
+                  //   reviewer  → "To Test"   (reviewer done, advance to tester)
+                  //   tester    → "Done"       (tester done, pipeline complete)
+                  const targetLabel =
+                    role === "tester" ? "Done" :
+                    role === "reviewer" ? "To Test" :
+                    "To Review";
                   await revertLabel(fix, expectedLabel, targetLabel);
                   if (!fix.labelRevertFailed) {
                     await deactivateSlot();
+                    // If tester completed, close the issue (terminal transition)
+                    if (role === "tester" && issueIdNum) {
+                      await provider.closeIssue(issueIdNum).catch(() => {});
+                    }
                     fix.fixed = true;
                   }
                   break;
