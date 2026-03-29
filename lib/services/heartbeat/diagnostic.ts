@@ -4,6 +4,7 @@
  * Examines evidence (PR state, commits, session activity) to determine
  * the correct action when a worker stalls. Does NOT modify any state.
  */
+import { execFileSync } from "child_process";
 
 export type StallAction =
   | "transition_to_review"
@@ -74,10 +75,14 @@ export async function diagnoseStall(input: StallDiagnosticInput): Promise<StallD
   return { action: "escalate_level", reason: "complexity", evidence: "Active session without commits" };
 }
 
+function ghSync(args: string[]): string {
+  return execFileSync("gh", args, { encoding: "utf-8", timeout: 15_000 });
+}
+
 async function findPrForIssue(owner: string, repo: string, issueId: number): Promise<{ number: number } | null> {
+  if (!owner || !repo) return null;
   try {
-    const { execa } = await import("execa");
-    const { stdout } = await execa("gh", [
+    const stdout = ghSync([
       "pr", "list", "--repo", `${owner}/${repo}`,
       "--search", `${issueId}`, "--json", "number", "--limit", "1",
     ]);
@@ -89,12 +94,13 @@ async function findPrForIssue(owner: string, repo: string, issueId: number): Pro
 }
 
 async function checkPrQaStatus(owner: string, repo: string, prNumber: number): Promise<"pass" | "fail" | "pending"> {
+  if (!owner || !repo) return "pending";
   try {
-    const { execa } = await import("execa");
-    const { stdout } = await execa("gh", [
+    const stdout = ghSync([
       "pr", "checks", String(prNumber), "--repo", `${owner}/${repo}`, "--json", "state",
     ]);
     const checks = JSON.parse(stdout);
+    if (checks.length === 0) return "pass"; // No checks configured = pass
     if (checks.every((c: any) => c.state === "SUCCESS")) return "pass";
     if (checks.some((c: any) => c.state === "FAILURE")) return "fail";
     return "pending";
@@ -104,9 +110,9 @@ async function checkPrQaStatus(owner: string, repo: string, prNumber: number): P
 }
 
 async function checkForBranchCommits(owner: string, repo: string, issueId: number): Promise<boolean> {
+  if (!owner || !repo) return false;
   try {
-    const { execa } = await import("execa");
-    const { stdout } = await execa("gh", [
+    const stdout = ghSync([
       "api", `repos/${owner}/${repo}/commits`,
       "--jq", ".[0].sha",
       "-f", `sha=issue-${issueId}`,

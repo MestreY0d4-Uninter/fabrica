@@ -1,23 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { diagnoseStall } from "../../lib/services/heartbeat/diagnostic.js";
 
-// Mock execa for gh CLI calls
-const mockExeca = vi.fn();
-vi.mock("execa", () => ({ execa: (...args: any[]) => mockExeca(...args) }));
+// Mock child_process.execFileSync for gh CLI calls
+const mockExecFileSync = vi.fn();
+vi.mock("child_process", () => ({ execFileSync: (...args: any[]) => mockExecFileSync(...args) }));
 
 describe("diagnoseStall", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it("returns transition_to_review when PR exists and QA passes", async () => {
-    // gh pr list returns a PR
-    mockExeca.mockImplementation((cmd: string, args: string[]) => {
+    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
       if (args.includes("pr") && args.includes("list")) {
-        return { stdout: JSON.stringify([{ number: 42 }]) };
+        return JSON.stringify([{ number: 42 }]);
       }
       if (args.includes("pr") && args.includes("checks")) {
-        return { stdout: JSON.stringify([{ state: "SUCCESS" }]) };
+        return JSON.stringify([{ state: "SUCCESS" }]);
       }
-      return { stdout: "[]" };
+      return "[]";
     });
 
     const result = await diagnoseStall({
@@ -29,10 +28,11 @@ describe("diagnoseStall", () => {
       sessionUpdatedAt: Date.now() - 2700000,
     });
     expect(result.action).toBe("transition_to_review");
+    expect(result.prNumber).toBe(42);
   });
 
   it("returns log_infra when session is dead with zero artifacts", async () => {
-    mockExeca.mockRejectedValue(new Error("not found"));
+    mockExecFileSync.mockImplementation(() => { throw new Error("not found"); });
 
     const result = await diagnoseStall({
       projectSlug: "myproject",
@@ -47,7 +47,7 @@ describe("diagnoseStall", () => {
   });
 
   it("returns escalate_level when session active but no commits", async () => {
-    mockExeca.mockRejectedValue(new Error("not found"));
+    mockExecFileSync.mockImplementation(() => { throw new Error("not found"); });
 
     const result = await diagnoseStall({
       projectSlug: "myproject",
@@ -62,7 +62,7 @@ describe("diagnoseStall", () => {
   });
 
   it("returns needs_human_review when same stall 2x+ without artifacts", async () => {
-    mockExeca.mockRejectedValue(new Error("not found"));
+    mockExecFileSync.mockImplementation(() => { throw new Error("not found"); });
 
     const result = await diagnoseStall({
       projectSlug: "myproject",
@@ -77,10 +77,10 @@ describe("diagnoseStall", () => {
   });
 
   it("returns redispatch_same_level when PR exists but QA fails", async () => {
-    mockExeca.mockImplementation((cmd: string, args: string[]) => {
-      if (args.includes("list")) return { stdout: JSON.stringify([{ number: 42 }]) };
-      if (args.includes("checks")) return { stdout: JSON.stringify([{ state: "FAILURE" }]) };
-      return { stdout: "[]" };
+    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes("list")) return JSON.stringify([{ number: 42 }]);
+      if (args.includes("checks")) return JSON.stringify([{ state: "FAILURE" }]);
+      return "[]";
     });
 
     const result = await diagnoseStall({
@@ -92,13 +92,13 @@ describe("diagnoseStall", () => {
       sessionUpdatedAt: Date.now() - 2700000,
     });
     expect(result.action).toBe("redispatch_same_level");
+    expect(result.prNumber).toBe(42);
   });
 
   it("returns nudge_open_pr when branch has commits but no PR", async () => {
-    mockExeca.mockImplementation((cmd: string, args: string[]) => {
-      if (args.includes("list")) return { stdout: "[]" }; // no PR
-      // checkForBranchCommits or checkForArtifacts — returns something
-      return { stdout: "abc123" }; // has commits
+    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes("list")) return "[]"; // no PR
+      return "abc123"; // has commits
     });
 
     const result = await diagnoseStall({
