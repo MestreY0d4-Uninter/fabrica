@@ -636,32 +636,44 @@ export async function checkWorkerHealth(opts: {
       // Case: Active with alive session but no recent activity (stalled)
       if (slot.active && sessionKey && sessions && !withinGracePeriod && isSessionAlive(sessionKey, sessions)) {
         const session = sessions.get(sessionKey)!;
-        const stallThresholdMs = (opts.stallTimeoutMinutes ?? 15) * 60_000;
+        const stallThresholdMs = (opts.stallTimeoutMinutes ?? 5) * 60_000;
         if (session.updatedAt == null) continue;
         const sessionIdleMs = Date.now() - session.updatedAt;
 
         if (sessionIdleMs > stallThresholdMs) {
           const idleMinutes = Math.round(sessionIdleMs / 60_000);
 
-          // After MAX_STALL_NUDGES stall intervals, run diagnostic-first escalation
-          // instead of blindly deactivating and requeueing.
-          // Use slot.startTime (wall-clock age) instead of sessionIdleMs because
-          // nudges reset session.updatedAt, which would prevent this threshold from
-          // ever being reached (infinite nudge loop bug — E2E #5 Round B).
+          // --- Diagnostic-first stall detection (v0.2.0) ---
+          // Always run diagnostic on first stall detection.  Workers spawned via
+          // runtime.subagent.run() may not have access to plugin tools like
+          // work_finish, so nudging them is often ineffective.  Instead, check for
+          // real deliverables (PR, commits, CI status) and act on evidence.
+          // Extract owner/repo from repoRemote URL (e.g. "https://github.com/Org/repo.git")
+          const repoRemote: string = (project as any).repoRemote ?? "";
+          const remoteMatch = repoRemote.match(/github\.com\/([^/]+)\/([^/.]+)/);
+          const diagnostic = await diagnoseStall({
+            projectSlug,
+            owner: remoteMatch?.[1] ?? "",
+            repo: remoteMatch?.[2] ?? "",
+            issueId: issueIdNum ?? 0,
+            sessionKey,
+            slotStartTime: slot.startTime ? new Date(slot.startTime).getTime() : Date.now() - sessionIdleMs,
+            sessionUpdatedAt: session.updatedAt,
+            dispatchAttemptCount: issueRuntime?.dispatchAttemptCount ?? 0,
+          });
+
+          // Actions that indicate the worker produced deliverables — act immediately
+          const evidenceActions = ["transition_to_review", "nudge_open_pr"];
+          const hasActionableEvidence = evidenceActions.includes(diagnostic.action);
+
+          // Model-unresponsive check: after MAX_STALL_NUDGES intervals, escalate
+          // regardless of diagnostic result (infinite nudge loop prevention).
           const modelUnresponsiveMs = stallThresholdMs * MAX_STALL_NUDGES;
           const slotAgeMs = slot.startTime ? Date.now() - new Date(slot.startTime).getTime() : sessionIdleMs;
-          if (slotAgeMs > modelUnresponsiveMs) {
-            // --- Diagnostic-first escalation (v0.2.0) ---
-            const diagnostic = await diagnoseStall({
-              projectSlug,
-              owner: (project as any).remote?.owner ?? "",
-              repo: (project as any).remote?.repo ?? "",
-              issueId: issueIdNum ?? 0,
-              sessionKey,
-              slotStartTime: slot.startTime ? new Date(slot.startTime).getTime() : Date.now() - sessionIdleMs,
-              sessionUpdatedAt: session.updatedAt,
-              dispatchAttemptCount: issueRuntime?.dispatchAttemptCount ?? 0,
-            });
+          const isModelUnresponsive = slotAgeMs > modelUnresponsiveMs;
+
+          if (hasActionableEvidence || isModelUnresponsive) {
+            // Act on diagnostic — either evidence-based or timeout-escalation
 
             // Update issue runtime state with diagnostic result
             if (issueIdNum) {
@@ -735,6 +747,7 @@ export async function checkWorkerHealth(opts: {
               diagnostic: diagnostic.action,
               reason: diagnostic.reason,
               evidence: diagnostic.evidence,
+              fastPath: hasActionableEvidence,
               dispatchAttemptCount: (issueRuntime?.dispatchAttemptCount ?? 0) + 1,
             }).catch(() => {});
 
@@ -742,6 +755,7 @@ export async function checkWorkerHealth(opts: {
             continue;
           }
 
+          // No deliverables found yet — nudge the worker as fallback
           const fix: HealthFix = {
             issue: {
               type: "session_stalled",
@@ -753,7 +767,7 @@ export async function checkWorkerHealth(opts: {
               sessionKey,
               issueId: slot.issueId,
               slotIndex,
-              message: `${role.toUpperCase()} ${level}[${slotIndex}] session idle ${idleMinutes}m — sending nudge`,
+              message: `${role.toUpperCase()} ${level}[${slotIndex}] session idle ${idleMinutes}m — no deliverables yet, sending nudge`,
             },
             fixed: false,
           };

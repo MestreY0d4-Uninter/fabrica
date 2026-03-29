@@ -233,7 +233,7 @@ function resolve(config: FabricaConfig, sourceLayers: string[], trace?: MergeTra
     dispatchMs: config.timeouts?.dispatchMs ?? 600_000,
     staleWorkerHours: config.timeouts?.staleWorkerHours ?? 2,
     sessionContextBudget: config.timeouts?.sessionContextBudget ?? 0.6,
-    stallTimeoutMinutes: config.timeouts?.stallTimeoutMinutes ?? 15,
+    stallTimeoutMinutes: config.timeouts?.stallTimeoutMinutes ?? 5,
     sessionConfirmAttempts: config.timeouts?.sessionConfirmAttempts ?? 5,
     sessionConfirmDelayMs: config.timeouts?.sessionConfirmDelayMs ?? 250,
     sessionLabelMaxLength: config.timeouts?.sessionLabelMaxLength ?? 64,
