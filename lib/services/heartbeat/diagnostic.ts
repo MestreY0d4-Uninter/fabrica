@@ -39,9 +39,6 @@ export interface StallDiagnostic {
 export async function diagnoseStall(input: StallDiagnosticInput): Promise<StallDiagnostic> {
   const { owner, repo, issueId, dispatchAttemptCount } = input;
 
-  // Debug logging — remove after confirming diagnostic works
-  console.log(`[diagnostic] diagnoseStall: owner=${owner} repo=${repo} issueId=${issueId} dispatchAttemptCount=${dispatchAttemptCount}`);
-
   // Repeated stall without artifacts → needs human
   if ((dispatchAttemptCount ?? 0) >= 2) {
     const hasArtifacts = await checkForArtifacts(owner, repo, issueId);
@@ -52,7 +49,6 @@ export async function diagnoseStall(input: StallDiagnosticInput): Promise<StallD
 
   // Check for PR
   const pr = await findPrForIssue(owner, repo, issueId);
-  console.log(`[diagnostic] findPrForIssue result: ${JSON.stringify(pr)}`);
   if (pr) {
     const qaStatus = await checkPrQaStatus(owner, repo, pr.number);
     if (qaStatus === "pass") {
