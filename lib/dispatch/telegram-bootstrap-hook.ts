@@ -200,18 +200,42 @@ async function classifyDmIntent(
     });
 
     const waitResult = await runtime.subagent.waitForRun({ runId, timeoutMs: 15_000 });
-    if (waitResult.status !== "ok") return null;
+    if (waitResult.status !== "ok") {
+      ctx.logger.warn(`[telegram-bootstrap] classify waitForRun status=${waitResult.status} (expected ok)`);
+      return null;
+    }
 
-    const messages = await runtime.subagent.getSessionMessages({ sessionKey });
-    const lastAssistant = messages?.filter((m: any) => m.role === "assistant").pop();
-    const text = lastAssistant?.content ?? "";
-    if (!text.trim()) return null;
+    const messagesResult = await runtime.subagent.getSessionMessages({ sessionKey });
+    // getSessionMessages may return an array or an object with a messages property
+    const messages = Array.isArray(messagesResult)
+      ? messagesResult
+      : (Array.isArray((messagesResult as any)?.messages) ? (messagesResult as any).messages : []);
+    const lastAssistant = messages.filter((m: any) => m.role === "assistant").pop();
+    if (!lastAssistant) {
+      ctx.logger.warn(`[telegram-bootstrap] classify: no assistant message found (messages=${messages.length}, resultType=${typeof messagesResult})`);
+      return null;
+    }
+    // content may be a string or an array of content blocks (thinking + text)
+    const rawContent = lastAssistant.content;
+    const text = typeof rawContent === "string"
+      ? rawContent
+      : (Array.isArray(rawContent)
+        ? (rawContent.find((b: any) => b.type === "text")?.text ?? "")
+        : "");
+    if (!text.trim()) {
+      ctx.logger.warn(`[telegram-bootstrap] classify: empty text from assistant (contentType=${typeof rawContent}, isArray=${Array.isArray(rawContent)})`);
+      return null;
+    }
 
     const jsonStr = text.replace(/^```(json)?/gm, "").replace(/```$/gm, "").trim();
     const intentData = JSON.parse(jsonStr);
     const validated = DmIntentSchema.safeParse(intentData);
+    if (!validated.success) {
+      ctx.logger.warn(`[telegram-bootstrap] classify: schema validation failed: ${validated.error?.message}`);
+    }
     return validated.success ? validated.data : null;
-  } catch {
+  } catch (err) {
+    ctx.logger.warn(`[telegram-bootstrap] classify exception: ${(err as Error).message ?? err}`);
     return null;
   }
 }
