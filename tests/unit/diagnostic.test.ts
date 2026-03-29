@@ -10,12 +10,8 @@ describe("diagnoseStall", () => {
 
   it("returns transition_to_review when PR exists and QA passes", async () => {
     mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
-      if (args.includes("pr") && args.includes("list")) {
-        return JSON.stringify([{ number: 42 }]);
-      }
-      if (args.includes("pr") && args.includes("checks")) {
-        return JSON.stringify([{ state: "SUCCESS" }]);
-      }
+      if (args.includes("list")) return JSON.stringify([{ number: 42 }]);
+      if (args.includes("view")) return JSON.stringify({ statusCheckRollup: [{ conclusion: "SUCCESS", status: "COMPLETED" }] });
       return "[]";
     });
 
@@ -79,7 +75,7 @@ describe("diagnoseStall", () => {
   it("returns redispatch_same_level when PR exists but QA fails", async () => {
     mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
       if (args.includes("list")) return JSON.stringify([{ number: 42 }]);
-      if (args.includes("checks")) return JSON.stringify([{ state: "FAILURE" }]);
+      if (args.includes("view")) return JSON.stringify({ statusCheckRollup: [{ conclusion: "FAILURE", status: "COMPLETED" }] });
       return "[]";
     });
 
