@@ -60,9 +60,6 @@ describe("checkWorkerHealth", () => {
       provider: h.provider,
       sessions,
       staleWorkerHours: 999,
-      stallTimeoutMinutes: 1,
-      runCommand: h.runCommand,
-      agentId: "main",
     });
 
     expect(fixes).toHaveLength(0);
@@ -94,9 +91,6 @@ describe("checkWorkerHealth", () => {
       provider: h.provider,
       sessions: new Map(),
       staleWorkerHours: 999,
-      stallTimeoutMinutes: 1,
-      runCommand: h.runCommand,
-      agentId: "main",
     });
 
     expect(fixes).toHaveLength(1);
@@ -171,9 +165,6 @@ describe("checkWorkerHealth", () => {
       provider: h.provider,
       sessions,
       staleWorkerHours: 999,
-      stallTimeoutMinutes: 30,
-      runCommand: h.runCommand,
-      agentId: "main",
     });
 
     expect(fixes).toHaveLength(1);

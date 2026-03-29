@@ -51,8 +51,6 @@ import {
   type Role,
 } from "../../workflow/index.js";
 import { isSessionAlive, type SessionLookup } from "../gateway-sessions.js";
-import type { PluginRuntime } from "openclaw/plugin-sdk";
-import type { RunCommand } from "../../context.js";
 import { withCorrelationContext } from "../../observability/context.js";
 import { withTelemetrySpan } from "../../observability/telemetry.js";
 import { resilientLabelTransition } from "../../workflow/labels.js";
@@ -68,11 +66,6 @@ export const GRACE_PERIOD_MS = 5 * 60 * 1_000; // 5 minutes (enough for dispatch
  * Now configurable via resolvedConfig.timeouts.dispatchConfirmTimeoutMs — fallback default preserved for callers without config. */
 export const DISPATCH_CONFIRMATION_TIMEOUT_MS = 2 * 60 * 1_000; // 2 minutes
 
-/**
- * Maximum dispatch attempts before the issue is moved to a HOLD state.
- * Prevents infinite dispatch loops when workers consistently fail to complete.
- */
-const MAX_DISPATCH_ATTEMPTS = 5;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -267,14 +260,6 @@ export async function checkWorkerHealth(opts: {
   workflow?: WorkflowConfig;
   /** Hours after which an active worker is considered stale (default: 2) */
   staleWorkerHours?: number;
-  /** @deprecated Stall detection removed — kept for callers compatibility */
-  stallTimeoutMinutes?: number;
-  /** @deprecated Stall detection removed — kept for callers compatibility */
-  runCommand?: RunCommand;
-  /** @deprecated Stall detection removed — kept for callers compatibility */
-  runtime?: PluginRuntime;
-  /** @deprecated Stall detection removed — kept for callers compatibility */
-  agentId?: string;
   /** Configurable dispatch confirmation timeout in ms (default: DISPATCH_CONFIRMATION_TIMEOUT_MS) */
   dispatchConfirmTimeoutMs?: number;
 }): Promise<HealthFix[]> {
@@ -648,6 +633,42 @@ export async function checkWorkerHealth(opts: {
             }
           }
           fixes.push(fix);
+        }
+      }
+
+      // PR-state recovery: active slot with correct label, but PR already exists and QA passes
+      // → advance to "To Review" without requiring a stall trigger.
+      if (slot.active && issueIdNum && issue && currentLabel === expectedLabel && autoFix) {
+        try {
+          const prStatus = await provider.getPrStatus(issueIdNum);
+          if (
+            prStatus.url &&
+            prStatus.state !== PrState.MERGED &&
+            prStatus.state !== PrState.CLOSED &&
+            prStatus.state !== PrState.CHANGES_REQUESTED &&
+            prStatus.state !== PrState.HAS_COMMENTS &&
+            prStatus.currentIssueMatch !== false
+          ) {
+            const rule = getCompletionRule(workflow, role, "done");
+            if (rule && rule.to !== expectedLabel) {
+              await resilientLabelTransition(provider, issueIdNum, expectedLabel, rule.to);
+              await deactivateSlot();
+              await auditLog(workspaceDir, "health_transition_to_review", {
+                project: project.name,
+                projectSlug,
+                role,
+                level,
+                issueId: slot.issueId,
+                sessionKey,
+                slotIndex,
+                fromLabel: expectedLabel,
+                toLabel: rule.to,
+                prUrl: prStatus.url,
+              }).catch(() => {});
+            }
+          }
+        } catch {
+          // Best-effort — provider errors must not abort health checks
         }
       }
 

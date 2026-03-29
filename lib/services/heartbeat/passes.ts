@@ -147,10 +147,6 @@ export async function performHealthPass(
       autoFix: true,
       provider,
       staleWorkerHours,
-      stallTimeoutMinutes,
-      runCommand: runCommand!,
-      runtime,
-      agentId,
       workflow: resolvedConfig?.workflow,
       dispatchConfirmTimeoutMs: resolvedConfig?.timeouts?.dispatchConfirmTimeoutMs,
     });
