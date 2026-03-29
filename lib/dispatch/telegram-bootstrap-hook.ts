@@ -335,14 +335,11 @@ function buildDmAck(projectName: string, topicLink: string, language: BootstrapL
   return BOOTSTRAP_MESSAGES.registered[language](projectName, topicLink);
 }
 
-function buildTopicKickoff(projectName: string, idea: string): string {
-  return [
-    `🧱 Projeto registrado automaticamente pela Fabrica.`,
-    `Projeto: ${projectName}`,
-    "",
-    "Resumo do pedido inicial:",
-    idea,
-  ].join("\n");
+function buildTopicKickoff(projectName: string, idea: string, language: BootstrapLanguage = "pt"): string {
+  const header = language === "en"
+    ? `🧱 Project automatically registered by Fabrica.\nProject: ${projectName}\n\nOriginal request summary:`
+    : `🧱 Projeto registrado automaticamente pela Fabrica.\nProjeto: ${projectName}\n\nResumo do pedido inicial:`;
+  return `${header}\n${idea}`;
 }
 
 async function sendTelegramText(
@@ -714,7 +711,8 @@ async function continueBootstrap(
         accountId: telegramConfig.projectsForumAccountId ?? undefined,
       },
     });
-    await sendTelegramText(ctx, projectChannelId, buildTopicKickoff(resolvedProjectName, request.rawIdea), {
+    const sessionLang: BootstrapLanguage = currentSession?.language ?? "pt";
+    await sendTelegramText(ctx, projectChannelId, buildTopicKickoff(resolvedProjectName, request.rawIdea, sessionLang), {
       accountId: telegramConfig.projectsForumAccountId,
       messageThreadId,
     });
@@ -733,7 +731,6 @@ async function continueBootstrap(
         logBootstrapWarning(ctx, `[telegram-bootstrap] immediate projectTick failed: ${error instanceof Error ? error.message : String(error)}`);
       });
     }
-    const sessionLang: BootstrapLanguage = currentSession?.language ?? "pt";
     await sendTelegramText(ctx, conversationId, buildDmAck(resolvedProjectName, buildTopicDeepLink(String(projectChannelId), messageThreadId), sessionLang));
     await upsertTelegramBootstrapSession(workspaceDir, {
       conversationId,
