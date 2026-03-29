@@ -614,6 +614,16 @@ export function createWorkFinishTool(ctx: PluginContext) {
         await updateIssueRuntime(workspaceDir, project.slug, issueId, { infraFailCount: 0 });
       }
 
+      // Reset diagnostic escalation counters after successful work_finish (v0.2.0)
+      if (issueRuntime && (issueRuntime.dispatchAttemptCount || issueRuntime.lastFailureReason || issueRuntime.lastDiagnosticResult || issueRuntime.lastDispatchedLevel)) {
+        await updateIssueRuntime(workspaceDir, project.slug, issueId, {
+          dispatchAttemptCount: 0,
+          lastFailureReason: null,
+          lastDiagnosticResult: null,
+          lastDispatchedLevel: null,
+        });
+      }
+
       return jsonResult({
         success: true, project: project.name, projectSlug: project.slug, issueId, role, result,
         ...completion,

@@ -26,6 +26,7 @@ import {
 } from "../workflow/index.js";
 import { detectRoleLevelFromLabels, detectStepRouting, findNextIssueForRole } from "./queue-scan.js";
 import { computeDispatchId, isDuplicate, recordDispatch, cleanupExpired } from "../dispatch/dispatch-dedup.js";
+import { ROLE_REGISTRY } from "../roles/registry.js";
 
 // ---------------------------------------------------------------------------
 // projectTick
@@ -237,25 +238,51 @@ export async function projectTick(opts: {
     // Level selection: label → heuristic (must happen before free slot check)
     const selectedLevel = resolveLevelForIssue(issue, role);
 
+    // --- Effort escalation (v0.2.0) ---
+    let effectiveLevel = selectedLevel;
+    const runtimeState = getIssueRuntime(fresh, issue.iid);
+    if (runtimeState?.lastFailureReason === "complexity" && (runtimeState.dispatchAttemptCount ?? 0) >= 2) {
+      const ESCALATION: Record<string, string> = { junior: "medior", medior: "senior" };
+      const escalated = ESCALATION[selectedLevel];
+      if (escalated) {
+        const roleConfig = ROLE_REGISTRY[role];
+        if (roleConfig?.levels?.includes(escalated)) {
+          effectiveLevel = escalated;
+          await auditLog(workspaceDir, "effort_escalated", {
+            project: project.name, issueId: issue.iid,
+            role, fromLevel: selectedLevel, toLevel: escalated,
+            reason: "complexity", attempts: runtimeState.dispatchAttemptCount,
+          }).catch(() => {});
+        }
+      } else {
+        // Already at senior — skip dispatch, needs human
+        await auditLog(workspaceDir, "escalation_ceiling", {
+          project: project.name, issueId: issue.iid,
+          role, level: selectedLevel, reason: "senior_stall_complexity",
+        }).catch(() => {});
+        continue; // skip dispatch
+      }
+    }
+
     // Check per-level slot availability
-    const freeSlot = findFreeSlot(roleWorker, selectedLevel);
+    const freeSlot = findFreeSlot(roleWorker, effectiveLevel);
     if (freeSlot === null) {
-      skipped.push({ role, reason: `${selectedLevel} slots full` });
+      skipped.push({ role, reason: `${effectiveLevel} slots full` });
       continue;
     }
 
     // F1-3: Dedup guard — skip if same issue/role/level was dispatched in the last 5 min
-    const dispatchId = computeDispatchId(projectSlug, issue.iid, role, selectedLevel);
+    const dispatchId = computeDispatchId(projectSlug, issue.iid, role, effectiveLevel);
     if (await isDuplicate(workspaceDir, dispatchId)) {
       skipped.push({ role, reason: `dispatch_dedup: ${dispatchId}` });
       continue;
     }
 
     if (dryRun) {
-      const existingSession = roleWorker.levels[selectedLevel]?.[freeSlot]?.sessionKey;
+      const existingSession = roleWorker.levels[effectiveLevel]?.[freeSlot]?.sessionKey;
       pickups.push({
         project: project.name, projectSlug, issueId: issue.iid, issueTitle: issue.title, issueUrl: issue.web_url,
-        role, level: selectedLevel,
+        role, level: effectiveLevel,
         sessionAction: existingSession ? "send" : "spawn",
         announcement: `[DRY RUN] Would pick up #${issue.iid}`,
       });
@@ -264,7 +291,7 @@ export async function projectTick(opts: {
         const dr = await dispatchTask({
           workspaceDir, agentId, project: fresh, issueId: issue.iid,
           issueTitle: issue.title, issueDescription: issue.description ?? "", issueUrl: issue.web_url,
-          role, level: selectedLevel, fromLabel: currentLabel, toLabel: targetLabel,
+          role, level: effectiveLevel, fromLabel: currentLabel, toLabel: targetLabel,
           provider,
           pluginConfig,
           sessionKey,
