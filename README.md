@@ -41,7 +41,7 @@ The heartbeat ticks every 60 seconds. On each tick, Fabrica alternates between a
 - **Zero-intervention pipeline** — from idea to merged PR without manual steps
 - **Deterministic FSM** — every transition is explicit; states are `planning → todo → doing → toReview → toTest → done` (+ `refining`, `toImprove`, `rejected`)
 - **Pluggable AI workers** — each role (developer, reviewer, tester, architect) maps to a configurable model and level
-- **Polling-first GitHub integration** — no webhook infrastructure required; GitHub App is optional
+- **Polling-first GitHub integration** — uses `gh` CLI for all GitHub operations; no webhook infrastructure or GitHub App required
 - **Telegram bootstrap** (optional) — describe a new project via DM; Fabrica asks clarifying questions and provisions the repo automatically
 - **Programmatic genesis** — trigger the full pipeline from a CLI script without Telegram
 - **Observability built-in** — audit log, metrics subcommand, heartbeat health checks, and OpenTelemetry tracing
@@ -187,46 +187,6 @@ Telegram enables DM-based project bootstrap and per-project forum topic notifica
 ```
 
 With Telegram enabled, send a project idea to the bot in a DM. Fabrica will ask clarifying questions, provision the GitHub repo, and create a dedicated forum topic for the project. All subsequent worker updates, review results, and the final merge notification appear in that topic.
-
-### With GitHub App (advanced)
-
-A GitHub App enables webhook-driven PR state updates, reducing polling latency. This is optional; polling works out of the box.
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "fabrica": {
-        "config": {
-          "providers": {
-            "github": {
-              "webhookPath": "/plugins/fabrica/github/webhook",
-              "webhookSecretPath": "<PATH_TO_WEBHOOK_SECRET_FILE>",
-              "defaultAuthProfile": "main",
-              "authProfiles": {
-                "main": {
-                  "mode": "github-app",
-                  "appId": "<YOUR_APP_ID>",
-                  "privateKeyPath": "<PATH_TO_APP_PRIVATE_KEY_PEM>"
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-Store credential files outside the repository (e.g., `~/.openclaw/credentials/`). Verify the webhook route is reachable:
-
-```bash
-curl -i -X POST http://127.0.0.1:18789/plugins/fabrica/github/webhook \
-  -H 'Content-Type: application/json' \
-  -d '{}'
-# Expected: 400 {"ok":false,"reason":"missing_headers"}
-```
 
 ## Programmatic genesis
 
