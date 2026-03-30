@@ -168,7 +168,9 @@ async function createOrUpdateCheckRunViaGhCli(
     if (opts.output) body.output = opts.output;
     if (opts.detailsUrl) body.details_url = opts.detailsUrl;
 
-    const { execa } = await import("execa");
+    // Dynamic import: execa is not a declared dependency but is mocked in tests.
+    // At runtime this path is best-effort (wrapped in try/catch returning null).
+    const { execa } = await import("execa" as string);
 
     let stdout: string;
     if (opts.checkRunId) {

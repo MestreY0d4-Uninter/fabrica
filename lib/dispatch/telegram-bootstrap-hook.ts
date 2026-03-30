@@ -956,7 +956,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
     }
 
     // If no projectName from structured fields, try LLM slug derivation
-    if (!parsed.projectName && ctx.runtime?.subagent?.run) {
+    if (!parsed.projectName && ctx.runtime?.subagent?.run != null) {
       // Bug B fix: create pending_classify session BEFORE await to prevent suppress race
       // (same pattern as Layer 3). The session is overwritten with "received" status after
       // the LLM call completes.
