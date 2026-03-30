@@ -183,7 +183,9 @@ export class GitHubProvider implements IssueProvider {
       if (result.code != null && result.code !== 0) {
         const errText = result.stderr?.trim() ?? "";
         if (errText.includes("rate limit") || errText.includes("429")) {
-          throw new GitHubRateLimitError(60_000);
+          const retryMatch = errText.match(/retry after (\d+)/i);
+          const retryMs = retryMatch ? parseInt(retryMatch[1]!, 10) * 1000 : 60_000;
+          throw new GitHubRateLimitError(retryMs);
         }
         throw new Error(errText || `gh api ${method} ${endpoint} failed with exit code ${result.code}`);
       }

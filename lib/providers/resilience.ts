@@ -17,8 +17,8 @@ import {
 
 /**
  * Thrown when a GitHub API call receives a rate limit response (429 or 403 with
- * x-ratelimit-remaining: 0). NOT retried by the cockatiel policy — rate limits
- * require waiting 60+ seconds, not exponential backoff retries.
+ * x-ratelimit-remaining: 0). Retried up to MAX_RATE_LIMIT_RETRIES times using
+ * the retryAfterMs delay plus jitter to avoid thundering herd.
  */
 export class GitHubRateLimitError extends Error {
   constructor(public readonly retryAfterMs: number) {
@@ -26,6 +26,9 @@ export class GitHubRateLimitError extends Error {
     this.name = "GitHubRateLimitError";
   }
 }
+
+const MAX_RATE_LIMIT_RETRIES = 2;
+const JITTER_MAX_MS = 5_000;
 
 const MAX_ENTRIES = 50;
 const policyCache = new Map<string, IPolicy>();
@@ -87,10 +90,38 @@ export function resetProviderPolicies(): void {
 /**
  * Execute a provider call with per-provider retry + circuit breaker.
  * The providerKey should be the repo identifier (e.g. "owner/repo").
+ *
+ * Rate-limited requests (GitHubRateLimitError) are retried up to 2 times
+ * using the delay from the error plus random jitter (0–5s by default).
  */
-export function withResilience<T>(fn: () => Promise<T>, providerKey?: string): Promise<T> {
+export async function withResilience<T>(
+  fn: () => Promise<T>,
+  providerKey?: string,
+  opts?: { jitterMaxMs?: number },
+): Promise<T> {
   const policy = providerKey ? getProviderPolicy(providerKey) : getProviderPolicy("__global__");
-  return policy.execute(() => fn());
+  const jitterMax = opts?.jitterMaxMs ?? JITTER_MAX_MS;
+
+  // Rate-limit retry layer (inner), then cockatiel policy (outer)
+  const withRateLimitRetry = async (): Promise<T> => {
+    let lastError: GitHubRateLimitError | undefined;
+    for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        if (err instanceof GitHubRateLimitError && attempt < MAX_RATE_LIMIT_RETRIES) {
+          lastError = err;
+          const jitter = jitterMax > 0 ? Math.floor(Math.random() * jitterMax) : 0;
+          await new Promise((resolve) => setTimeout(resolve, err.retryAfterMs + jitter));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastError!;
+  };
+
+  return policy.execute(withRateLimitRetry);
 }
 
 // Legacy: keep the global singleton export for backward compat during migration

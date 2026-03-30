@@ -4,15 +4,16 @@ import { withResilience, resetProviderPolicies, GitHubRateLimitError } from "../
 describe("rate limit resilience", () => {
   beforeEach(() => resetProviderPolicies());
 
-  it("does not retry GitHubRateLimitError", async () => {
+  it("retries GitHubRateLimitError up to 2 times with delay", async () => {
     let callCount = 0;
     await expect(
       withResilience(async () => {
         callCount++;
-        throw new GitHubRateLimitError(60_000);
-      }, "test-repo"),
+        throw new GitHubRateLimitError(10); // short delay for test
+      }, "test-repo", { jitterMaxMs: 0 }),
     ).rejects.toThrow(GitHubRateLimitError);
-    expect(callCount).toBe(1);
+    // 1 initial + 2 retries = 3 total
+    expect(callCount).toBe(3);
   });
 
   it("retries non-rate-limit errors up to 3 times", async () => {
