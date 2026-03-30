@@ -76,6 +76,9 @@ export async function cleanupExpired(workspaceDir: string, ttlMs: number = DEFAU
   const cutoff = Date.now() - ttlMs;
   const kept = entries.filter((e) => e.ts >= cutoff);
   if (kept.length < entries.length) {
-    await fs.writeFile(filePath, kept.map((e) => JSON.stringify(e)).join("\n") + (kept.length > 0 ? "\n" : ""), "utf-8");
+    const content = kept.map((e) => JSON.stringify(e)).join("\n") + (kept.length > 0 ? "\n" : "");
+    const tmpPath = filePath + ".tmp";
+    await fs.writeFile(tmpPath, content, "utf-8");
+    await fs.rename(tmpPath, filePath);
   }
 }
