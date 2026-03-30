@@ -51,10 +51,8 @@ type ServiceContext = {
 // ---------------------------------------------------------------------------
 
 export function registerHeartbeatService(api: OpenClawPluginApi, pluginCtx: PluginContext) {
-  // Single shared interval — alternates repair/triage each tick so the two
-  // modes never compete for the _anyTickRunning mutex.
   let sharedIntervalId: ReturnType<typeof setInterval> | null = null;
-  let tickCount = 0;
+  let _pendingWake = false;
 
   api.registerService({
     id: "fabrica-heartbeat",
@@ -63,20 +61,30 @@ export function registerHeartbeatService(api: OpenClawPluginApi, pluginCtx: Plug
       const { intervalSeconds } = resolveHeartbeatConfig(pluginCtx.pluginConfig);
       const intervalMs = intervalSeconds * 1000;
 
-      // Warm-up: run repair immediately on start.
-      setTimeout(() => runHeartbeatTick(pluginCtx, svcCtx.logger, "repair"), 2_000);
+      // Warm-up: run full tick immediately on start.
+      setTimeout(() => runHeartbeatTick(pluginCtx, svcCtx.logger, "full"), 2_000);
 
-      // Shared interval: even ticks → repair, odd ticks → triage.
+      // Every tick runs "full" mode (health + pickup).
+      // Previous alternation (repair/triage) caused triage starvation:
+      // repair ticks took >60s with many projects, blocking triage (the only
+      // mode that does pickup) via the _anyTickRunning mutex.
       sharedIntervalId = setInterval(() => {
-        const mode: TickMode = tickCount % 2 === 0 ? "repair" : "triage";
-        tickCount++;
-        runHeartbeatTick(pluginCtx, svcCtx.logger, mode);
+        runHeartbeatTick(pluginCtx, svcCtx.logger, "full").finally(() => {
+          // If a wake trigger arrived while this tick was running, run another tick now.
+          if (_pendingWake) {
+            _pendingWake = false;
+            svcCtx.logger.info("heartbeat_wake: running deferred full tick");
+            runHeartbeatTick(pluginCtx, svcCtx.logger, "full");
+          }
+        });
       }, intervalMs);
 
       // Register wake bridge so reactive-dispatch hooks trigger immediate ticks.
+      // If a tick is already in progress, queue a deferred tick (runs when current finishes).
       setPluginWakeHandler(async (reason) => {
         if (_anyTickRunning) {
-          svcCtx.logger.info(`heartbeat_wake: skipped (tick-in-progress), reason=${reason}`);
+          _pendingWake = true;
+          svcCtx.logger.info(`heartbeat_wake: deferred (tick-in-progress), reason=${reason}`);
           return;
         }
         svcCtx.logger.info(`heartbeat_wake: running full tick, reason=${reason}`);
