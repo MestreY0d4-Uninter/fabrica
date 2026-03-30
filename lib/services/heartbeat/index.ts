@@ -28,6 +28,8 @@ export { raceWithTimeout } from "../../utils/async.js";
 export { HEARTBEAT_DEFAULTS };
 import { tick, type TickMode } from "./tick-runner.js";
 import type { TickResult } from "./tick-runner.js";
+import { setPluginWakeHandler } from "./wake-bridge.js";
+export { wakeHeartbeat } from "./wake-bridge.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -70,9 +72,20 @@ export function registerHeartbeatService(api: OpenClawPluginApi, pluginCtx: Plug
         tickCount++;
         runHeartbeatTick(pluginCtx, svcCtx.logger, mode);
       }, intervalMs);
+
+      // Register wake bridge so reactive-dispatch hooks trigger immediate ticks.
+      setPluginWakeHandler(async (reason) => {
+        if (_anyTickRunning) {
+          svcCtx.logger.info(`heartbeat_wake: skipped (tick-in-progress), reason=${reason}`);
+          return;
+        }
+        svcCtx.logger.info(`heartbeat_wake: running full tick, reason=${reason}`);
+        await runHeartbeatTick(pluginCtx, svcCtx.logger, "full");
+      });
     },
 
     stop: async (svcCtx) => {
+      setPluginWakeHandler(null);
       if (sharedIntervalId) {
         clearInterval(sharedIntervalId);
         sharedIntervalId = null;

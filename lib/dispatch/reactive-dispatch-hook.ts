@@ -14,6 +14,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginContext } from "../context.js";
 import { parseFabricaSessionKey } from "./bootstrap-hook.js";
+import { wakeHeartbeat } from "../services/heartbeat/wake-bridge.js";
 
 /** Tools whose completion should immediately trigger heartbeat triage. */
 const COMPLETION_TOOLS = new Set(["work_finish", "review_submit"]);
@@ -39,6 +40,7 @@ export function registerReactiveDispatchHooks(
   api.on("after_tool_call", async (event, _eventCtx) => {
     if (!COMPLETION_TOOLS.has(event.toolName)) return;
     ctx.runtime?.system.requestHeartbeatNow({ reason: "work_finish", coalesceMs: 2000 });
+    wakeHeartbeat("work_finish").catch(() => {});
   });
 
   // Wake heartbeat immediately when any Fabrica worker run ends.
@@ -49,6 +51,7 @@ export function registerReactiveDispatchHooks(
     const parsed = parseFabricaSessionKey(sessionKey);
     if (!parsed) return;
     ctx.runtime?.system.requestHeartbeatNow({ reason: "agent_end", coalesceMs: 2000 });
+    wakeHeartbeat("agent_end").catch(() => {});
   });
 
   // Record spawn time for accurate duration tracking in subagent-lifecycle-hook.
