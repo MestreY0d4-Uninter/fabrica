@@ -215,9 +215,12 @@ export function buildEffortPrompt(
 
 export function sendToAgent(
   sessionKey: string, taskMessage: string,
-  opts: { agentId?: string; projectName: string; projectSlug?: string; issueId: number; role: string; level?: string; slotIndex?: number; fromLabel?: string; orchestratorSessionKey?: string; workspaceDir: string; dispatchTimeoutMs?: number; extraSystemPrompt?: string; runCommand: RunCommand; runtime?: PluginRuntime },
+  opts: { agentId?: string; projectName: string; projectSlug?: string; issueId: number; role: string; level?: string; slotIndex?: number; fromLabel?: string; orchestratorSessionKey?: string; workspaceDir: string; dispatchTimeoutMs?: number; extraSystemPrompt?: string; runCommand: RunCommand; runtime?: PluginRuntime; dispatchEpoch?: string },
 ): void {
-  const idempotencyKey = `fabrica-${opts.projectName}-${opts.issueId}-${opts.role}-${opts.level ?? "unknown"}-${opts.slotIndex ?? 0}-${opts.fromLabel ?? "unknown"}-${sessionKey}`;
+  // dispatchEpoch ensures retries (after slot cleanup + label revert) get a fresh
+  // idempotency key so OpenClaw doesn't deduplicate them as already-completed sessions.
+  const epoch = opts.dispatchEpoch ?? new Date().toISOString();
+  const idempotencyKey = `fabrica-${opts.projectName}-${opts.issueId}-${opts.role}-${opts.level ?? "unknown"}-${opts.slotIndex ?? 0}-${opts.fromLabel ?? "unknown"}-${sessionKey}-${epoch}`;
 
   // Prefer in-process dispatch via runtime.subagent.run() — bypasses WebSocket
   // entirely, avoiding the WS handshake timeout caused by event-loop contention

@@ -414,6 +414,7 @@ export async function dispatchTask(
   // Step 4c: Send task to agent (fire-and-forget — session already confirmed above)
   // Model is set on the session via sessions.patch (pre-commitment), not on the agent RPC —
   // the gateway's agent endpoint rejects unknown properties like 'model'.
+  const dispatchEpoch = new Date().toISOString();
   sendToAgent(sessionKey, taskMessage, {
     agentId, projectName: project.name, projectSlug: project.slug, issueId, role, level, slotIndex, fromLabel,
     orchestratorSessionKey: opts.sessionKey, workspaceDir,
@@ -424,6 +425,7 @@ export async function dispatchTask(
     ) || undefined,
     runCommand: rc,
     runtime,
+    dispatchEpoch,
   });
 
   // Record lifecycle event (worker state already written in Step 4a)
