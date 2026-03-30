@@ -10,14 +10,26 @@
 import type { FabricaConfig, RoleOverride } from "./types.js";
 import type { StateConfig, TransitionTarget } from "../workflow/index.js";
 
+// ---------------------------------------------------------------------------
+// Traced merge (type, exported for consumers)
+// ---------------------------------------------------------------------------
+
+export type MergeTrace = Record<string, string>;
+
 /**
  * Merge a config overlay on top of a base config.
  * Returns a new config — does not mutate inputs.
+ *
+ * When `traceOpts` is provided the returned object also carries a
+ * `_trace` property (a dotted-path → layer-name map).  Callers that
+ * only need the plain config can ignore it; `mergeConfigWithTrace`
+ * strips it before returning.
  */
 export function mergeConfig(
   base: FabricaConfig,
   overlay: FabricaConfig,
-): FabricaConfig {
+  traceOpts?: { baseLabel: string; overlayLabel: string },
+): FabricaConfig & { _trace?: MergeTrace } {
   const merged: FabricaConfig = {};
 
   // Merge roles
@@ -83,6 +95,52 @@ export function mergeConfig(
           }
         : undefined,
     };
+  }
+
+  if (traceOpts) {
+    const { baseLabel, overlayLabel } = traceOpts;
+    const trace: MergeTrace = {};
+
+    // Trace workflow fields
+    if (merged.workflow) {
+      for (const key of ["initial", "reviewPolicy", "testPolicy", "roleExecution", "maxWorkersPerLevel"] as const) {
+        if (merged.workflow[key] !== undefined) {
+          const fromOverlay = overlay.workflow?.[key] !== undefined;
+          trace[`workflow.${key}`] = fromOverlay ? overlayLabel : baseLabel;
+        }
+      }
+    }
+
+    // Trace timeout fields
+    if (merged.timeouts) {
+      for (const [key, value] of Object.entries(merged.timeouts)) {
+        if (value !== undefined) {
+          const fromOverlay = overlay.timeouts?.[key as keyof typeof overlay.timeouts] !== undefined;
+          trace[`timeouts.${key}`] = fromOverlay ? overlayLabel : baseLabel;
+        }
+      }
+    }
+
+    // Trace role fields
+    if (merged.roles) {
+      for (const [roleId, roleValue] of Object.entries(merged.roles)) {
+        if (roleValue === false) {
+          trace[`roles.${roleId}`] = overlay.roles?.[roleId] === false ? overlayLabel : baseLabel;
+          continue;
+        }
+        if (typeof roleValue === "object") {
+          for (const key of ["defaultLevel", "levels", "completionResults"] as const) {
+            if (roleValue[key] !== undefined) {
+              const overlayRole = overlay.roles?.[roleId];
+              const fromOverlay = typeof overlayRole === "object" && overlayRole?.[key] !== undefined;
+              trace[`roles.${roleId}.${key}`] = fromOverlay ? overlayLabel : baseLabel;
+            }
+          }
+        }
+      }
+    }
+
+    return Object.assign(merged, { _trace: trace });
   }
 
   return merged;
@@ -152,14 +210,14 @@ function mergeRoleOverride(
 }
 
 // ---------------------------------------------------------------------------
-// Traced merge
+// Backward-compatible traced merge wrapper
 // ---------------------------------------------------------------------------
 
-export type MergeTrace = Record<string, string>;
-
 /**
- * Merge with trace: returns { merged, trace } where trace maps
- * dotted paths to the layer name that contributed the value.
+ * Thin wrapper around `mergeConfig` that strips the internal `_trace`
+ * property and returns the classic `{ merged, trace }` shape.
+ *
+ * Kept for backward compatibility — no call-site changes required.
  */
 export function mergeConfigWithTrace(
   base: FabricaConfig,
@@ -167,47 +225,8 @@ export function mergeConfigWithTrace(
   baseLabel: string,
   overlayLabel: string,
 ): { merged: FabricaConfig; trace: MergeTrace } {
-  const merged = mergeConfig(base, overlay);
-  const trace: MergeTrace = {};
-
-  // Trace workflow fields
-  if (merged.workflow) {
-    for (const key of ["initial", "reviewPolicy", "testPolicy", "roleExecution", "maxWorkersPerLevel"] as const) {
-      if (merged.workflow[key] !== undefined) {
-        const fromOverlay = overlay.workflow?.[key] !== undefined;
-        trace[`workflow.${key}`] = fromOverlay ? overlayLabel : baseLabel;
-      }
-    }
-  }
-
-  // Trace timeout fields
-  if (merged.timeouts) {
-    for (const [key, value] of Object.entries(merged.timeouts)) {
-      if (value !== undefined) {
-        const fromOverlay = overlay.timeouts?.[key as keyof typeof overlay.timeouts] !== undefined;
-        trace[`timeouts.${key}`] = fromOverlay ? overlayLabel : baseLabel;
-      }
-    }
-  }
-
-  // Trace role fields
-  if (merged.roles) {
-    for (const [roleId, roleValue] of Object.entries(merged.roles)) {
-      if (roleValue === false) {
-        trace[`roles.${roleId}`] = overlay.roles?.[roleId] === false ? overlayLabel : baseLabel;
-        continue;
-      }
-      if (typeof roleValue === "object") {
-        for (const key of ["defaultLevel", "levels", "completionResults"] as const) {
-          if (roleValue[key] !== undefined) {
-            const overlayRole = overlay.roles?.[roleId];
-            const fromOverlay = typeof overlayRole === "object" && overlayRole?.[key] !== undefined;
-            trace[`roles.${roleId}.${key}`] = fromOverlay ? overlayLabel : baseLabel;
-          }
-        }
-      }
-    }
-  }
-
-  return { merged, trace };
+  const result = mergeConfig(base, overlay, { baseLabel, overlayLabel });
+  const trace = (result as any)._trace ?? {};
+  delete (result as any)._trace;
+  return { merged: result, trace };
 }
