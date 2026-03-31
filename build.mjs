@@ -2,7 +2,8 @@
  * esbuild bundler — produces a single dist/index.js with all dependencies inlined.
  *
  * Eliminates the need for `npm install` at plugin install time.
- * openclaw/plugin-sdk is kept external (peer dependency provided by the host).
+ * OpenClaw plugin APIs are consumed via host-provided runtime objects and type-only imports.
+ * The published bundle must not rely on resolving `openclaw/plugin-sdk` from the installed extension directory.
  */
 import esbuild from "esbuild";
 import { readFileSync } from "node:fs";
