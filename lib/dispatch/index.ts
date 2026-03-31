@@ -4,6 +4,7 @@
  * Handles: session lookup, spawn/reuse via Gateway RPC, task dispatch via CLI,
  * state update (activateWorker), and audit logging.
  */
+import { randomUUID } from "node:crypto";
 import type { PluginRuntime } from "openclaw/plugin-sdk";
 import type { RunCommand } from "../context.js";
 import { log as auditLog } from "../audit.js";
@@ -206,6 +207,7 @@ export async function dispatchTask(
   }
 
   const sessionAction = existingSessionKey ? "send" : "spawn";
+  const dispatchCycleId = randomUUID();
 
   // Fetch issue discussion (filtered later based on role/phase)
   const allComments = await provider.listComments(issueId);
@@ -276,14 +278,17 @@ export async function dispatchTask(
   // Writing the slot before the label transition prevents the C2 race where
   // scanOrphanedLabels() sees an active label with no tracking slot.
   await recordWorkerState(workspaceDir, project.slug, role, slotIndex, {
-    issueId, level, sessionKey, sessionAction, fromLabel, name: botName,
+    issueId, level, sessionKey, sessionAction, fromLabel, name: botName, dispatchCycleId,
   });
 
   // Record dispatchRequestedAt for fast recovery via dispatch_unconfirmed detection
   await updateIssueRuntime(workspaceDir, project.slug, String(issueId), {
     dispatchRequestedAt: new Date().toISOString(),
+    lastDispatchCycleId: dispatchCycleId,
+    dispatchRunId: null,
     agentAcceptedAt: null,
     firstWorkerActivityAt: null,
+    lastSessionKey: sessionKey,
   }).catch((err) => {
     auditLog(workspaceDir, "dispatch_warning", { step: "record_dispatch_requested", issue: issueId, err: String(err) }).catch(() => {});
   });
@@ -462,13 +467,15 @@ export async function dispatchTask(
 
 async function recordWorkerState(
   workspaceDir: string, slug: string, role: string, slotIndex: number,
-  opts: { issueId: number; level: string; sessionKey: string; sessionAction: "spawn" | "send"; fromLabel?: string; name?: string },
+  opts: { issueId: number; level: string; sessionKey: string; sessionAction: "spawn" | "send"; fromLabel?: string; name?: string; dispatchCycleId: string },
 ): Promise<void> {
   await activateWorker(workspaceDir, slug, role, {
     issueId: String(opts.issueId),
     level: opts.level,
     sessionKey: opts.sessionKey,
     startTime: new Date().toISOString(),
+    dispatchCycleId: opts.dispatchCycleId,
+    dispatchRunId: null,
     previousLabel: opts.fromLabel,
     slotIndex,
     name: opts.name,

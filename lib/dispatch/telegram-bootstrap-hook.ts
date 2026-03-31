@@ -367,12 +367,81 @@ function logBootstrapWarning(ctx: PluginContext, message: string): void {
   }
 }
 
+async function runBootstrapPreflightOrFail(
+  ctx: PluginContext,
+  conversationId: string,
+  workspaceDir: string,
+  request: {
+    rawIdea: string;
+    projectName?: string | null;
+    stackHint?: string | null;
+    repoUrl?: string | null;
+    repoPath?: string | null;
+  },
+  sourceRoute: TelegramBootstrapRoute,
+  options?: {
+    language?: BootstrapLanguage;
+  },
+): Promise<boolean> {
+  const telegramConfig = readFabricaTelegramConfig(ctx.pluginConfig);
+  const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
+  const language = options?.language ?? existingSession?.language ?? "pt";
+
+  if (!telegramConfig.projectsForumChatId) {
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId,
+      rawIdea: request.rawIdea,
+      projectName: request.projectName ?? undefined,
+      stackHint: request.stackHint ?? undefined,
+      repoUrl: request.repoUrl ?? undefined,
+      repoPath: request.repoPath ?? undefined,
+      sourceRoute,
+      status: "failed",
+      language,
+      error: "missing_projects_forum_chat",
+    });
+    await sendTelegramText(
+      ctx,
+      conversationId,
+      "A Fabrica precisa de um grupo de projetos configurado para criar projetos automaticamente. " +
+      "Configure 'telegram.projectsForumChatId' no openclaw.json do plugin.",
+    );
+    return true;
+  }
+
+  const candidateSlug = inferProjectSlug(request.projectName ?? request.rawIdea);
+  if (!candidateSlug) return false;
+
+  const projects = await readProjects(workspaceDir).catch(() => null);
+  if (!projects?.projects?.[candidateSlug]) return false;
+
+  await upsertTelegramBootstrapSession(workspaceDir, {
+    conversationId,
+    rawIdea: request.rawIdea,
+    projectName: request.projectName ?? undefined,
+    stackHint: request.stackHint ?? undefined,
+    repoUrl: request.repoUrl ?? undefined,
+    repoPath: request.repoPath ?? undefined,
+    sourceRoute,
+    status: "failed",
+    projectSlug: candidateSlug,
+    language,
+    error: "duplicate_project_slug",
+  });
+  await sendTelegramText(
+    ctx,
+    conversationId,
+    `Ja existe um projeto registrado com o slug "${candidateSlug}". Use o fluxo administrativo para vincular canais ou ajustar o projeto existente.`,
+  );
+  return true;
+}
+
 /**
  * Layer 3: LLM-based classification for ambiguous DMs.
  * Classifies the message via classifyDmIntent. If LLM returns null, "other", or
  * low confidence (< LAYER3_CONFIDENCE_THRESHOLD), deletes the classifying session (fail-open to chat).
- * If "create_project" with confidence >= LAYER3_CONFIDENCE_THRESHOLD (0.6), sends ack, merges LLM enrichment
- * into the parsed request, deduplicates, and enters clarification or fires the pipeline.
+ * If "create_project" with confidence >= LAYER3_CONFIDENCE_THRESHOLD (0.6), merges LLM enrichment,
+ * runs deterministic preflight checks, then sends ack and enters clarification or fires the pipeline.
  */
 async function classifyAndBootstrap(
   ctx: PluginContext,
@@ -399,9 +468,7 @@ async function classifyAndBootstrap(
     return;
   }
 
-  // LLM says create_project with high confidence — send ack
   const language: BootstrapLanguage = classification.language ?? "pt";
-  await sendTelegramText(ctx, conversationId, BOOTSTRAP_MESSAGES.ack[language]);
 
   // Parse the original content with existing regex parser, then merge LLM enrichment
   const parsed = parseBootstrapRequest(content);
@@ -438,6 +505,20 @@ async function classifyAndBootstrap(
   }
 
   const sourceRoute: TelegramBootstrapRoute = { channel: "telegram", channelId: conversationId };
+
+  if (parsed.stackHint) {
+    const handled = await runBootstrapPreflightOrFail(
+      ctx,
+      conversationId,
+      workspaceDir,
+      incomingRequest,
+      sourceRoute,
+      { language },
+    );
+    if (handled) return;
+  }
+
+  await sendTelegramText(ctx, conversationId, BOOTSTRAP_MESSAGES.ack[language]);
 
   // Upsert session with "received" status
   const session = await upsertTelegramBootstrapSession(workspaceDir, {
@@ -515,14 +596,10 @@ async function continueBootstrap(
   },
   sourceRoute: TelegramBootstrapRoute,
 ): Promise<void> {
-  const telegramConfig = readFabricaTelegramConfig(ctx.pluginConfig);
-  if (!telegramConfig.projectsForumChatId) {
-    await sendTelegramText(ctx, conversationId,
-      "A Fabrica precisa de um grupo de projetos configurado para criar projetos automaticamente. " +
-      "Configure 'telegram.projectsForumChatId' no openclaw.json do plugin.",
-    );
+  if (await runBootstrapPreflightOrFail(ctx, conversationId, workspaceDir, request, sourceRoute)) {
     return;
   }
+  const telegramConfig = readFabricaTelegramConfig(ctx.pluginConfig);
 
   const stackHint = request.stackHint;
   if (!stackHint) {
@@ -578,19 +655,6 @@ async function continueBootstrap(
         );
         return;
       }
-    }
-  }
-
-  const candidateSlug = inferProjectSlug(request.projectName ?? request.rawIdea);
-  if (candidateSlug) {
-    const projects = await readProjects(workspaceDir).catch(() => null);
-    if (projects?.projects?.[candidateSlug]) {
-      await sendTelegramText(
-        ctx,
-        conversationId,
-        `Ja existe um projeto registrado com o slug "${candidateSlug}". Use o fluxo administrativo para vincular canais ou ajustar o projeto existente.`,
-      );
-      return;
     }
   }
 
@@ -654,7 +718,7 @@ async function continueBootstrap(
   if (!result.success) {
     // Detect orphaned repo: repo was created but project registration failed
     const orphanedRepoArtifact = result.artifacts?.find(a => a.type === "github_repo" || a.type === "gitlab_repo");
-    const projectRegistered = result.payload?.project_registered === true;
+    const projectRegistered = result.payload?.metadata?.project_registered === true;
     if (orphanedRepoArtifact && !projectRegistered) {
       await upsertTelegramBootstrapSession(workspaceDir, {
         conversationId,
@@ -887,6 +951,20 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
         repoPath: existingSession.repoPath ?? null,
       };
       ctx.logger.info(`[telegram-bootstrap] clarification resolved: stack=${mergedRequest.stackHint}, idea="${mergedRequest.rawIdea}" (conversation: ${conversationId})`);
+      if (mergedRequest.stackHint) {
+        const handled = await runBootstrapPreflightOrFail(
+          ctx,
+          conversationId,
+          workspaceDir,
+          mergedRequest,
+          existingSession.sourceRoute ?? {
+            channel: "telegram",
+            channelId: conversationId,
+          },
+          { language: existingSession.language ?? "pt" },
+        );
+        if (handled) return;
+      }
       // Continue with merged request — fall through with pre-populated data
       // Fire-and-forget: session suppression is already in place (suppressUntil set above).
       // Awaiting the full pipeline in the event handler blocks all Telegram message processing.
@@ -984,22 +1062,19 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
     const language: BootstrapLanguage = /\b(cria|crie|criar|construa|desenvolva|registre|novo projeto)\b/i.test(content)
       ? "pt" : "en";
 
-    // Immediate ack — user knows message was received before pipeline starts
-    await sendTelegramText(ctx, conversationId, BOOTSTRAP_MESSAGES.ack[language]);
-
-    const session = await upsertTelegramBootstrapSession(workspaceDir, {
-      conversationId,
-      ...incomingRequest,
-      sourceRoute: {
-        channel: "telegram",
-        channelId: conversationId,
-      },
-      sourceChannel: "telegram",
-      status: "received",
-      language,
-    });
-
     if (!parsed.stackHint) {
+      await sendTelegramText(ctx, conversationId, BOOTSTRAP_MESSAGES.ack[language]);
+      const session = await upsertTelegramBootstrapSession(workspaceDir, {
+        conversationId,
+        ...incomingRequest,
+        sourceRoute: {
+          channel: "telegram",
+          channelId: conversationId,
+        },
+        sourceChannel: "telegram",
+        status: "received",
+        language,
+      });
       const pendingClarification = !parsed.projectName ? "stack_and_name" as const : "stack" as const;
       await upsertTelegramBootstrapSession(workspaceDir, {
         conversationId,
@@ -1012,6 +1087,34 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       await sendTelegramText(ctx, conversationId, buildClarificationMessage(parsed, pendingClarification, language));
       return;
     }
+
+    const handled = await runBootstrapPreflightOrFail(
+      ctx,
+      conversationId,
+      workspaceDir,
+      incomingRequest,
+      {
+        channel: "telegram",
+        channelId: conversationId,
+      },
+      { language },
+    );
+    if (handled) return;
+
+    // Immediate ack — user knows message was received before pipeline starts
+    await sendTelegramText(ctx, conversationId, BOOTSTRAP_MESSAGES.ack[language]);
+
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId,
+      ...incomingRequest,
+      sourceRoute: {
+        channel: "telegram",
+        channelId: conversationId,
+      },
+      sourceChannel: "telegram",
+      status: "received",
+      language,
+    });
 
     // Fire-and-forget: session suppression is already in place (suppressUntil set above).
     // Awaiting the full pipeline in the event handler blocks all Telegram message processing.

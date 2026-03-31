@@ -325,6 +325,14 @@ describe("label helpers", () => {
     expect(result?.channelId).toBe("ch2");
   });
 
+  it("resolveNotifyChannel returns undefined for an invalid notify: label instead of falling back silently", () => {
+    const channels = [
+      { channelId: "ch1", channel: "telegram", name: "primary" },
+      { channelId: "ch2", channel: "discord", name: "dev" },
+    ];
+    expect(resolveNotifyChannel(["notify:discord:missing"], channels)).toBeUndefined();
+  });
+
   it("owner labels", () => {
     expect(getOwnerLabel("Samaria")).toBe("owner:Samaria");
     expect(detectOwner(["owner:Samaria", "To Do"])).toBe("Samaria");

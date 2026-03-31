@@ -19,9 +19,10 @@ import { parseFabricaSessionKey } from "./bootstrap-hook.js";
 import { clearSpawnTime, getSpawnTime } from "./reactive-dispatch-hook.js";
 import { readProjects, deactivateWorker } from "../projects/index.js";
 import { loadConfig } from "../config/index.js";
-import { getActiveLabel, getRevertLabel } from "../workflow/index.js";
 import { createProvider } from "../providers/index.js";
+import { getActiveLabel, getRevertLabel } from "../workflow/index.js";
 import { wakeHeartbeat } from "../services/heartbeat/wake-bridge.js";
+import { handleReviewerAgentEnd } from "../services/reviewer-completion.js";
 
 export function registerSubagentLifecycleHook(
   api: OpenClawPluginApi,
@@ -79,7 +80,9 @@ export function registerSubagentLifecycleHook(
 
       for (const [level, slots] of Object.entries(roleWorker.levels)) {
         for (let i = 0; i < slots.length; i++) {
-          if (slots[i]!.sessionKey === sessionKey && slots[i]!.active) {
+          if (slots[i]!.sessionKey === sessionKey) {
+            // Accept both active slots (normal path) and recently-deactivated slots
+            // where stale_worker ran first and cleared issueId but preserved sessionKey.
             foundLevel = level;
             foundSlotIndex = i;
             foundSlot = slots[i]!;
@@ -89,33 +92,104 @@ export function registerSubagentLifecycleHook(
         if (foundSlot) break;
       }
 
-      // If not found or already inactive (work_finish already ran): no-op
+      // If not found: work_finish already handled this session (cleared sessionKey). No-op.
       if (!foundSlot || foundLevel == null || foundSlotIndex == null) return;
 
-      const issueId = foundSlot.issueId;
+      // Resolve issueId: active slots have it directly; deactivated slots store it in lastIssueId.
+      const issueId = foundSlot.issueId ?? foundSlot.lastIssueId;
+      const issueRuntime = issueId
+        ? project.issueRuntime?.[String(issueId)]
+        : undefined;
+      const currentDispatchRunId = foundSlot.dispatchRunId ?? issueRuntime?.dispatchRunId ?? null;
+      const currentDispatchCycleId = foundSlot.dispatchCycleId ?? issueRuntime?.lastDispatchCycleId ?? null;
 
-      // Deactivate the slot
-      await deactivateWorker(workspaceDir, projectSlug, role, {
-        level: foundLevel,
-        slotIndex: foundSlotIndex,
-      });
+      if (event.runId && currentDispatchRunId && event.runId !== currentDispatchRunId) {
+        await auditLog(workspaceDir, "subagent_ended_slot_cleanup_rejected", {
+          sessionKey,
+          project: projectName,
+          projectSlug,
+          role,
+          level: foundLevel,
+          slotIndex: foundSlotIndex,
+          issueId,
+          reason: "stale_dispatch_cycle",
+          eventRunId: event.runId,
+          currentDispatchRunId,
+          currentDispatchCycleId,
+        }).catch(() => {});
+        return;
+      }
 
-      // Revert label if it still matches the active label for this role
+      if (
+        foundSlot.dispatchCycleId &&
+        issueRuntime?.lastDispatchCycleId &&
+        foundSlot.dispatchCycleId !== issueRuntime.lastDispatchCycleId
+      ) {
+        await auditLog(workspaceDir, "subagent_ended_slot_cleanup_rejected", {
+          sessionKey,
+          project: projectName,
+          projectSlug,
+          role,
+          level: foundLevel,
+          slotIndex: foundSlotIndex,
+          issueId,
+          reason: "stale_dispatch_cycle",
+          eventRunId: event.runId ?? null,
+          currentDispatchRunId,
+          slotDispatchCycleId: foundSlot.dispatchCycleId,
+          runtimeDispatchCycleId: issueRuntime.lastDispatchCycleId,
+        }).catch(() => {});
+        return;
+      }
+
+      // Deactivate the slot (only if still active — stale_worker may have already done it)
+      if (foundSlot.active) {
+        await deactivateWorker(workspaceDir, projectSlug, role, {
+          level: foundLevel,
+          slotIndex: foundSlotIndex,
+        });
+      }
+
+      // Revert label if it still matches the active label for this role.
+      // For reviewer role: parse session output to determine approve/reject transition
+      // instead of always reverting to queue — this is the primary review signal.
       if (issueId) {
         try {
-          const config = await loadConfig(workspaceDir, projectSlug);
-          const activeLabel = getActiveLabel(config.workflow, role);
-          const revertLabel = getRevertLabel(config.workflow, role);
-
-          const { provider } = await createProvider({
-            repo: project.repo,
-            provider: project.provider,
-            runCommand: ctx.runCommand,
-          });
-
-          const issue = await provider.getIssue(Number(issueId));
-          if (issue.labels.includes(activeLabel)) {
-            await provider.transitionLabel(Number(issueId), activeLabel, revertLabel);
+          if (role === "reviewer") {
+            const reviewResult = await handleReviewerAgentEnd({
+              sessionKey,
+              runtime: ctx.runtime as any,
+              workspaceDir,
+              runCommand: ctx.runCommand,
+              fallbackToQueueOnUndetermined: true,
+            });
+            if (!reviewResult) {
+              const { workflow } = await loadConfig(workspaceDir, projectSlug);
+              const activeLabel = getActiveLabel(workflow, role);
+              const revertLabel = getRevertLabel(workflow, role);
+              const { provider } = await createProvider({
+                repo: project.repo,
+                provider: project.provider,
+                runCommand: ctx.runCommand,
+              });
+              const issue = await provider.getIssue(Number(issueId));
+              if (issue.labels.includes(activeLabel)) {
+                await provider.transitionLabel(Number(issueId), activeLabel, revertLabel);
+              }
+            }
+          } else {
+            const { workflow } = await loadConfig(workspaceDir, projectSlug);
+            const activeLabel = getActiveLabel(workflow, role);
+            const revertLabel = getRevertLabel(workflow, role);
+            const { provider } = await createProvider({
+              repo: project.repo,
+              provider: project.provider,
+              runCommand: ctx.runCommand,
+            });
+            const issue = await provider.getIssue(Number(issueId));
+            if (issue.labels.includes(activeLabel)) {
+              await provider.transitionLabel(Number(issueId), activeLabel, revertLabel);
+            }
           }
         } catch {
           // Best-effort label revert — slot is already deactivated

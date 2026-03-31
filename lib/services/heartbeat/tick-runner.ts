@@ -22,11 +22,10 @@ import {
   performReviewSkipPass,
   performTestSkipPass,
   performHoldEscapePass,
+  performReviewerPollPass,
 } from "./passes.js";
 import { runPrDiscoveryPass } from "./pr-discovery.js";
 import { checkGenesisHealth } from "./genesis-health.js";
-import { computeHealthScore } from "../../observability/health-score.js";
-import { shouldAlert, type AlertState } from "../../observability/alerting.js";
 import { withTelemetrySpan as withTickSpan } from "../../observability/tracer.js";
 
 // ---------------------------------------------------------------------------
@@ -46,8 +45,6 @@ export type TickResult = {
 export type TickMode = "full" | "repair" | "triage";
 
 const discoveredProjects = new Set<string>();
-let _tickCount = 0;
-const _alertState: AlertState = { lastAlertTs: 0, lastAlertScore: 100, cooldownMs: 1800_000 };
 
 // ---------------------------------------------------------------------------
 // Workflow integrity validation (cached per tick)
@@ -180,6 +177,11 @@ export async function tick(opts: {
             opts.logger.warn?.(`PR discovery pass failed for ${slug}: ${(err as Error).message}`);
           });
 
+          // Reviewer poll pass: detect reviewer session decisions without waiting for stale_worker
+          result.totalReviewTransitions += await performReviewerPollPass(
+            workspaceDir, slug, project, provider, resolvedConfig, runtime,
+          );
+
           // Review pass: transition issues whose PR check condition is met
           result.totalReviewTransitions += await performReviewPass(
             workspaceDir, slug, project, provider, resolvedConfig, pluginConfig, runtime, runCommand,
@@ -259,35 +261,6 @@ export async function tick(opts: {
     pickups: result.totalPickups,
     skipped: result.totalSkipped,
   });
-
-  // Every 10 ticks, compute composite health score and record in audit log
-  _tickCount++;
-  if (_tickCount % 10 === 0) {
-    const healthScore = computeHealthScore({
-      completionRate: slugs.length > 0 ? result.totalPickups / Math.max(1, slugs.length) : null,
-      avgDispatchToCompletionMinutes: null,
-      baselineMinutes: 30,
-      errorRate: slugs.length > 0 ? result.totalHealthFixes / Math.max(1, slugs.length) : null,
-      queueDepth: result.totalSkipped,
-      maxQueueDepth: Math.max(20, slugs.length * 3),
-      heartbeatRegularity: null,
-    });
-    await auditLog(workspaceDir, "health_score", {
-      score: healthScore.score,
-      status: healthScore.status,
-      tickCount: _tickCount,
-    }).catch(() => {});
-    const decision = shouldAlert(healthScore.score, 60, _alertState, Date.now());
-    if (decision === "alert" || decision === "recovered") {
-      _alertState.lastAlertTs = Date.now();
-      _alertState.lastAlertScore = healthScore.score;
-      await auditLog(workspaceDir, "health_alert", {
-        decision,
-        score: healthScore.score,
-        status: healthScore.status,
-      }).catch(() => {});
-    }
-  }
 
   return result;
 }

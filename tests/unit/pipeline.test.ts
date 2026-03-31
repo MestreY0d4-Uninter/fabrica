@@ -199,4 +199,5 @@ describe("runPipeline", () => {
     expect(p.spec?.delivery_target).toBe("cli");
     expect(p.spec?.acceptance_criteria.length).toBeGreaterThan(0);
   });
+
 });

@@ -42,21 +42,20 @@ describe("createPluginContext — pluginConfig validation", () => {
   });
 
   it("does NOT warn for valid config", () => {
-    const api = makeApi({ timeouts: { gitPullMs: 30000 } });
+    const api = makeApi({
+      work_heartbeat: { enabled: true, intervalSeconds: 60, maxPickupsPerTick: 4 },
+      providers: { github: { webhookMode: "optional" } },
+      telegram: { bootstrapDmEnabled: true },
+    });
     createPluginContext(api);
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
-  it("warns (does NOT throw) for invalid pluginConfig", () => {
-    // Invalid: timeouts.gitPullMs must be a positive number
-    const api = makeApi({ timeouts: { gitPullMs: "not-a-number" } });
+  it("fails closed for invalid material pluginConfig", () => {
+    const api = makeApi({ work_heartbeat: { enabled: "not-a-boolean" } });
 
-    // Must NOT throw — tolerant validation
-    expect(() => createPluginContext(api)).not.toThrow();
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ errors: expect.any(Array) }),
-      expect.stringContaining("pluginConfig validation failed"),
-    );
+    expect(() => createPluginContext(api)).toThrow(/pluginConfig validation failed/i);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it("does not warn for empty config (no validation needed)", () => {

@@ -190,4 +190,50 @@ describe("review_submit tool", () => {
 
     expect(mockSubmitPrReview).not.toHaveBeenCalled();
   });
+
+  it("rejects Fabrica reviewer sessions and points them to the canonical response contract", async () => {
+    const ctx = {
+      runCommand: vi.fn(),
+      runtime: {} as any,
+      pluginConfig: {},
+      config: {},
+      logger: console,
+    };
+    const tool = createReviewSubmitTool(ctx as any)({
+      workspaceDir: "/tmp/workspace",
+      sessionKey: "agent:main:subagent:test-project-reviewer-junior-ada",
+    });
+
+    await expect(tool.execute("1", {
+      channelId: "test-project",
+      issueId: 42,
+      result: "reject",
+      body: "Blocking findings.",
+    })).rejects.toThrow(/Review result: APPROVE|Review result: REJECT/);
+
+    expect(mockSubmitPrReview).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-reviewer Fabrica worker sessions", async () => {
+    const ctx = {
+      runCommand: vi.fn(),
+      runtime: {} as any,
+      pluginConfig: {},
+      config: {},
+      logger: console,
+    };
+    const tool = createReviewSubmitTool(ctx as any)({
+      workspaceDir: "/tmp/workspace",
+      sessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+    });
+
+    await expect(tool.execute("1", {
+      channelId: "test-project",
+      issueId: 42,
+      result: "approve",
+      body: "LGTM",
+    })).rejects.toThrow(/must not call review_submit/i);
+
+    expect(mockSubmitPrReview).not.toHaveBeenCalled();
+  });
 });

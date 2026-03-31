@@ -63,4 +63,16 @@ describe("loadConfig", () => {
     await expect(loadConfig(ws, "demo")).rejects.toThrow(/legacy workflow\.json/);
     await expect(loadConfig(ws, "demo")).rejects.toThrow(/demo\/workflow\.json/);
   });
+
+  it("fails closed when workflow.yaml includes plugin-only control plane keys", async () => {
+    const ws = await makeWorkspace();
+    await fs.writeFile(
+      path.join(ws, DATA_DIR, "workflow.yaml"),
+      "providers:\n  github:\n    webhookMode: required\n",
+      "utf-8",
+    );
+
+    await expect(loadConfig(ws)).rejects.toThrow(/plugin-only keys/i);
+    await expect(loadConfig(ws)).rejects.toThrow(/providers/);
+  });
 });

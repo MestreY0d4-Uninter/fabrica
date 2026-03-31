@@ -85,7 +85,7 @@ describe("task_comment", () => {
       channelId: "test-project",
       issueId: 1,
       body: "Blocking findings",
-    })).rejects.toThrow("review_submit");
+    })).rejects.toThrow("Review result:");
     expect(mockAddComment).not.toHaveBeenCalled();
   });
 

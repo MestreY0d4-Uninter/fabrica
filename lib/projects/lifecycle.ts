@@ -32,22 +32,20 @@ function findIssueBySessionKey(data: ProjectsData, sessionKey: string): Lifecycl
           if (slot.sessionKey !== sessionKey) continue;
           const issueId = slot.issueId ?? slot.lastIssueId;
           if (!issueId) continue;
+          const runtime = getIssueRuntime(project, issueId);
+          if (
+            !slot.dispatchCycleId ||
+            !runtime?.lastDispatchCycleId ||
+            slot.dispatchCycleId !== runtime.lastDispatchCycleId
+          ) {
+            continue;
+          }
           return {
             slug,
             issueId: Number(issueId),
-            runtime: getIssueRuntime(project, issueId),
+            runtime,
           };
         }
-      }
-    }
-
-    for (const [issueId, runtime] of Object.entries(project.issueRuntime ?? {})) {
-      if (runtime.lastSessionKey === sessionKey) {
-        return {
-          slug,
-          issueId: Number(issueId),
-          runtime,
-        };
       }
     }
   }

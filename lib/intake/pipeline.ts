@@ -6,6 +6,7 @@
  */
 import type { GenesisPayload, PipelineArtifact, PipelineStep, StepContext } from "./types.js";
 import { cleanupArtifacts } from "./lib/artifact-cleanup.js";
+import { buildForumTopicArtifactId } from "./lib/artifact-ids.js";
 import { log as auditLog } from "../audit.js";
 import { receiveStep } from "./steps/receive.js";
 import { classifyStep } from "./steps/classify.js";
@@ -90,7 +91,7 @@ export async function runPipeline(
       ctx.log(`Step ${step.name} completed in ${stepDuration}ms`);
     } catch (err: unknown) {
       ctx.log(`Step ${step.name} FAILED: ${String(err)}`);
-      const failureArtifacts = deriveArtifacts(payload);
+      const failureArtifacts = mergeArtifacts(deriveArtifacts(payload), extractErrorArtifacts(err));
       if (failureArtifacts.length > 0) {
         const cleanupResults = await cleanupArtifacts(failureArtifacts, {
           log: ctx.log,
@@ -138,10 +139,54 @@ function deriveArtifacts(payload: GenesisPayload): PipelineArtifact[] {
     const provider = payload.provisioning.provider === "gitlab" ? "gitlab_repo" : "github_repo";
     artifacts.push({ type: provider, id: payload.provisioning.repo_url });
   }
+  if (
+    payload.metadata.project_topic_created === true &&
+    payload.metadata.channel_id &&
+    payload.metadata.message_thread_id != null
+  ) {
+    artifacts.push({
+      type: "forum_topic",
+      id: buildForumTopicArtifactId(payload.metadata.channel_id, payload.metadata.message_thread_id),
+    });
+  }
   if (payload.issues?.length) {
     for (const issue of payload.issues) {
       artifacts.push({ type: "github_issue", id: String(issue.number) });
     }
   }
   return artifacts;
+}
+
+function extractErrorArtifacts(err: unknown): PipelineArtifact[] {
+  const artifacts = (err as { artifacts?: unknown })?.artifacts;
+  if (!Array.isArray(artifacts)) {
+    return [];
+  }
+  return artifacts.filter(isPipelineArtifact);
+}
+
+function isPipelineArtifact(value: unknown): value is PipelineArtifact {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const artifact = value as { type?: unknown; id?: unknown };
+  return (
+    typeof artifact.id === "string" &&
+    (artifact.type === "github_repo" ||
+      artifact.type === "gitlab_repo" ||
+      artifact.type === "forum_topic" ||
+      artifact.type === "github_issue")
+  );
+}
+
+function mergeArtifacts(primary: PipelineArtifact[], secondary: PipelineArtifact[]): PipelineArtifact[] {
+  const merged: PipelineArtifact[] = [];
+  const seen = new Set<string>();
+  for (const artifact of [...primary, ...secondary]) {
+    const key = `${artifact.type}:${artifact.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(artifact);
+  }
+  return merged;
 }

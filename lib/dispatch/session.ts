@@ -6,7 +6,7 @@ import type { RunCommand } from "../context.js";
 import type { EffortLevel } from "../roles/types.js";
 import { log as auditLog } from "../audit.js";
 import { fetchGatewaySessions } from "../services/gateway-sessions.js";
-import { recordIssueLifecycle } from "../projects/index.js";
+import { bindDispatchRunIdBySessionKey, recordIssueLifecycle } from "../projects/index.js";
 
 const GATEWAY_SESSION_LABEL_MAX = 64;
 const SESSION_CONFIRM_ATTEMPTS = 5;
@@ -234,6 +234,9 @@ export function sendToAgent(
       deliver: false,
       ...(opts.extraSystemPrompt ? { extraSystemPrompt: opts.extraSystemPrompt } : {}),
     }).then((result) => {
+      if (result?.runId) {
+        bindDispatchRunIdBySessionKey(opts.workspaceDir, sessionKey, result.runId).catch(() => {});
+      }
       auditLog(opts.workspaceDir, "dispatch_agent_sent", {
         step: "sendToAgent", sessionKey,
         issue: opts.issueId, role: opts.role,

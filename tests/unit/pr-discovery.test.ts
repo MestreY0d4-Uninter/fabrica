@@ -64,7 +64,7 @@ describe("runPrDiscoveryPass", () => {
       pluginConfig: undefined,
       logger: { info: vi.fn(), warn: vi.fn() },
     });
-    expect(provider.getPrDetails).toHaveBeenCalledWith(7);
+    expect(provider.getPrDetails).toHaveBeenCalledWith(7, undefined);
     expect(result.created).toBe(0);
   });
 
@@ -169,5 +169,43 @@ describe("runPrDiscoveryPass", () => {
     });
     expect(result.created).toBe(0);
     expect(result.updated).toBe(1);
+  });
+
+  it("uses the canonical bound PR selector when issue runtime already has a PR binding", async () => {
+    const runStore = new InMemoryFabricaRunStore();
+    const provider = {
+      getPrDetails: vi.fn(async () => ({
+        prNumber: 42,
+        headSha: "abc",
+        prState: "open",
+        prUrl: null,
+        sourceBranch: "feat",
+        repositoryId: 999,
+        owner: "org",
+        repo: "repo",
+      })),
+    } as any;
+
+    const project = makeProject({
+      issueRuntime: {
+        "7": {
+          currentPrNumber: 42,
+          currentPrState: "open",
+          currentPrUrl: "https://example.com/pr/42",
+        },
+      },
+    });
+
+    await runPrDiscoveryPass({
+      workspaceDir: "/tmp/test",
+      projectSlug: "test-project",
+      project,
+      provider,
+      runStore,
+      pluginConfig: undefined,
+      logger: { info: vi.fn(), warn: vi.fn() },
+    });
+
+    expect(provider.getPrDetails).toHaveBeenCalledWith(7, { prNumber: 42 });
   });
 });

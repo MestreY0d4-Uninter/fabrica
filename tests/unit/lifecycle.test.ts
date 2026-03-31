@@ -5,6 +5,18 @@ import { recordIssueLifecycle, recordIssueLifecycleBySessionKey } from "../../li
 import { createTestHarness, type TestHarness } from "../../lib/testing/index.js";
 import { DATA_DIR } from "../../lib/setup/constants.js";
 
+async function seedDispatchIdentity(harness: TestHarness, sessionKey: string, cycleId = "cycle-1"): Promise<void> {
+  const data = await harness.readProjects();
+  data.projects[harness.project.slug]!.workers.developer.levels.senior[0]!.dispatchCycleId = cycleId;
+  data.projects[harness.project.slug]!.issueRuntime ??= {};
+  data.projects[harness.project.slug]!.issueRuntime!["42"] = {
+    ...(data.projects[harness.project.slug]!.issueRuntime!["42"] ?? {}),
+    lastDispatchCycleId: cycleId,
+    lastSessionKey: sessionKey,
+  };
+  await harness.writeProjects(data);
+}
+
 async function readAuditEvents(workspaceDir: string): Promise<Array<Record<string, unknown>>> {
   const filePath = path.join(workspaceDir, DATA_DIR, "log", "audit.log");
   const content = await fs.readFile(filePath, "utf-8");
@@ -35,6 +47,7 @@ describe("issue lifecycle recording", () => {
         },
       },
     });
+    await seedDispatchIdentity(harness, sessionKey);
 
     await recordIssueLifecycle({
       workspaceDir: harness.workspaceDir,
@@ -111,6 +124,7 @@ describe("issue lifecycle recording", () => {
         },
       },
     });
+    await seedDispatchIdentity(harness, sessionKey);
 
     await recordIssueLifecycle({
       workspaceDir: harness.workspaceDir,

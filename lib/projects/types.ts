@@ -12,6 +12,10 @@ export type SlotState = {
   issueId: string | null;
   sessionKey: string | null;
   startTime: string | null;
+  /** Plugin-generated identity for the current dispatch cycle in this slot. */
+  dispatchCycleId?: string | null;
+  /** OpenClaw runId for the current dispatch cycle, when known. */
+  dispatchRunId?: string | null;
   previousLabel?: string | null;
   /** Deterministic fun name for this slot (e.g. "Ada", "Grace"). */
   name?: string;
@@ -26,6 +30,8 @@ export type RoleWorkerState = {
 
 export type IssueRuntimeState = {
   dispatchRequestedAt?: string | null;
+  lastDispatchCycleId?: string | null;
+  dispatchRunId?: string | null;
   sessionPatchedAt?: string | null;
   agentAcceptedAt?: string | null;
   firstWorkerActivityAt?: string | null;

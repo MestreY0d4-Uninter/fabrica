@@ -68,10 +68,9 @@ describe("resolveNotifyChannel (new format)", () => {
     assert.strictEqual(result!.channel, "whatsapp");
   });
 
-  it("should fall back to first channel when new-format label matches nothing", () => {
+  it("should return undefined when new-format label matches nothing", () => {
     const result = resolveNotifyChannel(["To Do", "notify:discord:unknown"], channels);
-    assert.ok(result);
-    assert.strictEqual(result!.channelId, "-111");
+    assert.strictEqual(result, undefined);
   });
 
   it("should fall back to first channel when no notify label present", () => {
@@ -103,10 +102,9 @@ describe("resolveNotifyChannel (legacy format)", () => {
     assert.strictEqual(result!.channel, "whatsapp");
   });
 
-  it("should fall back to first channel when legacy label matches unknown channelId", () => {
+  it("should return undefined when legacy label matches unknown channelId", () => {
     const result = resolveNotifyChannel(["To Do", "notify:-999"], channels);
-    assert.ok(result);
-    assert.strictEqual(result!.channelId, "-111");
+    assert.strictEqual(result, undefined);
   });
 
   it("should return first channel when no notify label and multiple channels", () => {

@@ -34,13 +34,13 @@ describe("reactive-dispatch-hook", () => {
       );
     });
 
-    it("calls requestHeartbeatNow when toolName is review_submit", async () => {
+    it("does NOT call requestHeartbeatNow when toolName is review_submit", async () => {
       const { registerReactiveDispatchHooks } = await import("../../lib/dispatch/reactive-dispatch-hook.js");
       const h = captureHandlers(registerReactiveDispatchHooks);
 
       await h["after_tool_call"]({ toolName: "review_submit", params: {} }, {});
 
-      expect(mockRequestHeartbeatNow).toHaveBeenCalledOnce();
+      expect(mockRequestHeartbeatNow).not.toHaveBeenCalled();
     });
 
     it("does NOT call requestHeartbeatNow for unrelated tools", async () => {
@@ -53,7 +53,57 @@ describe("reactive-dispatch-hook", () => {
     });
   });
 
+  describe("before_tool_call", () => {
+    it("injects the trusted runId into work_finish params", async () => {
+      const { registerReactiveDispatchHooks } = await import("../../lib/dispatch/reactive-dispatch-hook.js");
+      const h = captureHandlers(registerReactiveDispatchHooks);
+
+      const result = await h["before_tool_call"](
+        { toolName: "work_finish", params: { role: "developer", result: "done" }, runId: "run-42" },
+        { runId: "run-42", sessionKey: "agent:main:subagent:my-project-developer-junior-ada" },
+      );
+
+      expect(result).toEqual({
+        params: {
+          role: "developer",
+          result: "done",
+          _dispatchRunId: "run-42",
+        },
+      });
+    });
+
+    it("ignores unrelated tools in before_tool_call", async () => {
+      const { registerReactiveDispatchHooks } = await import("../../lib/dispatch/reactive-dispatch-hook.js");
+      const h = captureHandlers(registerReactiveDispatchHooks);
+
+      const result = await h["before_tool_call"](
+        { toolName: "task_create", params: { title: "x" }, runId: "run-42" },
+        { runId: "run-42", sessionKey: "agent:main:subagent:my-project-developer-junior-ada" },
+      );
+
+      expect(result).toBeUndefined();
+    });
+  });
+
   describe("agent_end", () => {
+    it("wakes heartbeat for reviewer sessions without mutating completion", async () => {
+      const { registerReactiveDispatchHooks } = await import("../../lib/dispatch/reactive-dispatch-hook.js");
+      const h = captureHandlers(registerReactiveDispatchHooks);
+
+      await h["agent_end"](
+        {
+          success: true,
+          messages: [{ role: "assistant", content: [{ type: "text", text: "Review result: REJECT" }] }],
+        },
+        { sessionKey: "agent:main:subagent:my-project-reviewer-junior-bob" },
+      );
+
+      expect(mockRequestHeartbeatNow).toHaveBeenCalledOnce();
+      expect(mockRequestHeartbeatNow).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: "agent_end" }),
+      );
+    });
+
     it("calls requestHeartbeatNow for a Fabrica worker session", async () => {
       const { registerReactiveDispatchHooks } = await import("../../lib/dispatch/reactive-dispatch-hook.js");
       const h = captureHandlers(registerReactiveDispatchHooks);

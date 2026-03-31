@@ -1,8 +1,9 @@
 /**
  * observability/metrics.ts — Compute operational metrics from the audit log.
  *
- * Reads audit.log and produces a summary: dispatch counts, completion rates,
- * average dispatch-to-completion time, conflict detections, and session resets.
+ * audit.log remains Fabrica's authoritative durable trail today. This module
+ * intentionally reads audit.log instead of events.ndjson because the structured
+ * event log is not yet wired into live transitions.
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";

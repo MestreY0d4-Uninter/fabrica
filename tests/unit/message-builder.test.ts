@@ -53,4 +53,21 @@ describe("buildTaskMessage", () => {
     expect(message).toContain("## Security Checklist");
     expect(message).toContain("Check for leaked secrets");
   });
+
+  it("does not append work_finish instructions to reviewer task messages", () => {
+    const message = buildTaskMessage({
+      projectName: "demo",
+      channelId: "demo",
+      role: "reviewer",
+      issueId: 1,
+      issueTitle: "Review this",
+      issueDescription: "Issue body",
+      issueUrl: "https://example.com/issues/1",
+      repo: "https://github.com/org/repo",
+      baseBranch: "main",
+    });
+
+    expect(message).not.toContain("When you finish this task, you MUST invoke the `work_finish`");
+    expect(message).not.toContain("Never end your session without calling work_finish.");
+  });
 });

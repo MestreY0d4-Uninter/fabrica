@@ -303,14 +303,27 @@ async function handleCommit(
         };
 
     const result = await runPipeline(payload, ctx);
+    const projectRegistered = result.payload.metadata.project_registered === true;
+    const hasRunnableWork =
+      (result.payload.issues?.length ?? 0) > 0 ||
+      result.payload.triage?.ready_for_dispatch === true;
+    const programmaticCommitFailedClosed =
+      !dryRun &&
+      result.success &&
+      !projectRegistered &&
+      !hasRunnableWork;
+    const success = programmaticCommitFailedClosed ? false : result.success;
+    const error = programmaticCommitFailedClosed
+      ? "Programmatic commit produced no registered project and no runnable work"
+      : result.error;
 
     return jsonResult({
-      success: result.success,
+      success,
       session_id: result.payload.session_id,
       steps_executed: result.steps_executed,
       steps_skipped: result.steps_skipped,
       duration_ms: result.duration_ms,
-      error: result.error,
+      error,
       spec: result.payload.spec,
       scaffold: result.payload.scaffold,
       qa_contract: result.payload.qa_contract,

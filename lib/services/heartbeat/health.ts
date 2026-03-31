@@ -31,6 +31,7 @@ import {
   readProjects,
   getProject,
   getIssueRuntime,
+  getCanonicalPrSelector,
   updateSlot,
   deactivateWorker,
   type Project,
@@ -154,6 +155,17 @@ async function auditHealthFixApplied(
   }));
 }
 
+function hasDispatchCycleMismatch(
+  slot: { dispatchCycleId?: string | null },
+  issueRuntime?: { lastDispatchCycleId?: string | null } | null,
+): boolean {
+  return Boolean(
+    slot.dispatchCycleId &&
+    issueRuntime?.lastDispatchCycleId &&
+    slot.dispatchCycleId !== issueRuntime.lastDispatchCycleId,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Issue label lookup
 // ---------------------------------------------------------------------------
@@ -181,19 +193,20 @@ function isIssueClosed(issue: Issue): boolean {
 /**
  * Determine the correct revert label for an orphaned issue.
  *
- * If the issue has an open PR with feedback (changes requested, comments),
- * revert to the feedback queue ("To Improve") instead of the default queue ("To Do").
- * This prevents feedback cycles from being re-dispatched as fresh tasks.
+ * Repair stays inside queue semantics only. If PR feedback exists, prefer the
+ * feedback queue ("To Improve"); otherwise fall back to the default queue.
  */
 async function resolveOrphanRevertLabel(
   provider: IssueProvider,
+  project: Project,
   issueId: number,
   role: Role,
   defaultQueueLabel: string,
   workflow: WorkflowConfig,
 ): Promise<string> {
   try {
-    const prStatus = await provider.getPrStatus(issueId);
+    const prSelector = getCanonicalPrSelector(project, issueId);
+    const prStatus = await provider.getPrStatus(issueId, prSelector);
     if (prStatus.url && prStatus.state !== PrState.MERGED && prStatus.state !== PrState.CLOSED && prStatus.currentIssueMatch !== false) {
       if (
         prStatus.state === PrState.CHANGES_REQUESTED ||
@@ -204,9 +217,6 @@ async function resolveOrphanRevertLabel(
         const feedbackLabel = queueLabels.find((l) => isFeedbackState(workflow, l));
         if (feedbackLabel) return feedbackLabel;
       }
-      // Fresh completion (OPEN/APPROVED) → workflow COMPLETE target ("To Review")
-      const rule = getCompletionRule(workflow, role, "done");
-      if (rule) return rule.to;
     }
   } catch {
     // Best-effort — fall back to default queue on API failure
@@ -260,12 +270,15 @@ export async function checkWorkerHealth(opts: {
   staleWorkerHours?: number;
   /** Configurable dispatch confirmation timeout in ms (default: DISPATCH_CONFIRMATION_TIMEOUT_MS) */
   dispatchConfirmTimeoutMs?: number;
+  /** Configurable grace period in ms before a fresh worker is considered session-dead. */
+  healthGracePeriodMs?: number;
 }): Promise<HealthFix[]> {
   const {
     workspaceDir, projectSlug, project, role, autoFix, provider, sessions,
     workflow = DEFAULT_WORKFLOW,
     staleWorkerHours = 2,
     dispatchConfirmTimeoutMs = DISPATCH_CONFIRMATION_TIMEOUT_MS,
+    healthGracePeriodMs = GRACE_PERIOD_MS,
   } = opts;
 
   const fixes: HealthFix[] = [];
@@ -290,7 +303,7 @@ export async function checkWorkerHealth(opts: {
 
       // Grace period: skip session liveness checks for recently-started workers
       const workerStartTime = slot.startTime ? new Date(slot.startTime).getTime() : null;
-      const withinGracePeriod = workerStartTime !== null && (Date.now() - workerStartTime) < GRACE_PERIOD_MS;
+      const withinGracePeriod = workerStartTime !== null && (Date.now() - workerStartTime) < healthGracePeriodMs;
 
       // Parse issueId
       const issueIdNum = slot.issueId ? Number(slot.issueId) : null;
@@ -325,6 +338,23 @@ export async function checkWorkerHealth(opts: {
           slotIndex,
           issueId: slot.issueId ?? undefined,
         });
+      }
+
+      if (slot.active && hasDispatchCycleMismatch(slot, issueRuntime)) {
+        await auditLog(workspaceDir, "health_fix_rejected", {
+          type: "dispatch_cycle_mismatch",
+          reason: "stale_dispatch_cycle",
+          project: project.name,
+          projectSlug,
+          role,
+          level,
+          slotIndex,
+          issueId: slot.issueId ?? null,
+          sessionKey,
+          slotDispatchCycleId: slot.dispatchCycleId ?? null,
+          runtimeDispatchCycleId: issueRuntime?.lastDispatchCycleId ?? null,
+        }).catch(() => {});
+        continue;
       }
 
       // Case 6: Active but issue doesn't exist (deleted/closed externally)
@@ -634,42 +664,6 @@ export async function checkWorkerHealth(opts: {
         }
       }
 
-      // PR-state recovery: active slot with correct label, but PR already exists and QA passes
-      // → advance to "To Review" without requiring a stall trigger.
-      if (slot.active && issueIdNum && issue && currentLabel === expectedLabel && autoFix) {
-        try {
-          const prStatus = await provider.getPrStatus(issueIdNum);
-          if (
-            prStatus.url &&
-            prStatus.state !== PrState.MERGED &&
-            prStatus.state !== PrState.CLOSED &&
-            prStatus.state !== PrState.CHANGES_REQUESTED &&
-            prStatus.state !== PrState.HAS_COMMENTS &&
-            prStatus.currentIssueMatch !== false
-          ) {
-            const rule = getCompletionRule(workflow, role, "done");
-            if (rule && rule.to !== expectedLabel) {
-              await resilientLabelTransition(provider, issueIdNum, expectedLabel, rule.to);
-              await deactivateSlot();
-              await auditLog(workspaceDir, "health_transition_to_review", {
-                project: project.name,
-                projectSlug,
-                role,
-                level,
-                issueId: slot.issueId,
-                sessionKey,
-                slotIndex,
-                fromLabel: expectedLabel,
-                toLabel: rule.to,
-                prUrl: prStatus.url,
-              }).catch(() => {});
-            }
-          }
-        } catch {
-          // Best-effort — provider errors must not abort health checks
-        }
-      }
-
       // Case 4: Inactive but issue has stuck active label
       if (!slot.active && issue && currentLabel === expectedLabel) {
         const fix: HealthFix = {
@@ -891,7 +885,7 @@ export async function scanOrphanedLabels(opts: {
       if (autoFix) {
         try {
           const revertTarget = await resolveOrphanRevertLabel(
-            provider, issue.iid, role, queueLabel, workflow,
+            provider, freshProject, issue.iid, role, queueLabel, workflow,
           );
           await resilientLabelTransition(provider, issue.iid, activeLabel, revertTarget);
           fix.fixed = true;

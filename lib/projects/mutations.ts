@@ -71,6 +71,8 @@ export async function activateWorker(
     level: string;
     sessionKey?: string;
     startTime?: string;
+    dispatchCycleId?: string | null;
+    dispatchRunId?: string | null;
     /** Label the issue had before transitioning to the active state (e.g. "To Do", "To Improve"). */
     previousLabel?: string;
     /** Slot index within the level's array. If omitted, finds first free slot. */
@@ -102,6 +104,8 @@ export async function activateWorker(
       issueId: params.issueId,
       sessionKey: params.sessionKey ?? slots[idx]!.sessionKey,
       startTime: params.startTime ?? new Date().toISOString(),
+      dispatchCycleId: params.dispatchCycleId ?? null,
+      dispatchRunId: params.dispatchRunId ?? null,
       previousLabel: params.previousLabel ?? null,
       name: params.name ?? slots[idx]!.name,
       lastIssueId: null,
@@ -156,6 +160,8 @@ export async function deactivateWorker(
           issueId: null,
           sessionKey: slot.sessionKey,
           startTime: null,
+          dispatchCycleId: slot.dispatchCycleId ?? null,
+          dispatchRunId: slot.dispatchRunId ?? null,
           previousLabel: null,
           name: slot.name,
           lastIssueId: slot.issueId,
@@ -189,6 +195,45 @@ export async function updateIssueRuntime(
     };
   });
   return data;
+}
+
+export async function bindDispatchRunIdBySessionKey(
+  workspaceDir: string,
+  sessionKey: string,
+  runId: string,
+): Promise<{ slug: string; issueId: number; role: string; level: string; slotIndex: number } | null> {
+  const { result } = await withProjectsMutation(workspaceDir, (data) => {
+    for (const [slug, project] of Object.entries(data.projects)) {
+      for (const [role, roleWorker] of Object.entries(project.workers ?? {})) {
+        for (const [level, slots] of Object.entries(roleWorker.levels ?? {})) {
+          for (let slotIndex = 0; slotIndex < slots.length; slotIndex++) {
+            const slot = slots[slotIndex]!;
+            if (!slot.active || !slot.issueId || slot.sessionKey !== sessionKey) continue;
+
+            slot.dispatchRunId = runId;
+            project.issueRuntime ??= {};
+            const issueKey = String(slot.issueId);
+            project.issueRuntime[issueKey] = {
+              ...(project.issueRuntime[issueKey] ?? {}),
+              dispatchRunId: runId,
+              lastSessionKey: sessionKey,
+            };
+
+            return {
+              slug,
+              issueId: Number(slot.issueId),
+              role,
+              level,
+              slotIndex,
+            };
+          }
+        }
+      }
+    }
+    return null;
+  });
+
+  return result;
 }
 
 export async function clearIssueRuntime(

@@ -99,14 +99,30 @@ const plugin = {
                 type: "string",
                 description: "Environment variable containing the GitHub App webhook secret.",
               },
+              webhookSecret: {
+                type: "string",
+                description: "Inline GitHub App webhook secret.",
+              },
+              webhookSecretPath: {
+                type: "string",
+                description: "Filesystem path containing the GitHub App webhook secret.",
+              },
+              webhookMode: {
+                type: "string",
+                enum: ["required", "optional", "disabled"],
+                description: "Controls GitHub webhook route registration behavior.",
+              },
               authProfiles: {
                 type: "object",
                 additionalProperties: {
                   type: "object",
                   properties: {
                     mode: { type: "string", enum: ["github-app"] },
+                    appId: { type: "string" },
                     appIdEnv: { type: "string" },
+                    privateKey: { type: "string" },
                     privateKeyEnv: { type: "string" },
+                    privateKeyPath: { type: "string" },
                     privateKeyPathEnv: { type: "string" },
                     baseUrl: { type: "string" },
                     fallbackMode: { type: "string", enum: ["pr-conversation-comment"] },

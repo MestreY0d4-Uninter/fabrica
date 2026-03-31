@@ -36,6 +36,7 @@ export const registerStep: PipelineStep = {
     const resolvedName = name ?? fail("Missing project name or repository target for registration");
     const resolvedRepo = repo ?? fail("Missing project name or repository target for registration");
     const resolvedChannelId = channelId ?? fail("Missing channel binding for project registration");
+    const createProjectTopic = payload.metadata.source === "telegram-dm-bootstrap";
 
     try {
       const programmaticSources = ["telegram-dm-bootstrap", "genesis-trigger-script"];
@@ -58,7 +59,7 @@ export const registerStep: PipelineStep = {
         pluginConfig: ctx.pluginConfig,
         baseBranch,
         deployBranch: baseBranch,
-        createProjectTopic: payload.metadata.source === "telegram-dm-bootstrap",
+        createProjectTopic,
         projectWorkflowConfig,
       });
       if (
@@ -87,6 +88,7 @@ export const registerStep: PipelineStep = {
         metadata: {
           ...payload.metadata,
           project_registered: output.success,
+          project_topic_created: createProjectTopic && output.success && output.messageThreadId != null,
           project_slug: output.projectSlug ?? payload.metadata.project_slug,
           repo_path: resolvedRepo,
           channel_id: output.channelId,

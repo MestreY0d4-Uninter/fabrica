@@ -6,7 +6,7 @@
  */
 import type { ToolContext } from "../types.js";
 import type { RunCommand } from "../context.js";
-import { readProjects, getProject, type Project, type ProjectsData, type RouteRef, routeKey, findPrimaryChannel } from "../projects/index.js";
+import { readProjects, getProject, getProjectByRoute, type Project, type ProjectsData, type RouteRef, routeKey, findPrimaryChannel } from "../projects/index.js";
 import { createProvider, type ProviderWithType } from "../providers/index.js";
 import { loadConfig } from "../config/index.js";
 import { loadInstanceName } from "../instance.js";
@@ -102,10 +102,24 @@ export async function resolveProjectFromContext(
   explicitMessageThreadId?: number,
 ): Promise<{ data: ProjectsData; project: Project; route: RouteRef }> {
   const route = resolveRoute(ctx, explicitChannelId, explicitMessageThreadId);
-  const resolved = await resolveProject(workspaceDir, route.channelId, {
-    messageThreadId: route.messageThreadId ?? undefined,
-  });
-  return { ...resolved, route };
+  const data = await readProjects(workspaceDir);
+  const project = getProjectByRoute(data, route) ?? getProject(data, route.channelId, route.messageThreadId ?? undefined);
+  if (!project) {
+    const topicScopedCount = Object.values(data.projects).filter((candidate) =>
+      candidate.channels.some((channel) =>
+        String(channel.channelId) === String(route.channelId) &&
+        channel.messageThreadId !== undefined &&
+        channel.messageThreadId !== null),
+    ).length;
+    const threadHint = topicScopedCount > 0 && route.messageThreadId == null
+      ? " This Telegram forum group has topic-scoped projects; pass the messageThreadId from the current topic."
+      : "";
+    throw new Error(
+      `No project found for "${routeKey(route)}". ` +
+      `Register a new project with project_register, or link this channel to an existing project.${threadHint}`,
+    );
+  }
+  return { data, project, route };
 }
 
 /**

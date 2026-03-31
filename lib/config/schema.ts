@@ -121,8 +121,33 @@ export const FabricaConfigSchema = z.object({
   workflow: WorkflowConfigSchema.partial().optional(),
   timeouts: TimeoutConfigSchema,
   instance: InstanceConfigSchema,
-  providers: ProvidersConfigSchema,
 });
+
+const HeartbeatPluginConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  intervalSeconds: z.number().int().positive().optional(),
+  maxPickupsPerTick: z.number().int().positive().optional(),
+}).optional();
+
+const TelegramPluginConfigSchema = z.object({
+  bootstrapDmEnabled: z.boolean().optional(),
+  projectsForumChatId: z.string().min(1).optional(),
+  projectsForumAccountId: z.string().min(1).optional(),
+  opsChatId: z.string().min(1).optional(),
+}).optional();
+
+const NotificationPluginConfigSchema = z.object({
+  workerStart: z.boolean().optional(),
+  workerComplete: z.boolean().optional(),
+}).optional();
+
+export const FabricaPluginConfigSchema = z.object({
+  work_heartbeat: HeartbeatPluginConfigSchema,
+  projectExecution: z.enum(["parallel", "sequential"]).optional(),
+  notifications: NotificationPluginConfigSchema,
+  telegram: TelegramPluginConfigSchema,
+  providers: ProvidersConfigSchema,
+}).passthrough();
 
 /**
  * Validate a raw parsed config object.

@@ -660,7 +660,7 @@ describe("E2E pipeline", () => {
       assert.strictEqual(gitCmds.length, 0, "Should NOT have run git pull after merge failure");
     });
 
-    it("should skip issues with review:agent label (agent pipeline handles those)", async () => {
+    it("should process issues with review:agent label when PR is approved by reviewer agent", async () => {
       h.provider.seedIssue({ iid: 62, title: "Agent-reviewed", labels: ["To Review", "review:agent"] });
       h.provider.setPrStatus(62, { state: "approved", url: "https://example.com/pr/12" });
 
@@ -673,13 +673,11 @@ describe("E2E pipeline", () => {
         runCommand: h.runCommand,
       });
 
-      assert.strictEqual(transitions, 0, "Should not auto-merge agent-routed issues");
+      assert.strictEqual(transitions, 1, "Should transition review:agent issues when PR is approved");
 
       const issue = await h.provider.getIssue(62);
-      assert.ok(issue.labels.includes("To Review"), "Should remain in To Review");
-
-      const mergeCalls = h.provider.callsTo("mergePr");
-      assert.strictEqual(mergeCalls.length, 0, "Should not have called mergePr");
+      assert.ok(issue.labels.includes("To Test"), `Expected To Test label, got: ${issue.labels}`);
+      assert.ok(!issue.labels.includes("To Review"), "Should not remain in To Review");
     });
 
     it("should skip issues with no routing label — safe default, never auto-merge without explicit review:human", async () => {

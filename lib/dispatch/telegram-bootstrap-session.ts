@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { DATA_DIR } from "../setup/constants.js";
@@ -143,7 +143,7 @@ export async function writeTelegramBootstrapSession(
   const dir = sessionsDir(workspaceDir);
   await fs.mkdir(dir, { recursive: true });
   const file = sessionPath(workspaceDir, session.conversationId);
-  const tmp = `${file}.tmp`;
+  const tmp = `${file}.${randomUUID()}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(session, null, 2) + "\n", "utf-8");
   await fs.rename(tmp, file);
 }

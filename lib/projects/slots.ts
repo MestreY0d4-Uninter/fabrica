@@ -14,6 +14,8 @@ export function emptySlot(): SlotState {
     issueId: null,
     sessionKey: null,
     startTime: null,
+    dispatchCycleId: null,
+    dispatchRunId: null,
   };
 }
 

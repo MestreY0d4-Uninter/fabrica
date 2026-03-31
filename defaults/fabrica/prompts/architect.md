@@ -96,7 +96,7 @@ Brief summary of what needs to be implemented and why.
 ### How to Create
 
 1. Call `task_create` with:
-   - `projectSlug`: same as your task message
+   - `projectSlug`: the value from the `Channel:` line in your task message (`task_create` still expects this field name)
    - `title`: clear, actionable title (e.g. "Implement SQLite session persistence")
    - `description`: use the format above — detailed enough for a developer to start immediately
 
@@ -105,13 +105,13 @@ Brief summary of what needs to be implemented and why.
 
 **Example:**
 ```
-task_create({ projectSlug: "my-app", title: "Implement SQLite session persistence", description: "From research #42\n\n## Overview\nReplace in-memory Map with SQLite...\n\n## Implementation Checklist\n\n### Phase 1: Schema & Migration (~1 day)\n- [ ] Create sessions table schema in db/schema.sql\n- [ ] Add migration logic in db/migrate.ts\n..." })
+task_create({ projectSlug: "<project slug from the 'Channel:' line in the task message>", title: "Implement SQLite session persistence", description: "From research #42\n\n## Overview\nReplace in-memory Map with SQLite...\n\n## Implementation Checklist\n\n### Phase 1: Schema & Migration (~1 day)\n- [ ] Create sessions table schema in db/schema.sql\n- [ ] Add migration logic in db/migrate.ts\n..." })
 // → returns issue id: 43, url: "https://github.com/.../43"
 
 work_finish({
   role: "architect",
   result: "done",
-  projectSlug: "my-app",
+  channelId: "my-app",
   summary: "Recommended SQLite approach. Created task #43.",
   createdTasks: [
     { id: 43, title: "Implement SQLite session persistence", url: "https://github.com/.../43" }
@@ -136,10 +136,10 @@ The task is created in Planning state — the operator reviews and moves it to t
 
 When you are done, **call `work_finish` yourself** — do not just announce in text.
 
-- **Done:** `work_finish({ role: "architect", result: "done", projectSlug: "<from task message>", summary: "<recommendation + created task numbers>", createdTasks: [{ id, title, url }] })`
-- **Blocked:** `work_finish({ role: "architect", result: "blocked", projectSlug: "<from task message>", summary: "<what you need>" })`
+- **Done:** `work_finish({ role: "architect", result: "done", channelId: "<project slug from the 'Channel:' line in the task message>", summary: "<recommendation + created task numbers>", createdTasks: [{ id, title, url }] })`
+- **Blocked:** `work_finish({ role: "architect", result: "blocked", channelId: "<project slug from the 'Channel:' line in the task message>", summary: "<what you need>" })`
 
-The `projectSlug` is included in your task message. Your session is persistent — you may be called back for refinements.
+The project slug is included on the `Channel:` line in your task message. Your session is persistent — you may be called back for refinements.
 
 ## Tools You Should NOT Use
 

@@ -89,4 +89,21 @@ describe("project routes", () => {
       }, alphaChannel),
     ).toBe(false);
   });
+
+  it("distinguishes routes with the same Telegram chat/topic but different accountId", () => {
+    const routeA = buildRouteRef({
+      channel: "telegram",
+      channelId: "-1003709213169",
+      messageThreadId: 101,
+      accountId: "acct-a",
+    });
+    const routeB = buildRouteRef({
+      channel: "telegram",
+      channelId: "-1003709213169",
+      messageThreadId: 101,
+      accountId: "acct-b",
+    });
+
+    expect(routeKey(routeA)).not.toBe(routeKey(routeB));
+  });
 });

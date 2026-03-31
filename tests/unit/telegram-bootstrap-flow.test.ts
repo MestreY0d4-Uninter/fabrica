@@ -9,6 +9,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { registerTelegramBootstrapHook, _testContinueBootstrap } from "../../lib/dispatch/telegram-bootstrap-hook.js";
 
@@ -41,8 +43,6 @@ vi.mock("../../lib/services/heartbeat/agent-discovery.js", () => ({
   discoverAgents: mockDiscoverAgents,
 }));
 
-const WORKSPACE = "/tmp/workspace-flow-tests";
-
 const sendMessageTelegram = vi.fn(async () => undefined);
 
 const ctx = {
@@ -53,7 +53,7 @@ const ctx = {
     },
   },
   config: {
-    agents: { defaults: { workspace: WORKSPACE } },
+    agents: { defaults: { workspace: "" } },
   },
   logger: { info: vi.fn(), warn: vi.fn() },
   runtime: {
@@ -74,8 +74,10 @@ const CONVERSATION_ID = "9876543210";
 
 describe("telegram bootstrap clarification flow", () => {
   let handler: ((event: any, eventCtx: any) => Promise<void>) | undefined;
+  let workspaceDir: string;
 
   beforeEach(async () => {
+    workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-telegram-flow-"));
     handler = undefined;
     sendMessageTelegram.mockClear();
     mockRunPipeline.mockReset();
@@ -83,17 +85,18 @@ describe("telegram bootstrap clarification flow", () => {
     mockProjectTick.mockReset();
     mockDiscoverAgents.mockReset();
     mockReadProjects.mockResolvedValue({ projects: {} });
-    mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: WORKSPACE }]);
+    mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: workspaceDir }]);
     mockProjectTick.mockResolvedValue({ pickups: [], skipped: [] });
+    ctx.config.agents.defaults.workspace = workspaceDir;
     // Clean up session files from prior tests
-    await fs.rm(`${WORKSPACE}/fabrica/bootstrap-sessions`, { recursive: true, force: true });
+    await fs.rm(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true, force: true });
 
     const api = makeApi((fn) => { handler = fn; });
     registerTelegramBootstrapHook(api, ctx);
   });
 
   afterEach(async () => {
-    await fs.rm(`${WORKSPACE}/fabrica/bootstrap-sessions`, { recursive: true, force: true });
+    await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
   it("resumes pipeline with original rawIdea after bare 'python' clarification response (Bug J: skips name clarification)", async () => {
@@ -226,7 +229,7 @@ describe("telegram bootstrap clarification flow", () => {
     sendMessageTelegram.mockClear();
 
     // Simulate session expiry: overwrite the session file with a past suppressUntil
-    const sessionDir = `${WORKSPACE}/fabrica/bootstrap-sessions`;
+    const sessionDir = path.join(workspaceDir, "fabrica", "bootstrap-sessions");
     const sessionFile = `${sessionDir}/${CONVERSATION_ID}.json`;
     try {
       const raw = await fs.readFile(sessionFile, "utf-8");
@@ -327,7 +330,7 @@ describe("telegram bootstrap clarification flow", () => {
     });
 
     // Seed a clarifying session in "name" pending state (rawIdea="" so inferProjectSlug=undefined)
-    const sessionDir = `${WORKSPACE}/fabrica/bootstrap-sessions`;
+    const sessionDir = path.join(workspaceDir, "fabrica", "bootstrap-sessions");
     await fs.mkdir(sessionDir, { recursive: true });
     await fs.writeFile(
       `${sessionDir}/${CONVERSATION_ID}.json`,
@@ -400,7 +403,7 @@ describe("telegram bootstrap clarification flow", () => {
     // Seed a clarifying session with an empty rawIdea to simulate the Bug J scenario:
     // inferProjectSlug("") → undefined. Without the fix, "auto" would return projectName=undefined
     // and the loop would repeat. With the fix, it returns "project-${Date.now()}".
-    const sessionDir = `${WORKSPACE}/fabrica/bootstrap-sessions`;
+    const sessionDir = path.join(workspaceDir, "fabrica", "bootstrap-sessions");
     await fs.mkdir(sessionDir, { recursive: true });
     await fs.writeFile(
       `${sessionDir}/${CONVERSATION_ID}.json`,
@@ -439,7 +442,7 @@ describe("telegram bootstrap clarification flow", () => {
     });
 
     // Seed a clarifying session with empty rawIdea
-    const sessionDir = `${WORKSPACE}/fabrica/bootstrap-sessions`;
+    const sessionDir = path.join(workspaceDir, "fabrica", "bootstrap-sessions");
     await fs.mkdir(sessionDir, { recursive: true });
     await fs.writeFile(
       `${sessionDir}/${CONVERSATION_ID}.json`,
@@ -502,7 +505,7 @@ describe("telegram bootstrap clarification flow", () => {
     // when continueBootstrap is called with projectName: null and rawIdea that
     // yields undefined from inferProjectSlug.
     // "@@@" → all non-word, non-hyphen chars → regex strips everything → slug "" → undefined
-    const sessionDir = `${WORKSPACE}/fabrica/bootstrap-sessions`;
+    const sessionDir = path.join(workspaceDir, "fabrica", "bootstrap-sessions");
     await fs.mkdir(sessionDir, { recursive: true });
     await fs.writeFile(
       `${sessionDir}/${CONVERSATION_ID}.json`,
@@ -535,7 +538,7 @@ describe("telegram bootstrap clarification flow", () => {
     // - request.projectName is null → triggers the name resolution branch
     // - inferProjectSlug("@@@") returns undefined ("@" chars are stripped by [^\w\s-] → empty slug)
     // - existing session has pendingClarification === "name" → level 2 fires: project-${Date.now()}
-    await _testContinueBootstrap(ctx, CONVERSATION_ID, WORKSPACE, {
+    await _testContinueBootstrap(ctx, CONVERSATION_ID, workspaceDir, {
       rawIdea: "@@@",
       projectName: null,
       stackHint: "python-cli",
@@ -546,5 +549,44 @@ describe("telegram bootstrap clarification flow", () => {
     const pipelinePayload = mockRunPipeline.mock.calls[0]?.[0];
     expect(pipelinePayload.metadata.project_name).toBeTruthy();
     expect(String(pipelinePayload.metadata.project_name)).toMatch(/^project-\d+$/);
+  });
+
+  it("treats metadata.project_registered as the single registration truth on pipeline failure", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: false,
+      error: "register step failed after repo registration",
+      payload: {
+        metadata: {
+          project_registered: true,
+          project_slug: "registered-project",
+        },
+      },
+      artifacts: [
+        { type: "github_repo", id: "https://github.com/acme/registered-project" },
+      ],
+    });
+
+    await _testContinueBootstrap(
+      ctx,
+      CONVERSATION_ID,
+      workspaceDir,
+      {
+        rawIdea: "Crie um projeto para processar arquivos CSV",
+        projectName: "registered-project",
+        stackHint: "python-cli",
+      },
+      {
+        channel: "telegram",
+        channelId: CONVERSATION_ID,
+      },
+    );
+
+    const sessionRaw = await fs.readFile(path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`), "utf-8");
+    const session = JSON.parse(sessionRaw) as { status: string; error?: string | null };
+
+    expect(session.status).toBe("failed");
+    expect(session.status).not.toBe("orphaned_repo");
+    expect(session.error).toContain("register step failed");
+    expect(String(sendMessageTelegram.mock.calls.at(-1)?.[1] ?? "")).toContain("Nao consegui registrar o projeto automaticamente");
   });
 });

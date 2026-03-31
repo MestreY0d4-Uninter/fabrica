@@ -17,6 +17,7 @@ import type { PluginContext } from "../../context.js";
 import type { ToolContext } from "../../types.js";
 import { readProjects, getProjectByRoute } from "../../projects/index.js";
 import { log as auditLog } from "../../audit.js";
+import { loadConfig } from "../../config/index.js";
 import { checkWorkerHealth, scanOrphanedLabels, fetchGatewaySessions, type HealthFix } from "../../services/heartbeat/health.js";
 import { requireWorkspaceDir, resolveProvider, resolveRoute } from "../helpers.js";
 
@@ -58,6 +59,7 @@ export function createHealthTool(ctx: PluginContext) {
       for (const slug of slugs) {
         const project = data.projects[slug];
         if (!project) continue;
+        const resolvedConfig = await loadConfig(workspaceDir, slug);
         const { provider } = await resolveProvider(project, ctx.runCommand);
         for (const role of Object.keys(project.workers)) {
           // Worker health check (session liveness, label consistency, etc)
@@ -69,6 +71,9 @@ export function createHealthTool(ctx: PluginContext) {
             sessions,
             autoFix: fix,
             provider,
+            workflow: resolvedConfig.workflow,
+            dispatchConfirmTimeoutMs: resolvedConfig.timeouts.dispatchConfirmTimeoutMs,
+            healthGracePeriodMs: resolvedConfig.timeouts.healthGracePeriodMs,
           });
           issues.push(...healthFixes.map((f) => ({ ...f, project: project.name, role })));
 

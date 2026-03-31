@@ -80,23 +80,6 @@ export function mergeConfig(
     merged.instance = { ...base.instance, ...overlay.instance };
   }
 
-  if (base.providers || overlay.providers) {
-    merged.providers = {
-      github: base.providers?.github || overlay.providers?.github
-        ? {
-            ...base.providers?.github,
-            ...overlay.providers?.github,
-            authProfiles: base.providers?.github?.authProfiles || overlay.providers?.github?.authProfiles
-              ? {
-                  ...base.providers?.github?.authProfiles,
-                  ...overlay.providers?.github?.authProfiles,
-                }
-              : undefined,
-          }
-        : undefined,
-    };
-  }
-
   if (traceOpts) {
     const { baseLabel, overlayLabel } = traceOpts;
     const trace: MergeTrace = {};

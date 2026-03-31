@@ -18,12 +18,13 @@ import {
 } from "./health.js";
 import type { Agent } from "./agent-discovery.js";
 import { discoverAgents } from "./agent-discovery.js";
-import { HEARTBEAT_DEFAULTS, resolveHeartbeatConfig } from "./config.js";
+import { DEFAULT_TICK_TIMEOUT_MS, HEARTBEAT_DEFAULTS, resolveHeartbeatConfig, resolveTickTimeoutMs } from "./config.js";
 import type { HeartbeatConfig } from "./config.js";
 import { processPendingGitHubEventsForWorkspace } from "../../github/process-events.js";
 import { getLifecycleService } from "../../machines/lifecycle-service.js";
 import { raceWithTimeout } from "../../utils/async.js";
 export { raceWithTimeout } from "../../utils/async.js";
+import { loadConfig } from "../../config/index.js";
 
 export { HEARTBEAT_DEFAULTS };
 import { tick, type TickMode } from "./tick-runner.js";
@@ -103,7 +104,6 @@ export function registerHeartbeatService(api: OpenClawPluginApi, pluginCtx: Plug
   });
 }
 
-const DEFAULT_TICK_TIMEOUT_MS = 50_000;
 let _ticksTimedOut = 0;
 
 /** Expose timeout counter for audit logging (used by tick-runner). */
@@ -154,6 +154,10 @@ async function runHeartbeatTick(
   let timedOut = false;
   try {
     const workspace = discoverAgents(ctx.config)[0]?.workspace;
+    const resolvedWorkspaceConfig = workspace
+      ? await loadConfig(workspace).catch(() => null)
+      : null;
+    const tickTimeoutMs = resolveTickTimeoutMs(resolvedWorkspaceConfig);
     const lifecycle = workspace ? await getLifecycleService(workspace, logger) : null;
     const run = () => ctx.observability.withContext({ phase: `heartbeat:${mode}` }, () =>
       ctx.observability.withSpan("fabrica.heartbeat.tick", { phase: `heartbeat:${mode}` }, async () => {
@@ -200,10 +204,10 @@ async function runHeartbeatTick(
 
     const HARD_TICK_TIMEOUT_MS = 5 * 60_000;
 
-    const raceResult = await raceWithTimeout(wrappedTickFn, DEFAULT_TICK_TIMEOUT_MS, () => {
+    const raceResult = await raceWithTimeout(wrappedTickFn, tickTimeoutMs, () => {
       _ticksTimedOut++;
       timedOut = true;
-      logger.warn(`work_heartbeat ${mode} tick timed out after ${DEFAULT_TICK_TIMEOUT_MS}ms (total timeouts: ${_ticksTimedOut})`);
+      logger.warn(`work_heartbeat ${mode} tick timed out after ${tickTimeoutMs}ms (total timeouts: ${_ticksTimedOut})`);
       // Do NOT release mutex here — the tick promise is still running.
       // Release it when the promise settles (see .finally() below).
       // tickPromise is always defined (deferred pattern) — no guard needed.

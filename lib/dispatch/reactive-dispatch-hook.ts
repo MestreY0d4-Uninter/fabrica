@@ -1,12 +1,14 @@
 /**
  * reactive-dispatch-hook.ts — Immediate heartbeat wake on worker lifecycle events.
  *
- * Three hooks:
- *   1. after_tool_call — when work_finish or review_submit is called, wake the
- *      heartbeat immediately so the next worker is dispatched in <5s instead of 60–120s.
- *   2. agent_end — when any Fabrica worker run ends (with or without work_finish),
- *      wake the heartbeat for immediate triage.
- *   3. subagent_spawned — record spawn timestamp per session key so
+ * Four hooks:
+ *   1. before_tool_call — inject trusted dispatch identity into delayed worker tools.
+ *   2. after_tool_call — when work_finish is called, wake the heartbeat
+ *      immediately so the next worker is dispatched in <5s instead of 60–120s.
+ *   3. agent_end — when any Fabrica worker run ends (with or without work_finish),
+ *      wake the heartbeat for immediate triage. This path is wake-only because
+ *      agent_end does not expose runId, so it cannot safely mutate reused slots.
+ *   4. subagent_spawned — record spawn timestamp per session key so
  *      subagent-lifecycle-hook can compute accurate durationMs.
  *
  * All hooks are fire-and-forget. Never throw, never block gateway operation.
@@ -15,9 +17,11 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginContext } from "../context.js";
 import { parseFabricaSessionKey } from "./bootstrap-hook.js";
 import { wakeHeartbeat } from "../services/heartbeat/wake-bridge.js";
+import { resolveWorkspaceDir } from "./attachment-hook.js";
+import { bindDispatchRunIdBySessionKey } from "../projects/index.js";
 
 /** Tools whose completion should immediately trigger heartbeat triage. */
-const COMPLETION_TOOLS = new Set(["work_finish", "review_submit"]);
+const COMPLETION_TOOLS = new Set(["work_finish"]);
 
 /** Spawn timestamps keyed by childSessionKey. Used by subagent-lifecycle-hook for durationMs. */
 const spawnTimes = new Map<string, number>();
@@ -36,7 +40,21 @@ export function registerReactiveDispatchHooks(
   api: OpenClawPluginApi,
   ctx: PluginContext,
 ): void {
-  // Wake heartbeat immediately when a worker calls work_finish or review_submit.
+  const workspaceDir = resolveWorkspaceDir(ctx.config as unknown as Record<string, unknown>);
+
+  api.on("before_tool_call", async (event, eventCtx) => {
+    if (event.toolName !== "work_finish") return;
+    const runId = eventCtx.runId ?? event.runId;
+    if (!runId) return;
+    return {
+      params: {
+        ...event.params,
+        _dispatchRunId: runId,
+      },
+    };
+  });
+
+  // Wake heartbeat immediately when a worker calls work_finish.
   api.on("after_tool_call", async (event, _eventCtx) => {
     if (!COMPLETION_TOOLS.has(event.toolName)) return;
     ctx.runtime?.system.requestHeartbeatNow({ reason: "work_finish", coalesceMs: 2000 });
@@ -59,5 +77,8 @@ export function registerReactiveDispatchHooks(
     const sessionKey = event.childSessionKey;
     if (!sessionKey) return;
     spawnTimes.set(sessionKey, Date.now());
+    if (workspaceDir && event.runId) {
+      await bindDispatchRunIdBySessionKey(workspaceDir, sessionKey, event.runId).catch(() => {});
+    }
   });
 }

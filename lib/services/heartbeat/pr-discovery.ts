@@ -3,6 +3,7 @@ import { log as auditLog } from "../../audit.js";
 import type { IssueProvider } from "../../providers/provider.js";
 import type { Project } from "../../projects/types.js";
 import type { FabricaRunStore } from "../../github/event-store.js";
+import { getCanonicalPrSelector } from "../../projects/index.js";
 
 type DiscoveryLogger = {
   info(msg: string, ...args: unknown[]): void;
@@ -64,7 +65,8 @@ export async function runPrDiscoveryPass(params: {
   for (const { issueId } of activeSlots) {
     try {
       // Step 1: lightweight PR lookup (no review-state determination)
-      const prDetails = await params.provider.getPrDetails(issueId);
+      const prSelector = getCanonicalPrSelector(params.project, issueId);
+      const prDetails = await params.provider.getPrDetails(issueId, prSelector);
       if (!prDetails) {
         result.skipped++;
         continue;

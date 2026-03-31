@@ -20,6 +20,16 @@ import { resolveNotifyChannel, getStateLabels } from "../../workflow/index.js";
 import { notify, getNotificationConfig } from "../../dispatch/notify.js";
 import { getPendingIntents, markDelivered } from "../../dispatch/notification-outbox.js";
 import { log as auditLog } from "../../audit.js";
+import {
+  getActiveLabel,
+  getRevertLabel,
+} from "../../workflow/index.js";
+import { resilientLabelTransition } from "../../workflow/labels.js";
+import { deactivateWorker } from "../../projects/index.js";
+import {
+  handleReviewerAgentEnd,
+  resolveReviewerDecisionTransition,
+} from "../reviewer-completion.js";
 
 // ---------------------------------------------------------------------------
 // Passes
@@ -113,24 +123,32 @@ export async function performHealthPass(
     for (const intent of pendingIntents) {
       if (intent.ts < staleThreshold) {
         try {
-          if (intent.deliveryTarget?.channelId) {
-            await notify(intent.data as any, {
+          const eventType = typeof intent.data?.type === "string"
+            ? intent.data.type
+            : undefined;
+          const notificationsEnabled = eventType
+            ? notifyConfig[eventType as keyof typeof notifyConfig] !== false
+            : true;
+          const hasDeliveryTarget = Boolean(intent.deliveryTarget?.channelId);
+          const sent = intent.deliveryTarget?.channelId
+            ? await notify(intent.data as any, {
               workspaceDir,
               config: notifyConfig,
               runtime,
               runCommand,
               deliveryTargetOverride: intent.deliveryTarget,
-            });
-          } else {
-            // Legacy entries without deliveryTarget — best-effort
-            await notify(intent.data as any, {
+              skipOutboxWrite: true,
+            })
+            : await notify(intent.data as any, {
               workspaceDir,
               config: notifyConfig,
               runtime,
               runCommand,
+              skipOutboxWrite: true,
             });
+          if (sent && hasDeliveryTarget && notificationsEnabled) {
+            await markDelivered(workspaceDir, intent.key).catch(() => {});
           }
-          await markDelivered(workspaceDir, intent.key).catch(() => {});
         } catch { /* best-effort */ }
       }
     }
@@ -149,6 +167,7 @@ export async function performHealthPass(
       staleWorkerHours,
       workflow: resolvedConfig?.workflow,
       dispatchConfirmTimeoutMs: resolvedConfig?.timeouts?.dispatchConfirmTimeoutMs,
+      healthGracePeriodMs: resolvedConfig?.timeouts?.healthGracePeriodMs,
     });
     fixedCount += healthFixes.filter((f) => f.fixed).length;
 
@@ -450,4 +469,106 @@ export async function performHoldEscapePass(
         .catch(() => {});
     },
   });
+}
+
+/**
+ * Reviewer poll pass — on every heartbeat tick, check active reviewer sessions for a
+ * decision signal. Transitions the FSM immediately instead of waiting for stale_worker (2h).
+ *
+ * Each active reviewer slot is polled via `runtime.subagent.getSessionMessages`. If a
+ * clear "approve" or "reject" is found the issue is advanced to the next stage and the
+ * slot is deactivated. This gives ≤2-minute transition latency (one heartbeat interval).
+ *
+ * @returns number of transitions made.
+ */
+export async function performReviewerPollPass(
+  workspaceDir: string,
+  projectSlug: string,
+  project: Project,
+  provider: import("../../providers/provider.js").IssueProvider,
+  resolvedConfig: ResolvedConfig,
+  runtime?: PluginRuntime,
+): Promise<number> {
+  if (!runtime) return 0;
+
+  const workflow = resolvedConfig.workflow;
+  let activeLabel: string;
+  try {
+    activeLabel = getActiveLabel(workflow, "reviewer");
+  } catch {
+    return 0; // No reviewer role in this workflow
+  }
+
+  const reviewerWorker = project.workers["reviewer"];
+  if (!reviewerWorker) return 0;
+
+  let transitions = 0;
+
+  for (const [level, slots] of Object.entries(reviewerWorker.levels)) {
+    for (let slotIndex = 0; slotIndex < slots.length; slotIndex++) {
+      const slot = slots[slotIndex]!;
+      if (!slot.active || !slot.sessionKey || !slot.issueId) continue;
+
+      // Grace period: skip sessions that just started (< 2 min) to avoid false positives
+      // from cached/stale content at session initialisation.
+      const startTime = slot.startTime ? new Date(slot.startTime).getTime() : 0;
+      if (startTime && (Date.now() - startTime) < 2 * 60_000) continue;
+
+      // Read session messages and parse review decision
+      const reviewResult = await handleReviewerAgentEnd({
+        sessionKey: slot.sessionKey,
+        runtime: runtime as any,
+      });
+      if (!reviewResult) continue;
+
+      const transition = resolveReviewerDecisionTransition(workflow, reviewResult);
+      if (!transition) continue;
+
+      // Verify issue still has the active label (guard against concurrent transitions)
+      let issue: Awaited<ReturnType<typeof provider.getIssue>>;
+      try {
+        issue = await provider.getIssue(Number(slot.issueId));
+      } catch {
+        continue;
+      }
+      if (!issue.labels.includes(activeLabel)) {
+        await deactivateWorker(workspaceDir, projectSlug, "reviewer", {
+          level,
+          slotIndex,
+        });
+        await auditLog(workspaceDir, "reviewer_poll_slot_released", {
+          sessionKey: slot.sessionKey,
+          project: project.name,
+          projectSlug,
+          issueId: slot.issueId,
+          from: activeLabel,
+          currentLabels: issue.labels,
+          reason: "issue_already_moved",
+        }).catch(() => {});
+        continue;
+      }
+
+      // Transition label and deactivate slot
+      await resilientLabelTransition(provider, Number(slot.issueId), activeLabel, transition.targetLabel);
+      await deactivateWorker(workspaceDir, projectSlug, "reviewer", {
+        level,
+        slotIndex,
+      });
+
+      await auditLog(workspaceDir, "reviewer_poll_transition", {
+        sessionKey: slot.sessionKey,
+        project: project.name,
+        projectSlug,
+        issueId: slot.issueId,
+        result: reviewResult,
+        eventKey: transition.eventKey,
+        from: activeLabel,
+        to: transition.targetLabel,
+      }).catch(() => {});
+
+      transitions++;
+    }
+  }
+
+  return transitions;
 }

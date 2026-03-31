@@ -102,7 +102,7 @@ describe("scanOrphanedLabels", () => {
       });
     });
 
-    it("should revert to 'To Review' when issue has open PR (fresh completion)", async () => {
+    it("should revert to 'To Do' when issue has open PR (repair stays in queue semantics)", async () => {
       h.provider.seedIssue({ iid: 42, title: "Test issue", labels: ["Doing"] });
       h.provider.setPrStatus(42, { state: PrState.OPEN, url: "https://github.com/test/pr/1" });
 
@@ -118,11 +118,11 @@ describe("scanOrphanedLabels", () => {
 
       assert.strictEqual(fixes.length, 1);
       assert.strictEqual(fixes[0]!.fixed, true);
-      assert.strictEqual(fixes[0]!.labelReverted, "Doing → To Review");
+      assert.strictEqual(fixes[0]!.labelReverted, "Doing → To Do");
 
-      // Verify issue now has "To Review" label
+      // Verify issue now has "To Do" label
       const issue = await h.provider.getIssue(42);
-      assert.ok(issue.labels.includes("To Review"), `Expected "To Review", got: ${issue.labels}`);
+      assert.ok(issue.labels.includes("To Do"), `Expected "To Do", got: ${issue.labels}`);
     });
 
     it("should revert to 'To Do' when issue has no PR (fresh task)", async () => {
@@ -184,6 +184,47 @@ describe("scanOrphanedLabels", () => {
       assert.strictEqual(fixes.length, 1);
       assert.strictEqual(fixes[0]!.fixed, true);
       assert.strictEqual(fixes[0]!.labelReverted, "Doing → To Improve");
+    });
+
+    it("uses the canonical bound PR when deciding orphan revert target", async () => {
+      h.provider.seedIssue({ iid: 42, title: "Test issue", labels: ["Doing"] });
+      h.provider.setPrStatus(42, { state: PrState.OPEN, url: "https://github.com/test/pr/other" });
+      h.provider.setPrStatus(999, {
+        number: 11,
+        state: PrState.CHANGES_REQUESTED,
+        url: "https://github.com/test/pr/11",
+        currentIssueMatch: true,
+      });
+
+      const data = await h.readProjects();
+      data.projects[h.project.slug]!.issueRuntime = {
+        "42": {
+          currentPrNumber: 11,
+          currentPrState: "open",
+          currentPrUrl: "https://github.com/test/pr/11",
+          currentPrIssueTarget: 42,
+        },
+      };
+      await writeProjects(h.workspaceDir, data);
+
+      const fixes = await scanOrphanedLabels({
+        workspaceDir: h.workspaceDir,
+        projectSlug: h.project.slug,
+        project: data.projects[h.project.slug]!,
+        role: "developer",
+        autoFix: true,
+        provider: h.provider,
+        workflow: h.workflow,
+      });
+
+      assert.strictEqual(fixes.length, 1);
+      assert.strictEqual(fixes[0]!.fixed, true);
+      assert.strictEqual(fixes[0]!.labelReverted, "Doing → To Improve");
+
+      const selectorCalls = h.provider.callsTo("getPrStatus").filter((call) =>
+        call.args.issueId === 42 && call.args.selector?.prNumber === 11,
+      );
+      assert.strictEqual(selectorCalls.length, 1, "expected orphan repair to query canonical PR selector");
     });
 
     it("should fall back to 'To Do' when getPrStatus throws", async () => {

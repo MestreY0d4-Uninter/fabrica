@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { ResolvedTimeouts } from "../../lib/config/types.js";
+import { DEFAULT_TICK_TIMEOUT_MS, resolveTickTimeoutMs } from "../../lib/services/heartbeat/config.js";
 
 describe("new timeout fields", () => {
   it("ResolvedTimeouts includes healthGracePeriodMs", () => {
@@ -16,5 +17,10 @@ describe("new timeout fields", () => {
     expect(t.healthGracePeriodMs).toBe(900000);
     expect(t.dispatchConfirmTimeoutMs).toBe(120000);
     expect(t.tickTimeoutMs).toBe(50000);
+  });
+
+  it("resolveTickTimeoutMs prefers resolved config and falls back to the default", () => {
+    expect(resolveTickTimeoutMs({ timeouts: { tickTimeoutMs: 12_345 } } as any)).toBe(12_345);
+    expect(resolveTickTimeoutMs(undefined)).toBe(DEFAULT_TICK_TIMEOUT_MS);
   });
 });

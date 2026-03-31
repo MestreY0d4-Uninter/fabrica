@@ -28,6 +28,8 @@ import { DATA_DIR } from "../../setup/constants.js";
 import { createProjectForumTopic } from "../../telegram/topic-service.js";
 import { readFabricaTelegramConfig } from "../../telegram/config.js";
 import { buildRouteRef, routeMatchesChannel, type RouteRef } from "../../projects/index.js";
+import { buildForumTopicArtifactId } from "../../intake/lib/artifact-ids.js";
+import type { PipelineArtifact } from "../../intake/types.js";
 
 /**
  * Scaffold project directory with prompts/ folder and a README explaining overrides.
@@ -120,6 +122,12 @@ async function hasProjectWorkflowOverride(
   }
 }
 
+function normalizeRepoIdentity(value?: string | null): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/\.git$/i, "").toLowerCase();
+}
+
 export type ProjectRegisterParams = {
   workspaceDir: string;
   route: RouteRef;
@@ -209,6 +217,7 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
     messageThreadId: route.messageThreadId ?? undefined,
     accountId: route.accountId,
   });
+  let createdArtifacts: PipelineArtifact[] = [];
   await acquireLock(workspaceDir);
   try {
     const data = await readProjects(workspaceDir);
@@ -254,6 +263,25 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
       );
     }
 
+    let repoRemote: string | undefined;
+    try {
+      repoRemote = await provider.resolveRepositoryRemote() ?? undefined;
+    } catch {
+      repoRemote = undefined;
+    }
+
+    if (existing) {
+      const sameRepoPath = resolveRepoPath(existing.repo) === repoPath;
+      const sameRepoRemote =
+        normalizeRepoIdentity(existing.repoRemote) != null &&
+        normalizeRepoIdentity(existing.repoRemote) === normalizeRepoIdentity(repoRemote);
+      if (!sameRepoPath && !sameRepoRemote) {
+        throw new Error(
+          `Project slug "${slug}" already points to a different repository. Existing repo="${existing.repo}" remote="${existing.repoRemote ?? "unknown"}"; incoming repo="${repoPath}" remote="${repoRemote ?? "unknown"}".`,
+        );
+      }
+    }
+
     await provider.ensureAllStateLabels();
 
     const workflowOverrideCreated = autonomousProject
@@ -283,13 +311,6 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
       await provider.ensureLabel(labelName, color);
     }
 
-    let repoRemote: string | undefined;
-    try {
-      repoRemote = await provider.resolveRepositoryRemote() ?? undefined;
-    } catch {
-      repoRemote = undefined;
-    }
-
     if (createProjectTopic) {
     if (!runtime || !config) {
       throw new Error("Runtime and config are required to create a Telegram project topic");
@@ -310,6 +331,13 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
       name,
       accountId: telegramConfig.projectsForumAccountId ?? initialRoute.accountId ?? undefined,
     });
+    if (createdTopic.isFallback || createdTopic.topicId === 1) {
+      throw new Error("DM bootstrap requires a dedicated Telegram topic; refusing to register against the General topic");
+    }
+    createdArtifacts = [{
+      type: "forum_topic",
+      id: buildForumTopicArtifactId(createdTopic.chatId, createdTopic.topicId),
+    }];
     targetRoute = buildRouteRef({
       channel: "telegram",
       channelId: createdTopic.chatId,
@@ -403,9 +431,45 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
       },
       announcement: `${action}. Labels ensured.${promptsNote} Ready for tasks.`,
     };
+  } catch (err) {
+    if (createdArtifacts.length > 0) {
+      throw attachArtifactsToError(err, createdArtifacts);
+    }
+    throw err;
   } finally {
     await releaseLock(workspaceDir);
   }
+}
+
+function attachArtifactsToError(error: unknown, artifacts: PipelineArtifact[]): Error {
+  const err = error instanceof Error ? error : new Error(String(error));
+  const existing = Array.isArray((err as Error & { artifacts?: unknown[] }).artifacts)
+    ? ((err as Error & { artifacts?: unknown[] }).artifacts as unknown[])
+    : [];
+  const merged = [...existing, ...artifacts].filter((artifact, index, array) => {
+    if (
+      !artifact ||
+      typeof artifact !== "object" ||
+      typeof (artifact as { type?: unknown }).type !== "string" ||
+      typeof (artifact as { id?: unknown }).id !== "string"
+    ) {
+      return false;
+    }
+    const current = `${(artifact as { type: string }).type}:${(artifact as { id: string }).id}`;
+    return index === array.findIndex((candidate) => {
+      if (
+        !candidate ||
+        typeof candidate !== "object" ||
+        typeof (candidate as { type?: unknown }).type !== "string" ||
+        typeof (candidate as { id?: unknown }).id !== "string"
+      ) {
+        return false;
+      }
+      return current === `${(candidate as { type: string }).type}:${(candidate as { id: string }).id}`;
+    });
+  });
+  (err as Error & { artifacts?: unknown[] }).artifacts = merged;
+  return err;
 }
 
 export function createProjectRegisterTool(ctx: PluginContext) {

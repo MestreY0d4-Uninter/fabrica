@@ -80,23 +80,21 @@ openclaw fabrica doctor
 
 ## Quick start
 
-**1. Configure the plugin** in `~/.openclaw/openclaw.json`:
+**1. Enable the plugin** in `~/.openclaw/openclaw.json`:
 
 ```json
 {
   "plugins": {
     "entries": {
       "fabrica": {
-        "config": {
-          "github": {
-            "org": "<YOUR_GITHUB_ORG_OR_USER>"
-          }
-        }
+        "enabled": true
       }
     }
   }
 }
 ```
+
+For polling-first GitHub usage via authenticated `gh`, no extra plugin config is required. Fabrica's plugin config is only for control-plane settings such as heartbeat cadence, Telegram routing, notifications, and provider/webhook auth. Worker models, levels, and workflow routing live in the workspace files and can be generated or updated with `openclaw fabrica setup`.
 
 **2. Restart the gateway**:
 
@@ -132,7 +130,7 @@ openclaw fabrica metrics
 
 ### Minimal (gh CLI only)
 
-This configuration uses `gh` CLI for all GitHub operations (no GitHub App needed):
+This mode uses authenticated `gh` CLI for all GitHub operations. Worker models, levels, and workflow routing live in the project workflow files, not in `openclaw.json`.
 
 ```json
 {
@@ -140,13 +138,49 @@ This configuration uses `gh` CLI for all GitHub operations (no GitHub App needed
     "entries": {
       "fabrica": {
         "config": {
-          "github": {
-            "org": "<YOUR_GITHUB_ORG_OR_USER>"
+          "work_heartbeat": {
+            "enabled": true,
+            "intervalSeconds": 60,
+            "maxPickupsPerTick": 4
           },
-          "workers": {
-            "developer": { "model": "gpt-4o", "level": "medior" },
-            "reviewer":  { "model": "gpt-4o", "level": "senior" },
-            "tester":    { "model": "gpt-4o", "level": "medior" }
+          "projectExecution": "parallel",
+          "notifications": {
+            "workerStart": true,
+            "workerComplete": true
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Optional GitHub App/webhook settings also live under `plugins.entries.fabrica.config.providers.github`.
+
+### With GitHub App / webhook config
+
+Use plugin config when you want explicit webhook behavior or provider auth profiles:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "fabrica": {
+        "config": {
+          "providers": {
+            "github": {
+              "defaultAuthProfile": "app",
+              "webhookMode": "optional",
+              "webhookPath": "/plugins/fabrica/github/webhook",
+              "webhookSecretEnv": "FABRICA_GITHUB_WEBHOOK_SECRET",
+              "authProfiles": {
+                "app": {
+                  "mode": "github-app",
+                  "appIdEnv": "FABRICA_GITHUB_APP_ID",
+                  "privateKeyPathEnv": "FABRICA_GITHUB_APP_KEY_PATH"
+                }
+              }
+            }
           }
         }
       }
@@ -157,7 +191,7 @@ This configuration uses `gh` CLI for all GitHub operations (no GitHub App needed
 
 ### With Telegram
 
-Telegram enables DM-based project bootstrap and per-project forum topic notifications.
+Telegram enables DM-based project bootstrap, per-project forum topics, and a separate ops chat for heartbeat and cron notifications.
 
 ```json
 {
@@ -177,6 +211,7 @@ Telegram enables DM-based project bootstrap and per-project forum topic notifica
           "telegram": {
             "bootstrapDmEnabled": true,
             "projectsForumChatId": "<YOUR_PROJECTS_FORUM_CHAT_ID>",
+            "projectsForumAccountId": "<OPTIONAL_TELEGRAM_ACCOUNT_ID>",
             "opsChatId": "<YOUR_OPS_CHAT_ID>"
           }
         }
@@ -186,7 +221,7 @@ Telegram enables DM-based project bootstrap and per-project forum topic notifica
 }
 ```
 
-With Telegram enabled, send a project idea to the bot in a DM. Fabrica will ask clarifying questions, provision the GitHub repo, and create a dedicated forum topic for the project. All subsequent worker updates, review results, and the final merge notification appear in that topic.
+With Telegram enabled, send a project idea to the bot in a DM. Fabrica will ask clarifying questions, provision the GitHub repo, create a dedicated forum topic for the project, and keep ops-only notifications on the separate `opsChatId` route.
 
 ## Programmatic genesis
 
@@ -227,6 +262,8 @@ Run tests:
 
 ```bash
 npm test
+npm run test:all
+npm run test:hot-path
 ```
 
 Build:

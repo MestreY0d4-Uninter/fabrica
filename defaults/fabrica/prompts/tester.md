@@ -124,13 +124,14 @@ Use `task_comment` to post your findings in this format:
 
 ### 6. Call work_finish
 
-- **Pass:** `work_finish({ role: "tester", result: "pass", channelId: "<project slug from 'Project:' field in task message>", summary: "<brief summary>" })`
-- **Fail:** `work_finish({ role: "tester", result: "fail", channelId: "<project slug from 'Project:' field in task message>", summary: "<specific failures>" })`
-- **Refine:** `work_finish({ role: "tester", result: "refine", channelId: "<project slug from 'Project:' field in task message>", summary: "<what needs human input>" })`
-- **Blocked:** `work_finish({ role: "tester", result: "blocked", channelId: "<project slug from 'Project:' field in task message>", summary: "<what you need>" })`
+- **Pass:** `work_finish({ role: "tester", result: "pass", channelId: "<project slug from the 'Channel:' line in the task message>", summary: "<brief summary>" })`
+- **Fail:** `work_finish({ role: "tester", result: "fail", channelId: "<project slug from the 'Channel:' line in the task message>", summary: "<specific failures>" })`
+- **Fail Infra:** `work_finish({ role: "tester", result: "fail_infra", channelId: "<project slug from the 'Channel:' line in the task message>", summary: "<toolchain or environment failure that prevented QA>" })`
+- **Refine:** `work_finish({ role: "tester", result: "refine", channelId: "<project slug from the 'Channel:' line in the task message>", summary: "<what needs human input>" })`
+- **Blocked:** `work_finish({ role: "tester", result: "blocked", channelId: "<project slug from the 'Channel:' line in the task message>", summary: "<what you need>" })`
 
 > **IMPORTANT:** The `channelId` parameter accepts the project slug (e.g., "gestao-notas").
-> Extract it from the "Project: <name>" line in your task message. Do NOT use the numeric
+> Extract it from the "Channel: <slug>" line in your task message. Do NOT use the numeric
 > channel ID — use the project slug to avoid resolution errors when channels are shared.
 
 ## Conventions
@@ -140,9 +141,9 @@ Use `task_comment` to post your findings in this format:
 
 ## Filing Follow-Up Issues
 
-If you discover unrelated bugs or needed improvements during your work, call `task_create`:
+If you discover unrelated bugs or needed improvements during your work, call `task_create` with the project slug from the `Channel:` line in your task message:
 
-`task_create({ projectSlug: "<from task message>", title: "Bug: ...", description: "..." })`
+`task_create({ projectSlug: "<project slug from the 'Channel:' line in the task message>", title: "Bug: ...", description: "..." })`
 
 ## Tools You Should NOT Use
 

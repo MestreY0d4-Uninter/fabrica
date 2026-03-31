@@ -284,6 +284,7 @@ export type PipelineMetadata = {
   delivery_target?: DeliveryTarget;
   auth_gate?: AuthGate;
   project_registered?: boolean;
+  project_topic_created?: boolean;
   message_thread_id?: number;
   channel_id?: string | null;
   scaffold_plan?: ScaffoldPlan | null;
@@ -316,7 +317,6 @@ export type GenesisPayload = {
   impact?: Impact;
   scaffold?: Scaffold;
   provisioning?: RepositoryProvisioning;
-  project_registered?: boolean;
   qa_contract?: QaContract;
   security?: SecurityReview;
   issues?: CreatedIssue[];
@@ -331,10 +331,9 @@ export type GenesisPayload = {
  * Artifact created during the pipeline that should be tracked for cleanup
  * if the pipeline fails partway through (e.g. repo created but project not registered).
  *
- * Note: "forum_topic" is defined for future use. deriveArtifacts() does not yet
- * derive forum topics because topic IDs are available only after registerStep completes.
- * If registerStep itself fails after topic creation, the topic would be orphaned but
- * is not currently tracked here.
+ * Forum topics are tracked only when Fabrica created the topic during intake
+ * (`metadata.project_topic_created === true`). Pre-existing project topics are
+ * not treated as pipeline-owned artifacts.
  */
 export type PipelineArtifact = {
   type: "github_repo" | "gitlab_repo" | "forum_topic" | "github_issue";

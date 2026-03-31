@@ -1,9 +1,10 @@
 /**
- * observability/event-log.ts — Structured append-only event log.
+ * observability/event-log.ts — Structured auxiliary append-only event log.
  *
- * Separate from audit.log (which rotates). Events here persist for metrics,
- * conflict detection, and state reconstruction.
- * Snapshots every 500 events to bound read cost.
+ * Separate from audit.log (which rotates), but not an authoritative source of
+ * runtime truth today. The live control plane still relies on audit.log plus
+ * issue runtime state; this module is an auxiliary side log for future
+ * analytics and experimentation.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -76,7 +77,7 @@ export async function readEvents(workspaceDir: string): Promise<StructuredEvent[
 }
 
 /**
- * Read events with snapshot optimization.
+ * Read auxiliary events with snapshot optimization.
  * If a snapshot exists, return snapshot + events after snapshot.
  */
 export async function readEventsWithSnapshot(

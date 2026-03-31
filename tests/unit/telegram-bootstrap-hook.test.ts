@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate, _testClassifyDmIntent as classifyDmIntent, _testBuildTopicDeepLink as buildTopicDeepLink, _testInferProjectSlug as inferProjectSlug, _testNormalizeUserResponse as normalizeUserResponse } from "../../lib/dispatch/telegram-bootstrap-hook.js";
 import {
@@ -45,6 +47,7 @@ describe("telegram bootstrap hook", () => {
   let handler: ((event: any, eventCtx: any) => Promise<void>) | undefined;
   let beforePromptBuildHandler: ((event: any, eventCtx: any) => Promise<any>) | undefined;
   let messageSendingHandler: ((event: any, eventCtx: any) => Promise<any>) | undefined;
+  let workspaceDir: string;
   const sendMessageTelegram = vi.fn(async () => undefined);
   const outerMockSubagentRun = vi.fn().mockResolvedValue({ runId: "outer-run" });
   const outerMockSubagentWait = vi.fn().mockResolvedValue({ status: "ok" });
@@ -60,7 +63,7 @@ describe("telegram bootstrap hook", () => {
     config: {
       agents: {
         defaults: {
-          workspace: "/tmp/workspace",
+          workspace: "",
         },
       },
     },
@@ -84,6 +87,7 @@ describe("telegram bootstrap hook", () => {
   } as any;
 
   beforeEach(async () => {
+    workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-telegram-bootstrap-"));
     handler = undefined;
     beforePromptBuildHandler = undefined;
     messageSendingHandler = undefined;
@@ -93,8 +97,9 @@ describe("telegram bootstrap hook", () => {
     mockProjectTick.mockReset();
     mockDiscoverAgents.mockReset();
     mockReadProjects.mockResolvedValue({ projects: {} });
-    mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: "/tmp/workspace" }]);
+    mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: workspaceDir }]);
     mockProjectTick.mockResolvedValue({ pickups: [], skipped: [] });
+    ctx.config.agents.defaults.workspace = workspaceDir;
     ctx.runCommand.mockClear();
     ctx.runCommand.mockResolvedValue({ stdout: "", stderr: "", code: 0 });
     outerMockSubagentRun.mockClear();
@@ -103,7 +108,11 @@ describe("telegram bootstrap hook", () => {
     outerMockSubagentRun.mockResolvedValue({ runId: "outer-run" });
     outerMockSubagentWait.mockResolvedValue({ status: "ok" });
     outerMockSubagentGetMessages.mockResolvedValue([]);
-    await fs.rm("/tmp/workspace/fabrica/bootstrap-sessions", { recursive: true, force: true });
+    await fs.rm(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true, force: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
   it("asks for clarification in DM when required fields are missing", async () => {
@@ -150,7 +159,7 @@ describe("telegram bootstrap hook", () => {
     // produce "telegram:6951571380" to match. But the message_received handler stored it with "6951571380".
     // For this test, we just need to verify the hook works with sessionKey.
     // First, store session with the telegram: prefix (matching production format):
-    await upsertTelegramBootstrapSession("/tmp/workspace", {
+    await upsertTelegramBootstrapSession(workspaceDir, {
       conversationId: "telegram:6951571380",
       rawIdea: "Crie um projeto novo para uma CLI",
       sourceRoute: { channel: "telegram", channelId: "6951571380" },
@@ -220,6 +229,98 @@ describe("telegram bootstrap hook", () => {
     }));
     expect(sendMessageTelegram.mock.calls[2]?.[0]).toBe("6951571380");
     expect(String(sendMessageTelegram.mock.calls[2]?.[1])).toContain("https://t.me/c/3709213169/777");
+  });
+
+  it("writes a failed bootstrap session when projectsForumChatId is missing", async () => {
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    const ctxMissingForum = {
+      ...ctx,
+      pluginConfig: {
+        telegram: {
+          bootstrapDmEnabled: true,
+        },
+      },
+    } as any;
+
+    registerTelegramBootstrapHook(api, ctxMissingForum);
+
+    await handler?.(
+      {
+        content: [
+          "Crie e registre um novo projeto.",
+          "Project name: demo-cli",
+          "Stack: python-cli",
+          "Idea:",
+          "Uma CLI para gerar senhas.",
+        ].join("\n"),
+        metadata: {},
+      },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalled(), { timeout: 2000 });
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("grupo de projetos configurado");
+
+    const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+    expect(session?.status).toBe("failed");
+    expect(session?.error).toBe("missing_projects_forum_chat");
+  });
+
+  it("writes a failed bootstrap session when the inferred slug already exists", async () => {
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    mockReadProjects.mockResolvedValue({
+      projects: {
+        "demo-cli": {
+          slug: "demo-cli",
+          name: "Demo CLI",
+          repo: "/tmp/demo-cli",
+          groupName: "Project: Demo CLI",
+          deployUrl: "",
+          baseBranch: "main",
+          deployBranch: "main",
+          channels: [],
+          workers: {},
+        },
+      },
+    });
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    await handler?.(
+      {
+        content: [
+          "Crie e registre um novo projeto.",
+          "Project name: demo-cli",
+          "Stack: python-cli",
+          "Idea:",
+          "Uma CLI para gerar senhas.",
+        ].join("\n"),
+        metadata: {},
+      },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalled(), { timeout: 2000 });
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Ja existe um projeto registrado com o slug");
+
+    const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+    expect(session?.status).toBe("failed");
+    expect(session?.error).toBe("duplicate_project_slug");
+    expect(session?.projectSlug).toBe("demo-cli");
   });
 
   it("ignores duplicate in-flight bootstrap requests with the same full request fingerprint", async () => {
@@ -499,7 +600,7 @@ describe("telegram bootstrap hook", () => {
       registerTelegramBootstrapHook(api, ctx);
       expect(messageSendingHandler).toBeTypeOf("function");
 
-      await upsertTelegramBootstrapSession("/tmp/workspace", {
+      await upsertTelegramBootstrapSession(workspaceDir, {
         conversationId: "telegram:6951571380",
         rawIdea: "build me an app",
         sourceRoute: { channel: "telegram", channelId: "6951571380" },
@@ -524,7 +625,7 @@ describe("telegram bootstrap hook", () => {
 
       registerTelegramBootstrapHook(api, ctx);
 
-      await upsertTelegramBootstrapSession("/tmp/workspace", {
+      await upsertTelegramBootstrapSession(workspaceDir, {
         conversationId: "telegram:6951571380",
         rawIdea: "build me an app",
         sourceRoute: { channel: "telegram", channelId: "6951571380" },
@@ -549,7 +650,7 @@ describe("telegram bootstrap hook", () => {
 
       registerTelegramBootstrapHook(api, ctx);
 
-      await upsertTelegramBootstrapSession("/tmp/workspace", {
+      await upsertTelegramBootstrapSession(workspaceDir, {
         conversationId: "telegram:6951571380",
         rawIdea: "build me an app",
         sourceRoute: { channel: "telegram", channelId: "6951571380" },
@@ -592,7 +693,7 @@ describe("telegram bootstrap hook", () => {
 
       registerTelegramBootstrapHook(api, ctx);
 
-      await upsertTelegramBootstrapSession("/tmp/workspace", {
+      await upsertTelegramBootstrapSession(workspaceDir, {
         conversationId: "telegram:6951571380",
         rawIdea: "build me an app",
         sourceRoute: { channel: "telegram", channelId: "6951571380" },
@@ -617,7 +718,7 @@ describe("telegram bootstrap hook", () => {
 
       registerTelegramBootstrapHook(api, ctx);
 
-      await upsertTelegramBootstrapSession("/tmp/workspace", {
+      await upsertTelegramBootstrapSession(workspaceDir, {
         conversationId: "telegram:6951571380",
         rawIdea: "build me an app",
         sourceRoute: { channel: "telegram", channelId: "6951571380" },
@@ -625,10 +726,10 @@ describe("telegram bootstrap hook", () => {
       });
 
       // Manually overwrite suppressUntil to the past
-      const session = await readTelegramBootstrapSession("/tmp/workspace", "telegram:6951571380");
+      const session = await readTelegramBootstrapSession(workspaceDir, "telegram:6951571380");
       if (session) {
         session.suppressUntil = new Date(Date.now() - 1000).toISOString();
-        await fs.writeFile("/tmp/workspace/fabrica/bootstrap-sessions/telegram:6951571380.json", JSON.stringify(session, null, 2));
+        await fs.writeFile(path.join(workspaceDir, "fabrica", "bootstrap-sessions", "telegram:6951571380.json"), JSON.stringify(session, null, 2));
       }
 
       const result = await messageSendingHandler?.(
@@ -649,7 +750,7 @@ describe("telegram bootstrap hook", () => {
 
       registerTelegramBootstrapHook(api, ctx);
 
-      await upsertTelegramBootstrapSession("/tmp/workspace", {
+      await upsertTelegramBootstrapSession(workspaceDir, {
         conversationId: "telegram:6951571380",
         rawIdea: "build me an app",
         sourceRoute: { channel: "telegram", channelId: "6951571380" },
@@ -711,7 +812,7 @@ describe("telegram bootstrap hook", () => {
 
       registerTelegramBootstrapHook(api, ctx);
 
-      await upsertTelegramBootstrapSession("/tmp/workspace", {
+      await upsertTelegramBootstrapSession(workspaceDir, {
         conversationId: "telegram:6951571380",
         rawIdea: "build me a cli app",
         sourceRoute: { channel: "telegram", channelId: "6951571380" },
@@ -755,7 +856,7 @@ describe("telegram bootstrap hook", () => {
     // synchronously inside classifyAndBootstrap before the blocked runCommand call)
     let session: Awaited<ReturnType<typeof readTelegramBootstrapSession>> = null;
     await vi.waitFor(async () => {
-      session = await readTelegramBootstrapSession("/tmp/workspace", "6951571380");
+      session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
       expect(session).not.toBeNull();
       expect(session!.status).toBe("classifying");
     }, { timeout: 2000 });
@@ -766,19 +867,19 @@ describe("telegram bootstrap hook", () => {
     // Unblock classify so the test cleans up properly
     resolveClassify();
     await vi.waitFor(async () => {
-      const s = await readTelegramBootstrapSession("/tmp/workspace", "6951571380");
+      const s = await readTelegramBootstrapSession(workspaceDir, "6951571380");
       expect(s).toBeNull(); // classify failed (empty stdout) → session deleted
     }, { timeout: 2000 });
   });
 
   it("shouldSuppressTelegramBootstrapReply returns true for pending_classify session", async () => {
-    await upsertTelegramBootstrapSession("/tmp/workspace", {
+    await upsertTelegramBootstrapSession(workspaceDir, {
       conversationId: "telegram:5555555555",
       rawIdea: "I need a CLI tool",
       sourceRoute: { channel: "telegram", channelId: "5555555555" },
       status: "pending_classify",
     });
-    const session = await readTelegramBootstrapSession("/tmp/workspace", "telegram:5555555555");
+    const session = await readTelegramBootstrapSession(workspaceDir, "telegram:5555555555");
     expect(session).not.toBeNull();
     expect(shouldSuppressTelegramBootstrapReply(session)).toBe(true);
   });
@@ -788,7 +889,7 @@ describe("telegram bootstrap hook", () => {
       // Clean up session files written by these tests to avoid polluting other describe blocks.
       // Wait briefly to let any fire-and-forget classifyAndBootstrap calls complete first.
       await new Promise((resolve) => setTimeout(resolve, 300));
-      await fs.rm("/tmp/workspace/fabrica/bootstrap-sessions", { recursive: true, force: true });
+      await fs.rm(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true, force: true });
     });
 
     it("proceeds with bootstrap when confidence is 0.6 (boundary)", async () => {
@@ -1174,6 +1275,7 @@ describe("classifyDmIntent", () => {
 // NOTE: The following describe block tests Layer 3 integration via the message_received handler.
 describe("Layer 3: LLM classification via message_received", () => {
   let handler: ((msg: any, meta: any) => Promise<void>) | undefined;
+  let workspaceDir: string;
   const sendMessageTelegram = vi.fn(async () => undefined);
   const mockSubagentRun = vi.fn().mockResolvedValue({ runId: "layer3-run" });
   const mockSubagentWait = vi.fn().mockResolvedValue({ status: "ok" });
@@ -1189,7 +1291,7 @@ describe("Layer 3: LLM classification via message_received", () => {
     config: {
       agents: {
         defaults: {
-          workspace: "/tmp/workspace",
+          workspace: "",
         },
       },
     },
@@ -1213,6 +1315,7 @@ describe("Layer 3: LLM classification via message_received", () => {
   } as any;
 
   beforeEach(async () => {
+    workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-telegram-layer3-"));
     handler = undefined;
     sendMessageTelegram.mockClear();
     ctx.runCommand.mockClear();
@@ -1228,9 +1331,14 @@ describe("Layer 3: LLM classification via message_received", () => {
     mockProjectTick.mockReset();
     mockDiscoverAgents.mockReset();
     mockReadProjects.mockResolvedValue({ projects: {} });
-    mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: "/tmp/workspace" }]);
+    mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: workspaceDir }]);
     mockProjectTick.mockResolvedValue({ pickups: [], skipped: [] });
-    await fs.rm("/tmp/workspace/fabrica/bootstrap-sessions", { recursive: true, force: true });
+    ctx.config.agents.defaults.workspace = workspaceDir;
+    await fs.rm(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true, force: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
   it("classifies ambiguous message via LLM and triggers bootstrap when create_project", async () => {
@@ -1272,6 +1380,40 @@ describe("Layer 3: LLM classification via message_received", () => {
       expect.stringContaining("Recebi!"),
       expect.anything(),
     );
+  });
+
+  it("fails before ack on the LLM path when projectsForumChatId is missing", async () => {
+    const api = {
+      on: vi.fn((name: string, fn: any) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    const ctxMissingForum = {
+      ...ctx,
+      pluginConfig: {
+        telegram: {
+          bootstrapDmEnabled: true,
+        },
+      },
+    } as any;
+
+    mockSubagentGetMessages.mockResolvedValue([
+      { role: "assistant", content: '{"intent":"create_project","confidence":0.95,"stackHint":"python-cli","projectSlug":"validador-cpf"}' },
+    ]);
+
+    registerTelegramBootstrapHook(api, ctxMissingForum);
+
+    await handler?.(
+      { content: "Build me a Python CLI that validates CPF numbers", metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 5000 });
+
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("grupo de projetos configurado");
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).not.toContain("Recebi!");
   });
 
   it("deletes session and does not bootstrap when LLM returns 'other'", async () => {
@@ -1320,7 +1462,7 @@ describe("Layer 3: LLM classification via message_received", () => {
 
     expect(mockRunPipeline).not.toHaveBeenCalled();
     expect(sendMessageTelegram).not.toHaveBeenCalled();
-    const session = await readTelegramBootstrapSession("/tmp/workspace", "6951571380");
+    const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
     expect(session).toBeNull();
   });
 

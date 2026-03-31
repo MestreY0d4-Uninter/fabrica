@@ -19,6 +19,79 @@
           "workerComplete": { "type": "boolean", "default": true }
         }
       },
+      "providers": {
+        "type": "object",
+        "properties": {
+          "github": {
+            "type": "object",
+            "properties": {
+              "defaultAuthProfile": { "type": "string" },
+              "webhookPath": {
+                "type": "string",
+                "description": "Plugin HTTP route path for GitHub App webhooks."
+              },
+              "webhookSecretEnv": {
+                "type": "string",
+                "description": "Environment variable containing the GitHub App webhook secret."
+              },
+              "webhookSecret": {
+                "type": "string",
+                "description": "Inline GitHub App webhook secret."
+              },
+              "webhookSecretPath": {
+                "type": "string",
+                "description": "Filesystem path containing the GitHub App webhook secret."
+              },
+              "webhookMode": {
+                "type": "string",
+                "enum": ["required", "optional", "disabled"],
+                "description": "Controls GitHub webhook route registration behavior."
+              },
+              "authProfiles": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "mode": { "type": "string", "enum": ["github-app"] },
+                    "appId": { "type": "string" },
+                    "appIdEnv": { "type": "string" },
+                    "privateKey": { "type": "string" },
+                    "privateKeyEnv": { "type": "string" },
+                    "privateKeyPath": { "type": "string" },
+                    "privateKeyPathEnv": { "type": "string" },
+                    "baseUrl": { "type": "string" },
+                    "fallbackMode": { "type": "string", "enum": ["pr-conversation-comment"] },
+                    "allowUserAuthFallback": { "type": "boolean", "default": true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "telegram": {
+        "type": "object",
+        "description": "Telegram routing for DM bootstrap, project forum topics, and ops notifications.",
+        "properties": {
+          "bootstrapDmEnabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Allow new-project bootstrap from Telegram DMs to the bot."
+          },
+          "projectsForumChatId": {
+            "type": "string",
+            "description": "Telegram forum group chat ID where Fabrica creates one topic per project."
+          },
+          "projectsForumAccountId": {
+            "type": "string",
+            "description": "Optional Telegram account ID to use when creating/sending project forum topics."
+          },
+          "opsChatId": {
+            "type": "string",
+            "description": "Telegram group/chat ID for cron, health, and ops-only notifications."
+          }
+        }
+      },
       "work_heartbeat": {
         "type": "object",
         "description": "Token-free interval-based heartbeat service. Runs health checks + queue dispatch automatically.",

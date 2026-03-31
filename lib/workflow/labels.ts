@@ -68,7 +68,9 @@ export function getNotifyLabel(channel: string, nameOrIndex: string): string {
 
 /**
  * Resolve which channel should receive notifications for an issue.
- * Each issue has at most one notify label. Falls back to the first channel.
+ * Each issue has at most one notify label.
+ * Without an explicit notify label, the first channel remains the default.
+ * With an explicit notify label, resolution must be exact; invalid routes fail closed.
  */
 export function resolveNotifyChannel(
   issueLabels: string[],
@@ -83,9 +85,9 @@ export function resolveNotifyChannel(
       const channelName = value.slice(colonIdx + 1);
       return channels.find(
         (ch) => ch.channel === channelType && (ch.name === channelName || String(channels.indexOf(ch)) === channelName),
-      ) ?? channels[0];
+      );
     }
-    return channels.find((ch) => ch.channelId === value) ?? channels[0];
+    return channels.find((ch) => ch.channelId === value);
   }
   return channels[0];
 }

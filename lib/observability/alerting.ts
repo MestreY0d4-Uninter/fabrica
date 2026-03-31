@@ -1,5 +1,8 @@
 /**
- * observability/alerting.ts — Health alert decision logic.
+ * observability/alerting.ts — Advisory health-alert decision logic.
+ *
+ * These helpers are intentionally pure and not wired into the runtime control
+ * plane until Fabrica has an authoritative operator health model.
  */
 
 export type AlertState = {

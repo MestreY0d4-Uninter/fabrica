@@ -529,7 +529,7 @@ export class GitHubProvider implements IssueProvider {
 
       let state: PrState;
       if (pr.state === "closed" && pr.mergedAt) {
-        state = pr.reviewDecision === "APPROVED" ? PrState.APPROVED : PrState.MERGED;
+        state = PrState.MERGED;
       } else if (pr.state === "closed") {
         state = PrState.CLOSED;
       } else if (pr.reviewDecision === "APPROVED") {
@@ -912,7 +912,7 @@ export class GitHubProvider implements IssueProvider {
     if (merged.length > 0) {
       merged.sort((a, b) => new Date(b.mergedAt ?? 0).getTime() - new Date(a.mergedAt ?? 0).getTime());
       const pr = merged[0];
-      const state = pr.reviewDecision === "APPROVED" ? PrState.APPROVED : PrState.MERGED;
+      const state = PrState.MERGED;
       return {
         number: (pr as { number?: number }).number,
         nodeId: (pr as { id?: string }).id,
@@ -950,30 +950,48 @@ export class GitHubProvider implements IssueProvider {
     return { state: PrState.CLOSED, url: null };
   }
 
-  async getPrDetails(issueId: number): Promise<PrDetails | null> {
+  async getPrDetails(issueId: number, selector?: PrSelector): Promise<PrDetails | null> {
     try {
-      // Find the open PR for this issue via timeline (reuses existing infrastructure)
       type RawPr = { number: number; headRefName: string; url: string; state: string; mergedAt: string | null; title: string; body: string };
-      let prs = await this.findPrsForIssue<RawPr>(
-        issueId,
-        "open",
-        "number,headRefName,url,state,mergedAt",
-      );
       let prState: "open" | "merged" | "closed" = "open";
+      let prNumber: number;
+      let prUrl: string | null;
+      let sourceBranch: string;
 
-      if (!prs.length) {
-        // Check recently merged PRs
-        prs = await this.findPrsForIssue<RawPr>(issueId, "merged", "number,headRefName,url,state,mergedAt");
-        if (prs.length) prState = "merged";
+      if (selector?.prNumber) {
+        const status = await this.getPrStatusForNumber(selector.prNumber);
+        if (!status?.number || !status.url || !status.sourceBranch) return null;
+        prNumber = status.number;
+        prUrl = status.url;
+        sourceBranch = status.sourceBranch;
+        prState = status.state === PrState.MERGED
+          ? "merged"
+          : status.state === PrState.CLOSED
+            ? "closed"
+            : "open";
+      } else {
+        let prs = await this.findPrsForIssue<RawPr>(
+          issueId,
+          "open",
+          "number,headRefName,url,state,mergedAt",
+        );
+
+        if (!prs.length) {
+          prs = await this.findPrsForIssue<RawPr>(issueId, "merged", "number,headRefName,url,state,mergedAt");
+          if (prs.length) prState = "merged";
+        }
+        if (!prs.length) return null;
+
+        const pr = prs[0]!;
+        prNumber = pr.number;
+        prUrl = pr.url ?? null;
+        sourceBranch = pr.headRefName;
       }
-      if (!prs.length) return null;
-
-      const pr = prs[0]!;
 
       // Fetch headSha, repositoryId, owner, and repo in one API call
       const raw = await this.gh([
         "api",
-        `repos/:owner/:repo/pulls/${pr.number}`,
+        `repos/:owner/:repo/pulls/${prNumber}`,
         "--jq",
         "{headSha: .head.sha, repositoryId: .head.repo.id, owner: .head.repo.owner.login, repo: .head.repo.name}",
       ]);
@@ -981,11 +999,11 @@ export class GitHubProvider implements IssueProvider {
       if (!extra.headSha || !extra.repositoryId || !extra.owner || !extra.repo) return null;
 
       return {
-        prNumber: pr.number,
+        prNumber,
         headSha: extra.headSha,
         prState,
-        prUrl: pr.url ?? null,
-        sourceBranch: pr.headRefName,
+        prUrl,
+        sourceBranch,
         repositoryId: extra.repositoryId,
         owner: extra.owner,
         repo: extra.repo,

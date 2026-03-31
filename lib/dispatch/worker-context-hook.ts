@@ -1,8 +1,8 @@
 /**
- * worker-context-hook.ts — Inject explicit work_finish instruction into worker system prompts.
+ * worker-context-hook.ts — Inject explicit completion instructions into worker system prompts.
  *
  * OpenClaw's minimal system prompt says "your final message will be automatically
- * reported" — workers misread this as permission to skip calling work_finish.
+ * reported" — workers misread this as permission to skip explicit completion.
  * This hook prepends a clear instruction that overrides that framing.
  *
  * Fires for every agent run (before_agent_start). No-op for non-worker sessions.
@@ -18,6 +18,17 @@ Do NOT rely on your session ending automatically — you must explicitly call \`
 This is required for the pipeline to advance to the next stage.
 `;
 
+const REVIEWER_COMPLETION_CONTEXT = `## Task Completion
+
+When you finish the review, signal completion by ending your response with the decision line below.
+End your response with exactly one decision line in plain text:
+- \`Review result: APPROVE\`
+- \`Review result: REJECT\`
+
+The orchestrator reads that line directly from your response and advances the review stage automatically.
+If you need the project slug for follow-up tools such as \`task_create\`, use the value from the \`Channel:\` line in the task message.
+`;
+
 export function registerWorkerContextHook(
   api: OpenClawPluginApi,
   _ctx: PluginContext,
@@ -29,6 +40,10 @@ export function registerWorkerContextHook(
     const parsed = parseFabricaSessionKey(sessionKey);
     if (!parsed) return;
 
-    return { prependSystemContext: WORK_FINISH_CONTEXT };
+    return {
+      prependSystemContext: parsed.role === "reviewer"
+        ? REVIEWER_COMPLETION_CONTEXT
+        : WORK_FINISH_CONTEXT,
+    };
   });
 }

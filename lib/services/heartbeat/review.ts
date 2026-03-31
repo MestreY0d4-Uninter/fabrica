@@ -19,7 +19,7 @@ import { detectStepRouting } from "../queue-scan.js";
 import type { RunCommand } from "../../context.js";
 import { log as auditLog } from "../../audit.js";
 import { guardedCloseIssue, persistMergedArtifact } from "../pipeline.js";
-import { readProjects, getProject, getIssueRuntime, updateIssueRuntime } from "../../projects/index.js";
+import { readProjects, getProject, getIssueRuntime, updateIssueRuntime, getCanonicalPrSelector } from "../../projects/index.js";
 import { resilientLabelTransition } from "../../workflow/labels.js";
 
 /**
@@ -56,12 +56,12 @@ export async function reviewPass(opts: {
 
     const issues = await provider.listIssuesByLabel(state.label);
     for (const issue of issues) {
-      // Only process issues explicitly marked for human review.
-      // review:agent → agent reviewer pipeline handles merge.
-      // No routing label → treat as agent by default (safe: never auto-merge without explicit human approval).
+      // Only process issues with explicit review routing.
       // review:human → human approved on provider; heartbeat handles merge transition.
+      // review:agent → reviewer agent approved via `gh pr review`; heartbeat detects the PR review state.
+      // null (no label) / review:skip / unknown → skip (safe: no auto-merge without explicit routing).
       const routing = detectStepRouting(issue.labels, "review");
-      if (routing !== "human") continue;
+      if (routing !== "human" && routing !== "agent") continue;
 
       // Only process issues managed by Fabrica (marked with 👀 on issue body).
       // Old-style issues without the marker are skipped to prevent false triggers
@@ -69,7 +69,11 @@ export async function reviewPass(opts: {
       const isManaged = await provider.issueHasReaction(issue.iid, "eyes");
       if (!isManaged) continue;
 
-      const status = await provider.getPrStatus(issue.iid);
+      const projectData = await readProjects(workspaceDir).catch(() => null);
+      const project = projectData ? getProject(projectData, projectName) : null;
+      const issueRuntime = project ? getIssueRuntime(project, issue.iid) : undefined;
+      const prSelector = project ? getCanonicalPrSelector(project, issue.iid) : undefined;
+      const status = await provider.getPrStatus(issue.iid, prSelector);
       if (status.currentIssueMatch === false) continue;
 
       // Fallback: no PR found, but work may have been committed directly to base branch.
@@ -159,14 +163,12 @@ export async function reviewPass(opts: {
           const closedActions = typeof closedTransition === "object" ? closedTransition.actions : undefined;
           const targetState = workflow.states[targetKey];
           if (targetState) {
-            await resilientLabelTransition(provider, issue.iid, state.label, targetState.label);
+            let aborted = false;
             if (closedActions) {
               for (const action of closedActions) {
                 switch (action) {
                   case Action.CLOSE_ISSUE:
                     try {
-                      const project = getProject(await readProjects(workspaceDir), projectName);
-                      const issueRuntime = project ? getIssueRuntime(project, issue.iid) : undefined;
                       if (!project) throw new Error(`Project not found: ${projectName}`);
                       await guardedCloseIssue({
                         workspaceDir,
@@ -175,17 +177,25 @@ export async function reviewPass(opts: {
                         issueId: issue.iid,
                         role: "reviewer",
                         provider,
+                        selector: prSelector,
                         issueRuntime,
                         followUpPrRequired: issueRuntime?.followUpPrRequired === true,
                       });
-                    } catch { /* best-effort */ }
+                    } catch {
+                      aborted = true;
+                    }
                     break;
                   case Action.REOPEN_ISSUE:
                     try { await provider.reopenIssue(issue.iid); } catch { /* best-effort */ }
                     break;
                 }
+                if (aborted) break;
               }
             }
+            if (aborted) {
+              continue;
+            }
+            await resilientLabelTransition(provider, issue.iid, state.label, targetState.label);
             await auditLog(workspaceDir, "review_transition", {
               project: projectName, issueId: issue.iid,
               from: state.label, to: targetState.label,
@@ -241,8 +251,6 @@ export async function reviewPass(opts: {
             case Action.MERGE_PR:
               // If the PR is already merged externally, skip the merge call but continue the transition.
               if (status.state === PrState.MERGED) {
-                const project = getProject(await readProjects(workspaceDir), projectName);
-                const issueRuntime = project ? getIssueRuntime(project, issue.iid) : undefined;
                 if (project && issueRuntime?.currentPrNumber) {
                   await persistMergedArtifact({
                     workspaceDir,
@@ -256,9 +264,7 @@ export async function reviewPass(opts: {
                 break;
               }
               try {
-                await provider.mergePr(issue.iid);
-                const project = getProject(await readProjects(workspaceDir), projectName);
-                const issueRuntime = project ? getIssueRuntime(project, issue.iid) : undefined;
+                await provider.mergePr(issue.iid, prSelector);
                 if (project && issueRuntime?.currentPrNumber) {
                   await persistMergedArtifact({
                     workspaceDir,
@@ -301,8 +307,6 @@ export async function reviewPass(opts: {
               break;
             case Action.CLOSE_ISSUE:
               {
-                const project = getProject(await readProjects(workspaceDir), projectName);
-                const issueRuntime = project ? getIssueRuntime(project, issue.iid) : undefined;
                 if (!project) throw new Error(`Project not found: ${projectName}`);
                 await guardedCloseIssue({
                   workspaceDir,
@@ -311,6 +315,7 @@ export async function reviewPass(opts: {
                   issueId: issue.iid,
                   role: "reviewer",
                   provider,
+                  selector: prSelector,
                   issueRuntime,
                   followUpPrRequired: issueRuntime?.followUpPrRequired === true,
                 });

@@ -22,7 +22,7 @@ import { getQueueLabels, isFeedbackState } from "../../workflow/index.js";
 import { resilientLabelTransition, resolveNotifyChannel } from "../../workflow/labels.js";
 import { notify, getNotificationConfig } from "../../dispatch/notify.js";
 import { loadConfig } from "../../config/index.js";
-import { PrState, type ReviewArtifactType, type PrSelector } from "../../providers/provider.js";
+import { PrState, type PrSelector } from "../../providers/provider.js";
 import {
   formatQaEvidenceValidationFailure,
   validateCanonicalQaEvidence,
@@ -225,13 +225,14 @@ export async function validatePrExistsForDeveloper(
     }
     return prStatus;
   } catch (err) {
-    // Re-throw our own validation errors; swallow provider/network errors.
-    // Swallowing keeps work_finish unblocked when the API is unreachable.
     if (err instanceof Error && (err.message.startsWith("Cannot mark work_finish(done)") || err.message.startsWith("Cannot complete work_finish(done)"))) {
       throw err;
     }
-    logger.warn({ err }, "PR validation warning; failing open");
-    return { state: PrState.CLOSED, url: null };
+    logger.warn({ err }, "PR validation warning; failing closed");
+    throw new Error(
+      `Cannot mark work_finish(done) because Fabrica could not verify PR state right now.\n\n` +
+      `Resolve the provider/API error and call work_finish again.`,
+    );
   }
 }
 
@@ -249,45 +250,6 @@ function shouldAutoRecoverToFeedback(summary?: string): boolean {
   );
 }
 
-export async function validateReviewerArtifact(
-  provider: Awaited<ReturnType<typeof resolveProvider>>["provider"],
-  issueId: number,
-  expectedResult: "approve" | "reject",
-  artifactId?: number,
-  artifactType?: ReviewArtifactType,
-  selector?: PrSelector,
-): Promise<void> {
-  if (!artifactId || !artifactType) {
-    throw new Error(
-      "Reviewer must publish feedback to the PR with review_submit before calling work_finish.",
-    );
-  }
-
-  const comments = await provider.getPrReviewComments(issueId, selector);
-  const match = comments.find((comment) =>
-    matchesReviewArtifact(comment, artifactId, artifactType),
-  );
-
-  if (!match) {
-    throw new Error(
-      `Review artifact #${artifactId} (${artifactType}) was not found on the PR for issue #${issueId}.`,
-    );
-  }
-
-  if (artifactType === "formal_review") {
-    if (expectedResult === "approve" && match.state !== "APPROVED") {
-      throw new Error(
-        `Review artifact #${artifactId} must be an APPROVED review before reviewer approve can complete issue #${issueId}.`,
-      );
-    }
-    if (expectedResult === "reject" && match.state !== "CHANGES_REQUESTED") {
-      throw new Error(
-        `Review artifact #${artifactId} must be a CHANGES_REQUESTED review before reviewer reject can complete issue #${issueId}.`,
-      );
-    }
-  }
-}
-
 export async function getCanonicalQaEvidenceValidationForPr(
   provider: Awaited<ReturnType<typeof resolveProvider>>["provider"],
   issueId: number,
@@ -297,32 +259,20 @@ export async function getCanonicalQaEvidenceValidationForPr(
   return validateCanonicalQaEvidence(prStatus.body);
 }
 
-export function matchesReviewArtifact(
-  comment: { id: number; state: string; path?: string },
-  artifactId: number,
-  artifactType: ReviewArtifactType,
-): boolean {
-  if (comment.id !== artifactId) return false;
-  if (artifactType === "formal_review") {
-    return comment.state === "APPROVED" || comment.state === "CHANGES_REQUESTED";
-  }
-  return comment.state === "COMMENTED" && !comment.path;
-}
-
 export const INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD = 2;
 
 export function createWorkFinishTool(ctx: PluginContext) {
   return (toolCtx: ToolContext) => ({
     name: "work_finish",
     label: "Work Finish",
-    description: `Complete a task: Developer done (PR created, goes to review) or blocked. Tester pass/fail/refine/blocked. Reviewer approve/reject/blocked. Architect done/blocked. Handles label transition, state update, issue close/reopen, notifications, and audit logging.`,
+    description: `Complete a task: Developer done (PR created, goes to review) or blocked. Tester pass/fail/fail_infra/refine/blocked. Architect done/blocked. Handles label transition, state update, issue close/reopen, notifications, and audit logging.`,
     parameters: {
       type: "object",
       required: ["channelId", "role", "result"],
       properties: {
-        channelId: { type: "string", description: "Project slug (e.g. 'my-project'). Use the value from the 'Channel:' or 'Project:' line in your task message. Do NOT use a numeric Telegram chat ID." },
+        channelId: { type: "string", description: "Project slug (e.g. 'my-project'). Use the value from the 'Channel:' line in your task message. Do NOT use a numeric Telegram chat ID." },
         role: { type: "string", enum: getAllRoleIds(), description: "Worker role" },
-        result: { type: "string", enum: ["done", "pass", "fail", "fail_infra", "refine", "blocked", "approve", "reject"], description: "Completion result. Use fail_infra (tester only) when the test toolchain is missing or broken — this keeps the issue in the test queue instead of routing it to the developer." },
+        result: { type: "string", enum: ["done", "pass", "fail", "fail_infra", "refine", "blocked"], description: "Completion result. Use fail_infra (tester only) when the test toolchain is missing or broken — this keeps the issue in the test queue instead of routing it to the developer." },
         summary: { type: "string", description: "Brief summary" },
         prUrl: { type: "string", description: "PR/MR URL (auto-detected if omitted)" },
         createdTasks: {
@@ -338,15 +288,6 @@ export function createWorkFinishTool(ctx: PluginContext) {
           },
           description: "Tasks created during this work session (architect creates implementation tasks).",
         },
-        reviewArtifactId: {
-          type: "number",
-          description: "Artifact ID returned by review_submit. Required for reviewer approve/reject.",
-        },
-        reviewArtifactType: {
-          type: "string",
-          enum: ["formal_review", "pr_conversation_comment"],
-          description: "Artifact type returned by review_submit. Required for reviewer approve/reject.",
-        },
       },
     },
 
@@ -356,16 +297,16 @@ export function createWorkFinishTool(ctx: PluginContext) {
       const summary = params.summary as string | undefined;
       const prUrl = params.prUrl as string | undefined;
       const createdTasks = params.createdTasks as Array<{ id: number; title: string; url: string }> | undefined;
-      const reviewArtifactId = params.reviewArtifactId as number | undefined;
-      const reviewArtifactType = params.reviewArtifactType as ReviewArtifactType | undefined;
+      const dispatchRunId = typeof params._dispatchRunId === "string"
+        ? params._dispatchRunId
+        : undefined;
       const workspaceDir = requireWorkspaceDir(toolCtx);
 
-      await recordIssueLifecycleBySessionKey({
-        workspaceDir,
-        sessionKey: toolCtx.sessionKey,
-        stage: "first_worker_activity",
-        details: { source: "work_finish" },
-      }).catch(() => {});
+      if (role === "reviewer") {
+        throw new Error(
+          "Reviewer completion is no longer handled by work_finish. End your response with exactly one plain-text decision line: 'Review result: APPROVE' or 'Review result: REJECT'. Use the project slug from the 'Channel:' line in your task message for any follow-up task_create call.",
+        );
+      }
 
       // Validate role:result using registry
       if (!isValidResult(role, result)) {
@@ -384,6 +325,45 @@ export function createWorkFinishTool(ctx: PluginContext) {
       }
       const { slotIndex, slotLevel, issueId, recovered } = workerSlot;
       const issueRuntime = project.issueRuntime?.[String(issueId)];
+      const currentDispatchRunId = workerSlot.dispatchRunId ?? issueRuntime?.dispatchRunId ?? null;
+      const hasCycleMismatch = Boolean(
+        workerSlot.dispatchCycleId &&
+        issueRuntime?.lastDispatchCycleId &&
+        workerSlot.dispatchCycleId !== issueRuntime.lastDispatchCycleId,
+      );
+
+      if (!dispatchRunId || !currentDispatchRunId || dispatchRunId !== currentDispatchRunId || hasCycleMismatch) {
+        await auditLog(workspaceDir, "work_finish_rejected", {
+          project: project.name,
+          projectSlug: project.slug,
+          issue: issueId,
+          role,
+          result,
+          reason: "stale_dispatch_cycle",
+          sessionKey: toolCtx.sessionKey ?? null,
+          providedDispatchRunId: dispatchRunId ?? null,
+          currentDispatchRunId,
+          slotDispatchCycleId: workerSlot.dispatchCycleId ?? null,
+          runtimeDispatchCycleId: issueRuntime?.lastDispatchCycleId ?? null,
+        });
+        return jsonResult({
+          success: false,
+          project: project.name,
+          projectSlug: project.slug,
+          issueId,
+          role,
+          result,
+          reason: "stale_dispatch_cycle",
+        });
+      }
+
+      await recordIssueLifecycleBySessionKey({
+        workspaceDir,
+        sessionKey: toolCtx.sessionKey,
+        stage: "first_worker_activity",
+        details: { source: "work_finish" },
+      }).catch(() => {});
+
       const prSelector = (role === "reviewer" || role === "tester")
         ? requireCanonicalPrSelector(project, issueId, `${role} completion`)
         : (issueRuntime?.currentPrNumber ? { prNumber: issueRuntime.currentPrNumber } : undefined);
@@ -535,25 +515,6 @@ export function createWorkFinishTool(ctx: PluginContext) {
           boundAt: new Date().toISOString(),
         });
       }
-      if (role === "reviewer" && (result === "approve" || result === "reject")) {
-        await validateReviewerArtifact(provider, issueId, result, reviewArtifactId, reviewArtifactType, prSelector);
-      }
-      if (role === "reviewer" && result === "approve") {
-        const qaEvidence = await getCanonicalQaEvidenceValidationForPr(provider, issueId, prSelector);
-        if (!qaEvidence.valid) {
-          await auditLog(workspaceDir, "work_finish_rejected", {
-            project: project.slug,
-            issue: issueId,
-            reason: "invalid_qa_evidence",
-            role,
-            result,
-            prNumber: issueRuntime?.currentPrNumber ?? null,
-            qaProblems: qaEvidence.problems,
-          });
-          throwInvalidQaEvidence(qaEvidence, "reviewer");
-        }
-      }
-
       const completion = await ctx.observability.withContext({
         sessionKey: toolCtx.sessionKey ?? undefined,
         issueId,
@@ -635,7 +596,14 @@ export function createWorkFinishTool(ctx: PluginContext) {
 export function resolveWorkerSlot(
   roleWorker: ReturnType<typeof getRoleWorker>,
   sessionKey?: string,
-): { slotIndex: number; slotLevel: string; issueId: number; recovered: boolean } | null {
+): {
+  slotIndex: number;
+  slotLevel: string;
+  issueId: number;
+  recovered: boolean;
+  dispatchCycleId?: string | null;
+  dispatchRunId?: string | null;
+} | null {
   for (const [level, slots] of Object.entries(roleWorker.levels)) {
     for (let i = 0; i < slots.length; i++) {
       const slot = slots[i]!;
@@ -646,6 +614,8 @@ export function resolveWorkerSlot(
           slotLevel: level,
           issueId: Number(slot.issueId),
           recovered: false,
+          dispatchCycleId: slot.dispatchCycleId ?? null,
+          dispatchRunId: slot.dispatchRunId ?? null,
         };
       }
     }
@@ -662,6 +632,8 @@ export function resolveWorkerSlot(
         slotLevel: level,
         issueId: Number(slot.lastIssueId),
         recovered: true,
+        dispatchCycleId: slot.dispatchCycleId ?? null,
+        dispatchRunId: slot.dispatchRunId ?? null,
       };
     }
   }

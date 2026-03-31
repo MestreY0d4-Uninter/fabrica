@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { registerSubagentLifecycleHook } from "../../lib/dispatch/subagent-lifecycle-hook.js";
+import { DEFAULT_WORKFLOW } from "../../lib/workflow/index.js";
+import { resolveReviewerDecisionTransition } from "../../lib/services/reviewer-completion.js";
 
 // Hoist mocks before any imports are resolved
 const { mockAuditLog } = vi.hoisted(() => ({
@@ -200,5 +202,15 @@ describe("subagent_ended hook", () => {
         role: "developer",
       }),
     );
+  });
+
+  it("uses reviewing-state reviewer transitions instead of toReview review events", () => {
+    const approve = resolveReviewerDecisionTransition(DEFAULT_WORKFLOW, "approve");
+    const reject = resolveReviewerDecisionTransition(DEFAULT_WORKFLOW, "reject");
+
+    expect(approve?.eventKey).toBe("APPROVE");
+    expect(approve?.targetLabel).toBe("To Test");
+    expect(reject?.eventKey).toBe("REJECT");
+    expect(reject?.targetLabel).toBe("To Improve");
   });
 });

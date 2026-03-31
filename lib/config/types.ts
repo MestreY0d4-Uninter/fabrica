@@ -4,7 +4,7 @@
  * A single workflow.yaml combines roles, models, and workflow.
  * Three-layer resolution: built-in -> workspace -> per-project.
  */
-import type { WorkflowConfig } from "../workflow/index.js";
+import type { ExecutionMode, WorkflowConfig } from "../workflow/index.js";
 import type { WorkflowResolutionMeta } from "./workflow-policy.js";
 import type { EffortLevel } from "../roles/types.js";
 
@@ -88,6 +88,7 @@ export type ProvidersConfig = {
     webhookSecret?: string;
     webhookSecretPath?: string;
     webhookSecretEnv?: string;
+    webhookMode?: "required" | "optional" | "disabled";
   };
 };
 
@@ -100,6 +101,31 @@ export type FabricaConfig = {
   workflow?: Partial<WorkflowConfig>;
   timeouts?: TimeoutConfig;
   instance?: InstanceConfig;
+};
+
+export type HeartbeatPluginConfig = {
+  enabled?: boolean;
+  intervalSeconds?: number;
+  maxPickupsPerTick?: number;
+};
+
+export type TelegramPluginConfig = {
+  bootstrapDmEnabled?: boolean;
+  projectsForumChatId?: string;
+  projectsForumAccountId?: string;
+  opsChatId?: string;
+};
+
+export type NotificationPluginConfig = {
+  workerStart?: boolean;
+  workerComplete?: boolean;
+};
+
+export type FabricaPluginConfig = {
+  work_heartbeat?: HeartbeatPluginConfig;
+  projectExecution?: ExecutionMode;
+  notifications?: NotificationPluginConfig;
+  telegram?: TelegramPluginConfig;
   providers?: ProvidersConfig;
 };
 

@@ -263,6 +263,7 @@ async function readWorkflowFile(dir: string): Promise<FabricaConfig | null> {
   try {
     const content = await fs.readFile(filePath, "utf-8");
     const parsed = YAML.parse(content);
+    rejectPluginOnlyKeys(parsed, filePath);
     if (parsed) validateConfig(parsed);
     return parsed as FabricaConfig;
   } catch (err: any) {
@@ -277,12 +278,30 @@ async function readLegacyConfigFile(dir: string): Promise<FabricaConfig | null> 
   try {
     const content = await fs.readFile(filePath, "utf-8");
     const parsed = YAML.parse(content);
+    rejectPluginOnlyKeys(parsed, filePath);
     if (parsed) validateConfig(parsed);
     return parsed as FabricaConfig;
   } catch (err: any) {
     if (err?.code === "ENOENT") return null;
     throw new Error(formatConfigReadError(filePath, err, "legacy config.yaml"));
   }
+}
+
+const PLUGIN_ONLY_KEYS = [
+  "providers",
+  "telegram",
+  "work_heartbeat",
+  "notifications",
+  "projectExecution",
+] as const;
+
+function rejectPluginOnlyKeys(raw: unknown, filePath: string): void {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+  const forbidden = PLUGIN_ONLY_KEYS.filter((key) => key in (raw as Record<string, unknown>));
+  if (forbidden.length === 0) return;
+  throw new Error(
+    `Invalid workflow config at ${filePath}: plugin-only keys are not allowed in workflow.yaml/config.yaml (${forbidden.join(", ")}). Configure them in pluginConfig/openclaw.json instead.`,
+  );
 }
 
 /** Read legacy workflow.json (standalone workflow section only). */

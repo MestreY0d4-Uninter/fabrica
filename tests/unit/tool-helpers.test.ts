@@ -1,8 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
-import { applyNotifyLabel } from "../../lib/tools/helpers.js";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { applyNotifyLabel, resolveProjectFromContext } from "../../lib/tools/helpers.js";
 import type { Project } from "../../lib/projects/types.js";
+import { DATA_DIR } from "../../lib/setup/constants.js";
 
 describe("tool helpers", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
+  });
+
   it("routes notify labels to the primary topic when the source channel is the DM helper route", async () => {
     const provider = {
       ensureLabel: vi.fn(async () => undefined),
@@ -30,5 +40,73 @@ describe("tool helpers", () => {
 
     expect(provider.ensureLabel).toHaveBeenCalledWith("notify:telegram:primary", expect.any(String));
     expect(provider.addLabel).toHaveBeenCalledWith(42, "notify:telegram:primary");
+  });
+
+  it("resolveProjectFromContext keeps the full route tuple, including accountId", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-tool-helpers-"));
+    tempDirs.push(workspaceDir);
+    await fs.mkdir(path.join(workspaceDir, DATA_DIR), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, DATA_DIR, "projects.json"),
+      JSON.stringify({
+        projects: {
+          alpha: {
+            slug: "alpha",
+            name: "Alpha",
+            repo: "/tmp/alpha",
+            groupName: "Project: Alpha",
+            deployUrl: "",
+            baseBranch: "main",
+            deployBranch: "main",
+            channels: [
+              {
+                channel: "telegram",
+                channelId: "-1003709213169",
+                messageThreadId: 101,
+                accountId: "acct-a",
+                name: "primary",
+                events: ["*"],
+              },
+            ],
+            workers: {},
+          },
+          beta: {
+            slug: "beta",
+            name: "Beta",
+            repo: "/tmp/beta",
+            groupName: "Project: Beta",
+            deployUrl: "",
+            baseBranch: "main",
+            deployBranch: "main",
+            channels: [
+              {
+                channel: "telegram",
+                channelId: "-1003709213169",
+                messageThreadId: 101,
+                accountId: "acct-b",
+                name: "primary",
+                events: ["*"],
+              },
+            ],
+            workers: {},
+          },
+        },
+      }, null, 2),
+      "utf-8",
+    );
+
+    const resolved = await resolveProjectFromContext(
+      workspaceDir,
+      {
+        workspaceDir,
+        messageChannel: "telegram",
+        messageThreadId: 101,
+        agentAccountId: "acct-b",
+      },
+      "-1003709213169",
+    );
+
+    expect(resolved.project.slug).toBe("beta");
+    expect(resolved.route.accountId).toBe("acct-b");
   });
 });

@@ -67,11 +67,5 @@ export async function createProjectForumTopic(
     }
   }
 
-  // Fallback: use General topic (messageThreadId=1)
-  return {
-    chatId: opts.chatId,
-    topicId: 1,
-    name: opts.name,
-    isFallback: true,
-  };
+  throw lastError ?? new Error("Telegram topic creation failed after retry exhaustion");
 }

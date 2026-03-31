@@ -34,7 +34,7 @@ describe("worker-context-hook — before_agent_start", () => {
     expect(result.prependSystemContext).toContain("MUST");
   });
 
-  it("returns prependSystemContext with 'MUST call' for reviewer session", async () => {
+  it("returns reviewer-specific completion context without work_finish", async () => {
     const { registerWorkerContextHook } = await import("../../lib/dispatch/worker-context-hook.js");
     const handler = captureHandler(registerWorkerContextHook);
 
@@ -43,7 +43,8 @@ describe("worker-context-hook — before_agent_start", () => {
       { sessionKey: "agent:main:subagent:my-project-reviewer-junior-bob" },
     );
 
-    expect(result?.prependSystemContext).toContain("MUST call");
+    expect(result?.prependSystemContext).toContain("Review result:");
+    expect(result?.prependSystemContext).not.toContain("work_finish");
   });
 
   it("returns void for a non-Fabrica session (main agent)", async () => {

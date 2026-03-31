@@ -73,8 +73,7 @@ Do **not** treat the task envelope (`Repo:`, `Project:`, `Channel:`, branch hint
 
 - Read the PR diff carefully
 - Check the code against the review checklist
-- Call `review_submit` with your review findings so the artifact is written to the PR itself
-- Then call `work_finish`
+- Output your decision in the format described in **Completing Your Task** below
 
 ## Conventions
 
@@ -86,27 +85,37 @@ Do **not** treat the task envelope (`Repo:`, `Project:`, `Channel:`, branch hint
 
 ## Filing Follow-Up Issues
 
-If you discover unrelated bugs or needed improvements, call `task_create`:
+If you discover unrelated bugs or needed improvements, call `task_create` with the project slug from the `Channel:` line in your task message:
 
-`task_create({ projectSlug: "<from task message>", title: "Bug: ...", description: "..." })`
+`task_create({ projectSlug: "<project slug from the 'Channel:' line in the task message>", title: "Bug: ...", description: "..." })`
 
 ## Completing Your Task
 
-When you are done, submit the review artifact first, then **call `work_finish` yourself** — do not just announce in text.
+After writing your review, you **MUST** output your final decision on a dedicated line in **exactly** one of these two formats:
 
-- **Approve review artifact:** `review_submit({ channelId: "<project slug from 'Project:' field in task message>", issueId: <issue number>, result: "approve", body: "<what you checked>" })`
-- **Reject review artifact:** `review_submit({ channelId: "<project slug from 'Project:' field in task message>", issueId: <issue number>, result: "reject", body: "<specific issues>" })`
-- Capture the returned `artifactId` and `artifactType` from `review_submit`.
+```
+Review result: APPROVE
+```
+```
+Review result: REJECT
+```
 
-**Never call `task_comment` for review findings.** The orchestrator may mirror your result to the issue separately, but your authoritative feedback must live on the PR via `review_submit`.
+The Fabrica orchestrator reads your session output and advances the pipeline automatically based on this line. **You do not need to call any tool or run any CLI command.** Just output the line above and your work is done.
 
-- **Approve:** `work_finish({ role: "reviewer", result: "approve", channelId: "<project slug from 'Project:' field in task message>", summary: "<what you checked>", reviewArtifactId: <artifactId>, reviewArtifactType: "<artifactType>" })`
-- **Reject:** `work_finish({ role: "reviewer", result: "reject", channelId: "<project slug from 'Project:' field in task message>", summary: "<specific issues>", reviewArtifactId: <artifactId>, reviewArtifactType: "<artifactType>" })`
-- **Blocked:** `work_finish({ role: "reviewer", result: "blocked", channelId: "<project slug from 'Project:' field in task message>", summary: "<what you need>" })`
+- Output `Review result: APPROVE` if all quality gates pass and the code is ready to proceed.
+- Output `Review result: REJECT` if any blocking issue was found that the developer must fix.
 
-> **IMPORTANT:** The `channelId` parameter accepts the project slug (e.g., "gestao-notas").
-> Extract it from the "Project: <name>" line in your task message. Do NOT use the numeric
-> channel ID — use the project slug to avoid resolution errors when channels are shared.
+> **IMPORTANT:** The decision line must appear in your response text, not inside a code block. It is case-insensitive but must follow the `Review result: APPROVE/REJECT` format exactly.
+
+### Optional: submit PR comment (best-effort)
+
+If `gh` is available and the PR author is not the same GitHub account you are logged in as, you may optionally leave a PR comment for visibility:
+
+```
+gh pr comment <PR_NUMBER> --repo <OWNER/REPO> --body "<summary of your findings>"
+```
+
+This is informational only — the orchestrator does not require it to advance the pipeline.
 
 ## Tools You Should NOT Use
 

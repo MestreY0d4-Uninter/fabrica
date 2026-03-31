@@ -6,7 +6,8 @@
  * - Developer worker posts implementation notes
  * - Orchestrator adds summary comments
  *
- * Blocking reviewer feedback must use review_submit so the artifact is stored on the PR.
+ * Reviewer worker findings must stay in the review response and end with
+ * the canonical `Review result:` line.
  */
 import { jsonResult } from "openclaw/plugin-sdk";
 import type { PluginContext } from "../../context.js";
@@ -33,7 +34,7 @@ Use cases:
 - Orchestrator adds summary comments
 - Cross-referencing related issues or PRs
 
-Blocking reviewer decisions belong in \`review_submit\`, not \`task_comment\`.
+Reviewer worker decisions belong in the review response, not in \`task_comment\`.
 
 Examples:
 - Simple: { issueId: 42, body: "Found an edge case with null inputs" }
@@ -96,7 +97,8 @@ Examples:
           sessionKey: toolCtx.sessionKey,
         });
         throw new Error(
-          "Reviewer findings must be published to the PR with review_submit. " +
+          "Reviewer workers must keep findings in the review response and finish with " +
+          "`Review result: APPROVE` or `Review result: REJECT`. " +
           "task_comment is reserved for issue-side operational notes from non-reviewer roles.",
         );
       }
@@ -111,7 +113,7 @@ Examples:
           sessionKey: toolCtx.sessionKey ?? null,
         });
         throw new Error(
-          "Reviewer feedback must be published on the PR with review_submit. task_comment is not allowed for reviewer findings.",
+          "Reviewer worker findings must stay in the review response. task_comment is not allowed for reviewer findings.",
         );
       }
 

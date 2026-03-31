@@ -14,7 +14,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { parseGenesisArgs, loadAnswersFromFile } from "./genesis-trigger-args.js";
 
 const execFileAsync = promisify(execFile);
@@ -231,65 +230,8 @@ if (issues && issues.length > 0) {
   console.log(`Issue: #${issue.number} — ${issue.html_url}`);
 }
 
-// --- Create Telegram forum topic (equivalent to Telegram DM bootstrap) ---
-if (result.success && !dryRunFlag) {
-  const { resolveTopicCreationParams } = await import("./genesis-trigger-telegram.js");
-  const envPath = join(homedir(), ".openclaw", ".env");
-
-  let envContent: string | null = null;
-  try {
-    envContent = readFileSync(envPath, "utf-8");
-  } catch {
-    // File missing — resolveTopicCreationParams will handle the error
-  }
-
-  const slug = projectName ?? (scaffold?.repo_name ?? "");
-  const topicParams = resolveTopicCreationParams({ envPath, envContent, slug, channelId });
-
-  if (topicParams.error) {
-    console.warn(`Telegram topic creation skipped: ${topicParams.error}`);
-  } else {
-    console.log("\n--- Creating Telegram forum topic ---");
-    try {
-      const topicRes = await fetch(
-        `https://api.telegram.org/bot${topicParams.botToken}/createForumTopic`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: parseInt(topicParams.channelId, 10),
-            name: `📦 ${topicParams.slug}`,
-            icon_color: 7322096,
-          }),
-        },
-      );
-      const topicData = (await topicRes.json()) as {
-        ok: boolean;
-        result?: { message_thread_id: number };
-        description?: string;
-      };
-
-      if (topicData.ok && topicData.result) {
-        const messageThreadId = topicData.result.message_thread_id;
-        console.log(`Topic created: messageThreadId=${messageThreadId}`);
-        const { updateProjectTopic } = await import("./genesis-trigger-projects.js");
-        const updateResult = await updateProjectTopic({
-          workspaceDir: WORKSPACE_DIR,
-          slug: topicParams.slug,
-          channelId: topicParams.channelId,
-          messageThreadId,
-        });
-
-        if (updateResult.success) {
-          console.log(`projects.json updated for "${topicParams.slug}"`);
-        } else {
-          console.warn(`projects.json update failed: ${updateResult.error}`);
-        }
-      } else {
-        console.warn(`Telegram API error: ${topicData.description ?? "unknown"}`);
-      }
-    } catch (err) {
-      console.warn("Telegram topic creation failed (non-fatal):", err);
-    }
-  }
+if (result.success && !dryRunFlag && channelId) {
+  console.log("");
+  console.log("Telegram topic handoff is no longer created post-hoc by this script.");
+  console.log("Use the transactional registration flow when a dedicated project topic is required.");
 }

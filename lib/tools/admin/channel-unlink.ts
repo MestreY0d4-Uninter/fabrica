@@ -27,6 +27,11 @@ export function createChannelUnlinkTool(_ctx: PluginContext) {
           type: "string",
           description: "Channel ID to remove (e.g., Telegram group ID)",
         },
+        channel: {
+          type: "string",
+          enum: ["telegram", "whatsapp", "discord", "slack"],
+          description: "Channel type. Defaults to 'telegram'.",
+        },
         messageThreadId: {
           type: "number",
           description: "Optional Telegram topic ID. When provided, removes only that specific topic route.",
@@ -44,12 +49,13 @@ export function createChannelUnlinkTool(_ctx: PluginContext) {
 
     async execute(_id: string, params: Record<string, unknown>) {
       const channelId = params.channelId as string;
+      const channelType = (params.channel as "telegram" | "whatsapp" | "discord" | "slack") ?? "telegram";
       const messageThreadId = typeof params.messageThreadId === "number" ? params.messageThreadId : undefined;
       const projectRef = params.project as string;
       const confirm = params.confirm as boolean | undefined;
       const workspaceDir = requireWorkspaceDir(toolCtx);
       const targetRoute = buildRouteRef({
-        channel: "telegram",
+        channel: channelType,
         channelId,
         messageThreadId,
         accountId: toolCtx.agentAccountId,

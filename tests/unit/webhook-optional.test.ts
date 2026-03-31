@@ -2,24 +2,24 @@ import { describe, it, expect, vi } from "vitest";
 
 describe("webhookMode config schema", () => {
   it("accepts optional, required, disabled values", async () => {
-    const { FabricaConfigSchema } = await import("../../lib/config/schema.js");
+    const { FabricaPluginConfigSchema } = await import("../../lib/config/schema.js");
     // optional
-    expect(() => FabricaConfigSchema.parse({
+    expect(() => FabricaPluginConfigSchema.parse({
       providers: { github: { webhookMode: "optional" } },
     })).not.toThrow();
     // required
-    expect(() => FabricaConfigSchema.parse({
+    expect(() => FabricaPluginConfigSchema.parse({
       providers: { github: { webhookMode: "required" } },
     })).not.toThrow();
     // disabled
-    expect(() => FabricaConfigSchema.parse({
+    expect(() => FabricaPluginConfigSchema.parse({
       providers: { github: { webhookMode: "disabled" } },
     })).not.toThrow();
   });
 
   it("defaults to optional when webhookMode is not set", async () => {
-    const { FabricaConfigSchema } = await import("../../lib/config/schema.js");
-    const result = FabricaConfigSchema.parse({ providers: { github: {} } });
+    const { FabricaPluginConfigSchema } = await import("../../lib/config/schema.js");
+    const result = FabricaPluginConfigSchema.parse({ providers: { github: {} } });
     // default: not set means optional behavior applies
     expect(result.providers?.github?.webhookMode).toBeUndefined(); // undefined = "optional" by convention
   });

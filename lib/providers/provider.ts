@@ -162,7 +162,7 @@ export interface IssueProvider {
    * Does NOT determine review state — use getPrStatus for that.
    * Returns null if no PR exists for the issue or on API error.
    */
-  getPrDetails(issueId: number): Promise<PrDetails | null>;
+  getPrDetails(issueId: number, selector?: PrSelector): Promise<PrDetails | null>;
   findOpenPrForBranch(branchName: string): Promise<PrStatus | null>;
   mergePr(issueId: number, selector?: PrSelector): Promise<void>;
   getPrDiff(issueId: number, selector?: PrSelector): Promise<string | null>;

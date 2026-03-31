@@ -183,6 +183,7 @@ describe("registerStep", () => {
     }));
     expect(result.metadata.channel_id).toBe("-1003709213169");
     expect(result.metadata.message_thread_id).toBe(501);
+    expect(result.metadata.project_topic_created).toBe(true);
   });
 
   it("fails closed when DM bootstrap resolves a non-agent review policy", async () => {
@@ -347,6 +348,7 @@ describe("registerStep", () => {
     }));
     expect(result.metadata.channel_id).toBe("-1003709213169");
     expect(result.metadata.message_thread_id).toBe(502);
+    expect(result.metadata.project_topic_created).toBe(false);
   });
 
   it("fails closed when project_register rejects", async () => {

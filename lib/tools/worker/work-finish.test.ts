@@ -17,9 +17,8 @@ import { tmpdir } from "node:os";
 import { rmdir } from "node:fs/promises";
 import {
   getCanonicalQaEvidenceValidationForPr,
-  matchesReviewArtifact,
+  createWorkFinishTool,
   resolveWorkerSlot,
-  validateReviewerArtifact,
   validatePrExistsForDeveloper,
   INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD,
 } from "./work-finish.js";
@@ -381,91 +380,23 @@ describe("work_finish: PR validation and conflict resolution", () => {
     });
   });
 
-  describe("matchesReviewArtifact", () => {
-    it("matches formal review artifacts by approved/changes_requested state", () => {
-      assert.equal(
-        matchesReviewArtifact({ id: 11, state: "APPROVED" }, 11, "formal_review"),
-        true,
-      );
-      assert.equal(
-        matchesReviewArtifact({ id: 12, state: "CHANGES_REQUESTED" }, 12, "formal_review"),
-        true,
-      );
-      assert.equal(
-        matchesReviewArtifact({ id: 13, state: "COMMENTED" }, 13, "formal_review"),
-        false,
-      );
-    });
-
-    it("matches PR conversation comments and excludes inline comments", () => {
-      assert.equal(
-        matchesReviewArtifact({ id: 21, state: "COMMENTED" }, 21, "pr_conversation_comment"),
-        true,
-      );
-      assert.equal(
-        matchesReviewArtifact({ id: 22, state: "COMMENTED", path: "src/app.ts" }, 22, "pr_conversation_comment"),
-        false,
-      );
-    });
-  });
-
-  describe("validateReviewerArtifact", () => {
-    it("accepts a formal review artifact present on the PR", async () => {
-      const provider = new TestProvider();
-      provider.setPrStatus(25, { state: "open", url: "https://example.com/pr/25" });
-
-      const artifact = await provider.submitPrReview(25, {
-        result: "reject",
-        body: "Please tighten the validation logic.",
-      });
-
-      await assert.doesNotReject(
-        validateReviewerArtifact(provider, 25, "reject", artifact.artifactId, artifact.artifactType),
-      );
-    });
-
-    it("accepts a PR conversation comment fallback present on the PR", async () => {
-      const provider = new TestProvider();
-      provider.setPrStatus(25, { state: "open", url: "https://example.com/pr/25" });
-
-      const artifact = await provider.addPrConversationComment(25, "Please rerun scripts/qa.sh.");
-
-      await assert.doesNotReject(
-        validateReviewerArtifact(provider, 25, "reject", artifact.artifactId, artifact.artifactType),
-      );
-    });
-
-    it("rejects completion when reviewer did not provide artifact metadata", async () => {
-      const provider = new TestProvider();
+  describe("reviewer work_finish path", () => {
+    it("fails closed and points reviewers to the Review result line contract", async () => {
+      const tool = createWorkFinishTool({
+        pluginConfig: {},
+        runtime: undefined,
+        observability: {
+          withContext: async (_ctx: unknown, fn: () => Promise<unknown>) => fn(),
+          withSpan: async (_name: string, _ctx: unknown, fn: () => Promise<unknown>) => fn(),
+        },
+        runCommand: (async () => {
+          throw new Error("runCommand should not be called");
+        }) as RunCommand,
+      } as any)({ sessionKey: "agent:test:subagent:demo-reviewer-junior-ada" } as any);
 
       await assert.rejects(
-        validateReviewerArtifact(provider, 25, "reject", undefined, undefined),
-        /review_submit/,
-      );
-    });
-
-    it("rejects completion when artifact metadata does not match any PR artifact", async () => {
-      const provider = new TestProvider();
-      provider.setPrStatus(25, { state: "open", url: "https://example.com/pr/25" });
-
-      await assert.rejects(
-        validateReviewerArtifact(provider, 25, "approve", 999, "formal_review"),
-        /was not found on the PR/,
-      );
-    });
-
-    it("rejects reviewer approval when the artifact is not an APPROVED review", async () => {
-      const provider = new TestProvider();
-      provider.setPrStatus(25, { state: "open", url: "https://example.com/pr/25" });
-
-      const artifact = await provider.submitPrReview(25, {
-        result: "reject",
-        body: "Needs changes.",
-      });
-
-      await assert.rejects(
-        validateReviewerArtifact(provider, 25, "approve", artifact.artifactId, artifact.artifactType),
-        /must be an APPROVED review/,
+        tool.execute("call-1", { role: "reviewer", result: "approve", channelId: "demo" }),
+        /Review result: APPROVE/,
       );
     });
   });

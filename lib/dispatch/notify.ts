@@ -497,6 +497,8 @@ export async function notify(
       accountId?: string;
       messageThreadId?: number;
     };
+    /** Retry path already owns the outbox row; do not write a fresh intent. */
+    skipOutboxWrite?: boolean;
   },
 ): Promise<boolean> {
   if (opts.config?.[event.type] === false) return true;
@@ -530,27 +532,30 @@ export async function notify(
     return true; // Not an error, just nothing to do
   }
 
-  // Idempotency: write intent to outbox before sending; skip if duplicate
-  const notifyKey = computeNotifyKey(
-    (event as any).project ?? "global",
-    (event as any).issueId ?? 0,
-    event.type,
-  );
-  const isNew = await writeIntent(opts.workspaceDir, notifyKey, event as Record<string, unknown>, {
-    channelId: target.channelId,
-    channel: target.channel,
-    accountId: target.accountId,
-    messageThreadId: target.messageThreadId,
-  }).catch(() => false); // FIX: false means "skip on error, retry later"
-  if (!isNew) {
-    await auditLog(opts.workspaceDir, "notify_skip", {
-      eventId,
-      correlationId,
-      eventType: event.type,
-      reason: "duplicate outbox key",
-      key: notifyKey,
-    }).catch(() => {});
-    return true;
+  let notifyKey: string | null = null;
+  if (!opts.skipOutboxWrite) {
+    // Idempotency: write intent to outbox before sending; skip if duplicate
+    notifyKey = computeNotifyKey(
+      (event as any).project ?? "global",
+      (event as any).issueId ?? 0,
+      event.type,
+    );
+    const isNew = await writeIntent(opts.workspaceDir, notifyKey, event as Record<string, unknown>, {
+      channelId: target.channelId,
+      channel: target.channel,
+      accountId: target.accountId,
+      messageThreadId: target.messageThreadId,
+    }).catch(() => false); // FIX: false means "skip on error, retry later"
+    if (!isNew) {
+      await auditLog(opts.workspaceDir, "notify_skip", {
+        eventId,
+        correlationId,
+        eventType: event.type,
+        reason: "duplicate outbox key",
+        key: notifyKey,
+      }).catch(() => {});
+      return true;
+    }
   }
 
   await auditLog(opts.workspaceDir, "notify", {
@@ -584,7 +589,7 @@ export async function notify(
     },
   );
 
-  if (sent) {
+  if (sent && notifyKey) {
     await markDelivered(opts.workspaceDir, notifyKey).catch(() => {}); // best-effort
   }
 

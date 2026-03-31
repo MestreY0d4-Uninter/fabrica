@@ -9,6 +9,7 @@ import {
 } from "../helpers.js";
 import { sanitizePublicOutput } from "./public-output-sanitizer.js";
 import { recordIssueLifecycleBySessionKey, requireCanonicalPrSelector } from "../../projects/index.js";
+import { parseFabricaSessionKey } from "../../dispatch/bootstrap-hook.js";
 
 export function createReviewSubmitTool(ctx: PluginContext) {
   return (toolCtx: ToolContext) => ({
@@ -16,7 +17,6 @@ export function createReviewSubmitTool(ctx: PluginContext) {
     label: "Review Submit",
     description: `Submit canonical review feedback to the PR linked to an issue.
 
-Use this instead of task_comment for reviewer approvals/rejections.
 It writes the review to the PR itself, preferring a formal PR review and
 falling back to a top-level PR conversation comment when necessary.`,
     parameters: {
@@ -48,6 +48,22 @@ falling back to a top-level PR conversation comment when necessary.`,
       const result = params.result as "approve" | "reject";
       const body = params.body as string;
       const workspaceDir = requireWorkspaceDir(toolCtx);
+      const workerSession = toolCtx.sessionKey ? parseFabricaSessionKey(toolCtx.sessionKey) : null;
+
+      if (workerSession) {
+        await auditLog(workspaceDir, "review_submit_blocked", {
+          project: workerSession.projectName,
+          role: workerSession.role,
+          issue: issueId,
+          sessionKey: toolCtx.sessionKey,
+          reason: "fabrica_worker_session",
+        }).catch(() => {});
+        throw new Error(
+          workerSession.role === "reviewer"
+            ? "Reviewer workers must finish by ending their response with `Review result: APPROVE` or `Review result: REJECT`. Do not call review_submit."
+            : "Fabrica worker sessions must not call review_submit. Use the role's normal completion contract instead.",
+        );
+      }
 
       await recordIssueLifecycleBySessionKey({
         workspaceDir,

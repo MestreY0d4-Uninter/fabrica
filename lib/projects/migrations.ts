@@ -112,8 +112,11 @@ function parseLegacyFlatState(worker: Record<string, unknown>, role: string): Ro
     issueId: worker.issueId as string | null,
     sessionKey,
     startTime: worker.startTime as string | null,
+    dispatchCycleId: (worker.dispatchCycleId as string | null) ?? null,
+    dispatchRunId: (worker.dispatchRunId as string | null) ?? null,
     previousLabel: (worker.previousLabel as string | null) ?? null,
     name: (worker.name ?? worker.slotName) as string | undefined,
+    lastIssueId: (worker.lastIssueId as string | null) ?? null,
   };
 
   return { levels: { [migratedLevel]: [slot] } };
@@ -132,14 +135,17 @@ function parseOldSlotState(worker: Record<string, unknown>, role: string): RoleW
     if (!rawLevel) continue; // Skip null-level slots
 
     if (!levels[rawLevel]) levels[rawLevel] = [];
-    levels[rawLevel]!.push({
-      active: s.active as boolean,
-      issueId: s.issueId as string | null,
-      sessionKey: s.sessionKey as string | null,
-      startTime: s.startTime as string | null,
-      previousLabel: (s.previousLabel as string | null) ?? null,
-      name: (s.name ?? s.slotName) as string | undefined,
-    });
+      levels[rawLevel]!.push({
+        active: s.active as boolean,
+        issueId: s.issueId as string | null,
+        sessionKey: s.sessionKey as string | null,
+        startTime: s.startTime as string | null,
+        dispatchCycleId: (s.dispatchCycleId as string | null) ?? null,
+        dispatchRunId: (s.dispatchRunId as string | null) ?? null,
+        previousLabel: (s.previousLabel as string | null) ?? null,
+        name: (s.name ?? s.slotName) as string | undefined,
+        lastIssueId: (s.lastIssueId as string | null) ?? null,
+      });
   }
 
   return { levels };
@@ -166,8 +172,11 @@ function parseLevelState(worker: Record<string, unknown>, role: string): RoleWor
         issueId: s.issueId as string | null,
         sessionKey: s.sessionKey as string | null,
         startTime: s.startTime as string | null,
+        dispatchCycleId: (s.dispatchCycleId as string | null) ?? null,
+        dispatchRunId: (s.dispatchRunId as string | null) ?? null,
         previousLabel: (s.previousLabel as string | null) ?? null,
         name: (s.name ?? s.slotName) as string | undefined,
+        lastIssueId: (s.lastIssueId as string | null) ?? null,
       });
     }
   }

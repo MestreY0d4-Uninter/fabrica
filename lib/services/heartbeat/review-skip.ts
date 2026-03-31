@@ -22,7 +22,7 @@ import { detectStepRouting } from "../queue-scan.js";
 import type { RunCommand } from "../../context.js";
 import { log as auditLog } from "../../audit.js";
 import { guardedCloseIssue, persistMergedArtifact } from "../pipeline.js";
-import { readProjects, getProject, getIssueRuntime } from "../../projects/index.js";
+import { readProjects, getProject, getIssueRuntime, getCanonicalPrSelector } from "../../projects/index.js";
 import { resilientLabelTransition } from "../../workflow/labels.js";
 
 /**
@@ -74,6 +74,11 @@ export async function reviewSkipPass(opts: {
       const isManaged = await provider.issueHasReaction(issue.iid, "eyes");
       if (!isManaged) continue;
 
+      const projectData = await readProjects(workspaceDir).catch(() => null);
+      const project = projectData ? getProject(projectData, projectName) : null;
+      const issueRuntime = project ? getIssueRuntime(project, issue.iid) : undefined;
+      const prSelector = project ? getCanonicalPrSelector(project, issue.iid) : undefined;
+
       // Execute SKIP transition actions
       let aborted = false;
       if (actions && effectiveActions && actions.length !== effectiveActions.length) {
@@ -91,15 +96,13 @@ export async function reviewSkipPass(opts: {
         for (const action of effectiveActions) {
           switch (action) {
             case Action.MERGE_PR: {
-              const status = await provider.getPrStatus(issue.iid);
+              const status = await provider.getPrStatus(issue.iid, prSelector);
               if (status.currentIssueMatch === false) {
                 aborted = true;
                 break;
               }
               // Already merged externally — skip the merge call but continue.
               if (status.state === PrState.MERGED) {
-                const project = getProject(await readProjects(workspaceDir), projectName);
-                const issueRuntime = project ? getIssueRuntime(project, issue.iid) : undefined;
                 if (project && issueRuntime?.currentPrNumber) {
                   await persistMergedArtifact({
                     workspaceDir,
@@ -115,9 +118,7 @@ export async function reviewSkipPass(opts: {
               // No PR exists — skip merge (work may have been committed directly).
               if (!status.url) break;
               try {
-                await provider.mergePr(issue.iid);
-                const project = getProject(await readProjects(workspaceDir), projectName);
-                const issueRuntime = project ? getIssueRuntime(project, issue.iid) : undefined;
+                await provider.mergePr(issue.iid, prSelector);
                 if (project && issueRuntime?.currentPrNumber) {
                   await persistMergedArtifact({
                     workspaceDir,
@@ -154,8 +155,6 @@ export async function reviewSkipPass(opts: {
               break;
             case Action.CLOSE_ISSUE:
               try {
-                const project = getProject(await readProjects(workspaceDir), projectName);
-                const issueRuntime = project ? getIssueRuntime(project, issue.iid) : undefined;
                 if (!project) throw new Error(`Project not found: ${projectName}`);
                 await guardedCloseIssue({
                   workspaceDir,
@@ -164,10 +163,13 @@ export async function reviewSkipPass(opts: {
                   issueId: issue.iid,
                   role: "reviewer",
                   provider,
+                  selector: prSelector,
                   issueRuntime,
                   followUpPrRequired: issueRuntime?.followUpPrRequired === true,
                 });
-              } catch { /* best-effort */ }
+              } catch {
+                aborted = true;
+              }
               break;
             case Action.REOPEN_ISSUE:
               try { await provider.reopenIssue(issue.iid); } catch { /* best-effort */ }

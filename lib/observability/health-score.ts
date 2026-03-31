@@ -1,7 +1,10 @@
 /**
- * observability/health-score.ts — Composite health score (0-100).
+ * observability/health-score.ts — Advisory composite health score helper (0-100).
  *
- * Weighted signals:
+ * This helper is intentionally detached from the live control plane until the
+ * plugin has authoritative runtime sources for all of its inputs.
+ *
+ * Weighted advisory signals:
  *   Completion rate:      25%
  *   Dispatch speed:       20%
  *   Error rate:           20%
@@ -26,8 +29,8 @@ export type HealthScoreResult = {
 };
 
 /**
- * Compute composite health score.
- * Returns 50 (neutral) when no data is available.
+ * Compute an advisory composite health score.
+ * Returns 50 (neutral) when no authoritative data is available.
  */
 export function computeHealthScore(input: HealthSignalInput): HealthScoreResult {
   const signals: HealthScoreResult["signals"] = [];
