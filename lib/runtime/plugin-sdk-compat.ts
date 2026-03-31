@@ -82,21 +82,15 @@ export async function detectMime(opts: {
   const extMime = MIME_BY_EXT[getFileExtension(opts.filePath) ?? ""];
   const headerMime = normalizeMimeType(opts.headerMime);
   const sniffLimit = 64;
-  let sniffBuffer: Uint8Array | undefined;
+  let sniffed: string | undefined;
   if (opts.buffer && opts.buffer.length > 0) {
-    const prefix = opts.buffer.subarray(0, Math.min(opts.buffer.length, sniffLimit));
-    if (prefix.length === sniffLimit) {
-      sniffBuffer = prefix;
-    } else {
-      sniffBuffer = Buffer.concat([
-        Buffer.from(prefix),
-        Buffer.alloc(sniffLimit - prefix.length),
-      ]);
+    const sniffBuffer = opts.buffer.subarray(0, Math.min(opts.buffer.length, sniffLimit));
+    try {
+      sniffed = normalizeMimeType((await fileTypeFromBuffer(sniffBuffer))?.mime);
+    } catch {
+      sniffed = undefined;
     }
   }
-  const sniffed = sniffBuffer
-    ? normalizeMimeType((await fileTypeFromBuffer(sniffBuffer))?.mime)
-    : undefined;
 
   if (sniffed && (!isGenericMime(sniffed) || !extMime)) return sniffed;
   if (extMime) return extMime;
