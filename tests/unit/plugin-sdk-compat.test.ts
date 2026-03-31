@@ -12,7 +12,11 @@ const VALID_PNG_SAMPLE = Buffer.from([
   0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
   0x42, 0x60, 0x82,
 ]);
-const TRUNCATED_BYTES = Buffer.from([0x89, 0x50, 0x4e]);
+const TRUNCATED_PNG_HEADER = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47,
+  0x0d, 0x0a, 0x1a, 0x0a,
+  0x00, 0x00, 0x00, 0x0d,
+]);
 
 describe("plugin-sdk-compat", () => {
   it("jsonResult preserves the payload in both text and details", () => {
@@ -37,11 +41,11 @@ describe("plugin-sdk-compat", () => {
     ).resolves.toBe("text/markdown");
   });
 
-  it("falls back to extension when sniffing fails", async () => {
+  it("falls back to extension when sniffing throws", async () => {
     await expect(
       detectMime({
         filePath: "/tmp/truncated.txt",
-        buffer: TRUNCATED_BYTES,
+        buffer: TRUNCATED_PNG_HEADER,
       }),
     ).resolves.toBe("text/plain");
   });
