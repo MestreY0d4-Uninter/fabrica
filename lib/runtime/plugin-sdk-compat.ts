@@ -18,7 +18,7 @@ const MIME_BY_EXT: Record<string, string> = {
   ".heif": "image/heif",
   ".jpeg": "image/jpeg",
   ".jpg": "image/jpeg",
-  ".js": "application/javascript",
+  ".js": "text/javascript",
   ".json": "application/json",
   ".mov": "video/quicktime",
   ".m4a": "audio/x-m4a",
