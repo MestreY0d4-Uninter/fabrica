@@ -64,6 +64,9 @@ The heartbeat ticks every 60 seconds. On each tick, Fabrica alternates between a
 openclaw plugins install @mestreyoda/fabrica
 ```
 
+That install should be enough for OpenClaw to load Fabrica immediately, without
+manual remediation.
+
 ### Via GitHub clone
 
 ```bash
@@ -77,6 +80,14 @@ After installation, verify the plugin loaded correctly:
 openclaw plugins list
 openclaw fabrica doctor
 ```
+
+## Loadability vs operational readiness
+
+- **Loadable:** the plugin installs and OpenClaw can load it immediately.
+- **Operational:** Fabrica has the GitHub, Telegram, and optional webhook
+  configuration needed for your workflow.
+
+`openclaw fabrica doctor` checks both and tells you what is still missing.
 
 ## Quick start
 
@@ -94,7 +105,10 @@ openclaw fabrica doctor
 }
 ```
 
-For polling-first GitHub usage via authenticated `gh`, no extra plugin config is required. Fabrica's plugin config is only for control-plane settings such as heartbeat cadence, Telegram routing, notifications, and provider/webhook auth. Worker models, levels, and workflow routing live in the workspace files and can be generated or updated with `openclaw fabrica setup`.
+After `openclaw plugins install @mestreyoda/fabrica`, the plugin should load
+without manual remediation. GitHub, Telegram, and webhook behavior are a
+separate operational step handled by `openclaw fabrica doctor` and
+`openclaw fabrica setup`.
 
 **2. Restart the gateway**:
 

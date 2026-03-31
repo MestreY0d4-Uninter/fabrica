@@ -63,17 +63,22 @@ Important invariants:
 
 ## Installation model
 
-The supported local installation is path-based:
+Fabrica is distributed as a self-contained OpenClaw plugin package.
+
+The supported operator path is:
 
 ```bash
-openclaw plugins install -l /path/to/fabrica
+openclaw plugins install @mestreyoda/fabrica
 ```
 
-That means:
+The installed extension must be loadable in isolation. Fabrica may depend on
+OpenClaw only through the plugin host ABI and runtime objects passed by the
+host. It must not require manual symlinks, local `npm install`, or host-global
+module resolution to load.
 
-- the repository stays editable in place
-- the installed plugin points back to this directory
-- the loaded runtime should match the local build output in `dist/`
+External credentials and routes such as GitHub auth, Telegram chat IDs, and
+webhook secrets are operational configuration, not installation dependencies.
+Those are validated through Fabrica's `doctor` and `setup` flows.
 
 ## Operational notes
 
