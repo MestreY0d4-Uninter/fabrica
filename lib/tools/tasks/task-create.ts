@@ -9,7 +9,7 @@
  * - A sub-agent finds a bug and needs to file a follow-up issue
  * - Breaking down an epic into smaller tasks
  */
-import { jsonResult } from "openclaw/plugin-sdk";
+import { jsonResult } from "../../runtime/plugin-sdk-compat.js";
 import type { PluginContext } from "../../context.js";
 import type { ToolContext } from "../../types.js";
 import { log as auditLog } from "../../audit.js";

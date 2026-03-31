@@ -8,7 +8,7 @@
  * Fabrica adds an explicit audit entry with who, when, and what changed.
  * Optionally posts an auto-comment on the issue for traceability.
  */
-import { jsonResult } from "openclaw/plugin-sdk";
+import { jsonResult } from "../../runtime/plugin-sdk-compat.js";
 import type { PluginContext } from "../../context.js";
 import type { ToolContext } from "../../types.js";
 import { log as auditLog } from "../../audit.js";

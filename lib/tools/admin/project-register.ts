@@ -6,7 +6,7 @@
  *
  * Replaces the manual steps of running glab/gh label create + editing projects.json.
  */
-import { jsonResult } from "openclaw/plugin-sdk";
+import { jsonResult } from "../../runtime/plugin-sdk-compat.js";
 import type { ToolContext } from "../../types.js";
 import type { PluginContext } from "../../context.js";
 import fs from "node:fs/promises";

@@ -8,7 +8,7 @@
  * Calls provider.ensureLabel() directly instead of provider.ensureAllStateLabels()
  * so that custom workflow states from workspace/project overrides are included.
  */
-import { jsonResult } from "openclaw/plugin-sdk";
+import { jsonResult } from "../../runtime/plugin-sdk-compat.js";
 import type { ToolContext } from "../../types.js";
 import type { PluginContext } from "../../context.js";
 import { requireWorkspaceDir } from "../helpers.js";

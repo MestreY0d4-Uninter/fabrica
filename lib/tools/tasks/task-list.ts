@@ -4,7 +4,7 @@
  * Lists issues grouped by state label with optional filtering by state type,
  * specific label, or text search. Supports terminal (closed) issues.
  */
-import { jsonResult } from "openclaw/plugin-sdk";
+import { jsonResult } from "../../runtime/plugin-sdk-compat.js";
 import type { PluginContext } from "../../context.js";
 import type { ToolContext } from "../../types.js";
 import { log as auditLog } from "../../audit.js";

@@ -5,7 +5,7 @@
  * workflow config, and execution settings. No issue-tracker API calls.
  * Use `tasks_status` for live issue counts.
  */
-import { jsonResult } from "openclaw/plugin-sdk";
+import { jsonResult } from "../../runtime/plugin-sdk-compat.js";
 import type { ToolContext } from "../../types.js";
 import type { PluginContext } from "../../context.js";
 import { requireWorkspaceDir, resolveProjectFromContext } from "../helpers.js";

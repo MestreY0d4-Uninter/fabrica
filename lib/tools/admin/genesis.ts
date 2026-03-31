@@ -8,7 +8,7 @@
  *   discover — Classify, interview, generate spec (returns questions or commit_token)
  *   commit   — Execute full pipeline (scaffold, create task, triage)
  */
-import { jsonResult } from "openclaw/plugin-sdk";
+import { jsonResult } from "../../runtime/plugin-sdk-compat.js";
 import type { PluginContext } from "../../context.js";
 import type { ToolContext } from "../../types.js";
 import { requireWorkspaceDir } from "../helpers.js";

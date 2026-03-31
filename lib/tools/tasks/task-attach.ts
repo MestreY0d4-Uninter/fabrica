@@ -6,7 +6,7 @@
  * - Manually attach a local file to an issue
  * - View attachment metadata and local paths
  */
-import { jsonResult } from "openclaw/plugin-sdk";
+import { detectMime, jsonResult } from "../../runtime/plugin-sdk-compat.js";
 import type { PluginContext } from "../../context.js";
 import type { ToolContext } from "../../types.js";
 import { log as auditLog } from "../../audit.js";
@@ -113,7 +113,6 @@ Use cases:
         const filename = path.basename(resolvedPath);
 
         // Detect mime type
-        const { detectMime } = await import("openclaw/plugin-sdk");
         const mimeType = await detectMime({ filePath: resolvedPath, buffer }) ?? "application/octet-stream";
 
         const { provider } = await resolveProvider(project, ctx.runCommand);

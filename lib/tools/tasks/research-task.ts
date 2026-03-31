@@ -12,7 +12,7 @@
  *   → architect calls work_finish(result="done") → "Researching" → "Done" (issue closed)
  *   → operator reviews created tasks in Planning, moves to "To Do" when ready
  */
-import { jsonResult } from "openclaw/plugin-sdk";
+import { jsonResult } from "../../runtime/plugin-sdk-compat.js";
 import type { ToolContext } from "../../types.js";
 import type { PluginContext } from "../../context.js";
 import type { StateLabel } from "../../providers/provider.js";

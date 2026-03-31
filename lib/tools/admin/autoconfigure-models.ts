@@ -3,7 +3,7 @@
  *
  * Queries available authenticated models and intelligently assigns them to Fabrica roles.
  */
-import { jsonResult } from "openclaw/plugin-sdk";
+import { jsonResult } from "../../runtime/plugin-sdk-compat.js";
 import type { ToolContext } from "../../types.js";
 import type { PluginContext, RunCommand } from "../../context.js";
 import {
