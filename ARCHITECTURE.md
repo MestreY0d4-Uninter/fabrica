@@ -78,7 +78,8 @@ module resolution to load.
 
 External credentials and routes such as GitHub auth, Telegram chat IDs, and
 webhook secrets are operational configuration, not installation dependencies.
-Those are validated through Fabrica's `doctor` and `setup` flows.
+Fabrica's `doctor` and `setup` flows guide and validate that operational
+configuration where applicable.
 
 ## Operational notes
 

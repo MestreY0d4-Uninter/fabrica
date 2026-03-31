@@ -77,8 +77,7 @@ openclaw plugins install -l ~/fabrica
 After installation, verify the plugin loaded correctly:
 
 ```bash
-openclaw plugins list
-openclaw fabrica doctor
+openclaw plugins inspect fabrica
 ```
 
 ## Loadability vs operational readiness
@@ -87,36 +86,43 @@ openclaw fabrica doctor
 - **Operational:** Fabrica has the GitHub, Telegram, and optional webhook
   configuration needed for your workflow.
 
-`openclaw fabrica doctor` checks both and tells you what is still missing.
+`openclaw plugins inspect fabrica` is the loadability check after install.
+`openclaw fabrica doctor` runs once the plugin is loaded and checks the
+operational/workspace state, then tells you what is still missing.
 
 ## Quick start
 
-**1. Enable the plugin** in `~/.openclaw/openclaw.json`:
+**1. Install Fabrica**:
 
-```json
-{
-  "plugins": {
-    "entries": {
-      "fabrica": {
-        "enabled": true
-      }
-    }
-  }
-}
+```bash
+openclaw plugins install @mestreyoda/fabrica
 ```
 
-After `openclaw plugins install @mestreyoda/fabrica`, the plugin should load
-without manual remediation. GitHub, Telegram, and webhook behavior are a
-separate operational step handled by `openclaw fabrica doctor` and
-`openclaw fabrica setup`.
+The plugin should load immediately after install, without manual remediation.
 
-**2. Restart the gateway**:
+**2. Confirm loadability**:
+
+```bash
+openclaw plugins inspect fabrica
+```
+
+**3. Configure operational state as needed**:
+
+```bash
+openclaw fabrica doctor
+openclaw fabrica setup
+```
+
+GitHub, Telegram, and webhook behavior are separate operational concerns, not
+installation dependencies.
+
+**4. Restart the gateway**:
 
 ```bash
 systemctl --user restart openclaw-gateway.service
 ```
 
-**3. Trigger a new project programmatically**:
+**5. Trigger a new project programmatically**:
 
 ```bash
 cd ~/fabrica  # GitHub clone install only
@@ -128,13 +134,13 @@ npx tsx scripts/genesis-trigger.ts "A CLI tool that counts words in a file" \
 
 Remove `--dry-run` to execute for real.
 
-**4. Watch the pipeline run**:
+**6. Watch the pipeline run**:
 
 ```bash
 tail -f ~/.openclaw/workspace/logs/genesis.log
 ```
 
-**5. Check metrics**:
+**7. Check metrics**:
 
 ```bash
 openclaw fabrica metrics
