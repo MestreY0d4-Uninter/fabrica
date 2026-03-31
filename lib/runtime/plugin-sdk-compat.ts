@@ -21,7 +21,7 @@ const MIME_BY_EXT: Record<string, string> = {
   ".js": "text/javascript",
   ".json": "application/json",
   ".mov": "video/quicktime",
-  ".m4a": "audio/x-m4a",
+  ".m4a": "audio/mp4",
   ".md": "text/markdown",
   ".mp3": "audio/mpeg",
   ".mp4": "video/mp4",
