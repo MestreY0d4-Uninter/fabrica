@@ -9,6 +9,8 @@ type ToolTextResult<T> = {
 const MIME_BY_EXT: Record<string, string> = {
   ".aac": "audio/aac",
   ".csv": "text/csv",
+  ".doc": "application/msword",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ".flac": "audio/flac",
   ".gif": "image/gif",
   ".gz": "application/gzip",
@@ -16,8 +18,10 @@ const MIME_BY_EXT: Record<string, string> = {
   ".heif": "image/heif",
   ".jpeg": "image/jpeg",
   ".jpg": "image/jpeg",
+  ".js": "application/javascript",
   ".json": "application/json",
-  ".m4a": "audio/mp4",
+  ".mov": "video/quicktime",
+  ".m4a": "audio/x-m4a",
   ".md": "text/markdown",
   ".mp3": "audio/mpeg",
   ".mp4": "video/mp4",
@@ -25,12 +29,17 @@ const MIME_BY_EXT: Record<string, string> = {
   ".opus": "audio/opus",
   ".pdf": "application/pdf",
   ".png": "image/png",
+  ".ppt": "application/vnd.ms-powerpoint",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   ".rar": "application/vnd.rar",
   ".tar": "application/x-tar",
   ".txt": "text/plain",
   ".wav": "audio/wav",
   ".webp": "image/webp",
+  ".xls": "application/vnd.ms-excel",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ".zip": "application/zip",
+  ".7z": "application/x-7z-compressed",
 };
 
 function normalizeMimeType(value?: string): string | undefined {
@@ -58,12 +67,6 @@ function isGenericMime(value?: string): boolean {
   );
 }
 
-function prepareSniffBuffer(value: Uint8Array): Buffer {
-  const source = Buffer.from(value);
-  if (source.length >= 64) return source;
-  return Buffer.concat([source, Buffer.alloc(64 - source.length)]);
-}
-
 export function jsonResult<T>(payload: T): ToolTextResult<T> {
   return {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
@@ -78,8 +81,21 @@ export async function detectMime(opts: {
 }): Promise<string | undefined> {
   const extMime = MIME_BY_EXT[getFileExtension(opts.filePath) ?? ""];
   const headerMime = normalizeMimeType(opts.headerMime);
-  const sniffed = opts.buffer
-    ? normalizeMimeType((await fileTypeFromBuffer(prepareSniffBuffer(opts.buffer)))?.mime)
+  const sniffLimit = 64;
+  let sniffBuffer: Uint8Array | undefined;
+  if (opts.buffer && opts.buffer.length > 0) {
+    const prefix = opts.buffer.subarray(0, Math.min(opts.buffer.length, sniffLimit));
+    if (prefix.length === sniffLimit) {
+      sniffBuffer = prefix;
+    } else {
+      sniffBuffer = Buffer.concat([
+        Buffer.from(prefix),
+        Buffer.alloc(sniffLimit - prefix.length),
+      ]);
+    }
+  }
+  const sniffed = sniffBuffer
+    ? normalizeMimeType((await fileTypeFromBuffer(sniffBuffer))?.mime)
     : undefined;
 
   if (sniffed && (!isGenericMime(sniffed) || !extMime)) return sniffed;

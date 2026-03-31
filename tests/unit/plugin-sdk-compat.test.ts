@@ -9,15 +9,15 @@ const PNG_HEADER = Buffer.from([
 
 describe("plugin-sdk-compat", () => {
   it("jsonResult preserves the payload in both text and details", () => {
-    expect(jsonResult({ ok: true, nested: { count: 2 } })).toEqual({
-      content: [
-        {
-          type: "text",
-          text: '{\n  "ok": true,\n  "nested": {\n    "count": 2\n  }\n}',
-        },
-      ],
-      details: { ok: true, nested: { count: 2 } },
+    const payload = { ok: true, nested: { count: 2 } };
+    const result = jsonResult(payload);
+
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0]).toEqual({
+      type: "text",
+      text: JSON.stringify(payload, null, 2),
     });
+    expect(result.details).toBe(payload);
   });
 
   it("detectMime prefers sniffed content and falls back to extension", async () => {
@@ -28,5 +28,11 @@ describe("plugin-sdk-compat", () => {
     await expect(
       detectMime({ filePath: "/tmp/notes.md" }),
     ).resolves.toBe("text/markdown");
+  });
+
+  it("detectMime honors header MIME when sniffing and extension are absent", async () => {
+    await expect(
+      detectMime({ headerMime: "application/pdf; charset=utf-8" }),
+    ).resolves.toBe("application/pdf");
   });
 });
