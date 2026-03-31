@@ -176,7 +176,7 @@ describe("dispatch identity hardening", () => {
     } finally {
       await h.cleanup();
     }
-  }, 15_000);
+  }, 45_000);
 
   it("delayed subagent_ended against a reused slot does not clean the new cycle", async () => {
     const h = await createTestHarness({

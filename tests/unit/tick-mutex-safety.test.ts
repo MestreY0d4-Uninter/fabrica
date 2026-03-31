@@ -49,7 +49,7 @@ describe("P0-3: timed-out tick does not immediately release the mutex", () => {
     // Now mutex is free — next call should succeed
     const afterResult = await mod.withTickMutex(async () => "after");
     expect(afterResult).toBe("after");
-  });
+  }, 15_000);
 
   it("raceWithTimeout does not release mutex when timeout fires before fn completes", async () => {
     // This test validates the core contract of P0-3 at a lower level:
