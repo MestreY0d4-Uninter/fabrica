@@ -81,12 +81,10 @@ export async function detectMime(opts: {
 }): Promise<string | undefined> {
   const extMime = MIME_BY_EXT[getFileExtension(opts.filePath) ?? ""];
   const headerMime = normalizeMimeType(opts.headerMime);
-  const sniffLimit = 64;
   let sniffed: string | undefined;
   if (opts.buffer && opts.buffer.length > 0) {
-    const sniffBuffer = opts.buffer.subarray(0, Math.min(opts.buffer.length, sniffLimit));
     try {
-      sniffed = normalizeMimeType((await fileTypeFromBuffer(sniffBuffer))?.mime);
+      sniffed = normalizeMimeType((await fileTypeFromBuffer(opts.buffer))?.mime);
     } catch {
       sniffed = undefined;
     }
