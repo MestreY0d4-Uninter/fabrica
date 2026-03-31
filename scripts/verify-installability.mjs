@@ -1,92 +1,130 @@
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
-function runRaw(command, args, options = {}) {
-  const result = spawnSync(command, args, {
-    encoding: "utf8",
-    ...options,
-  });
-  return {
-    status: result.status ?? 1,
-    output: `${result.stdout ?? ""}${result.stderr ?? ""}`.trim(),
-  };
+export const DEFAULT_TIMEOUT_MS = 300_000;
+
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function run(command, args, options = {}) {
-  const result = runRaw(command, args, options);
-  if (result.status !== 0) {
-    const rendered = result.output.length > 0 ? `\n${result.output}` : "";
-    throw new Error(`Command failed: ${command} ${args.join(" ")}${rendered}`);
-  }
-
-  return result.output;
-}
-
-function runShell(command) {
-  return run("bash", ["-lc", command]);
-}
-
-function runShellRaw(command) {
-  return runRaw("bash", ["-lc", command]).output;
+function formatCommand(command, args) {
+  return `${command} ${args.join(" ")}`;
 }
 
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
-function sleep(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function buildShellCommand(command, args) {
+  return [command, ...args].map(shellQuote).join(" ");
 }
 
-const profile = `fabrica-install-smoke-${Date.now()}`;
-let tarball = "";
+function failCommand(command, args, status, output) {
+  const rendered = output.length > 0 ? `\n${output}` : "";
+  throw new Error(
+    `Command failed (${status}): ${formatCommand(command, args)}${rendered}`
+  );
+}
 
-try {
-  const packOutput = run("npm", ["pack", "--json"]);
-  const packResult = JSON.parse(packOutput);
-  tarball = packResult?.[0]?.filename;
+export function executeExternal(command, args, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  const isOpenclaw = command === "openclaw";
+  const result = isOpenclaw
+    ? spawnSync("bash", ["-lc", buildShellCommand(command, args)], {
+        encoding: "utf8",
+        timeout: timeoutMs,
+      })
+    : spawnSync(command, args, {
+        encoding: "utf8",
+        timeout: timeoutMs,
+      });
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
 
-  if (!tarball) {
-    throw new Error("npm pack --json did not return a tarball filename.");
+  if (result.error?.code === "ETIMEDOUT") {
+    throw new Error(`Command timed out after ${timeoutMs}ms: ${formatCommand(command, args)}`);
   }
 
-  runShell(
-    `openclaw --profile ${shellQuote(profile)} plugins install ${shellQuote(tarball)}`
-  );
+  return {
+    status: result.status ?? 1,
+    output,
+  };
+}
 
-  let inspectOutput = "";
-  for (let attempt = 1; attempt <= 4; attempt++) {
-    try {
-      inspectOutput = runShell(
-        `openclaw --profile ${shellQuote(profile)} plugins inspect fabrica`
-      );
-      break;
-    } catch (error) {
-      if (
-        attempt === 4 ||
-        !(error instanceof Error) ||
-        !error.message.includes("unknown command 'inspect'")
-      ) {
-        throw error;
-      }
-      sleep(1_500);
+export function verifyInstallabilitySmoke({
+  exec = executeExternal,
+  fsImpl = fs,
+  now = Date.now,
+  homedir = os.homedir(),
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+} = {}) {
+  const profile = `fabrica-install-smoke-${now()}`;
+  const profileDir = path.join(homedir, `.openclaw-${profile}`);
+  let tarball = "";
+
+  try {
+    const packArgs = ["pack", "--json"];
+    const packResult = exec("npm", packArgs, { timeoutMs });
+    if (packResult.status !== 0) {
+      failCommand("npm", packArgs, packResult.status, packResult.output);
     }
-  }
 
-  if (!inspectOutput.includes("Status: loaded")) {
-    throw new Error(`Inspect output does not contain "Status: loaded".\n${inspectOutput}`);
-  }
+    const packJson = JSON.parse(packResult.output);
+    tarball = packJson?.[0]?.filename ?? "";
+    if (!tarball) {
+      throw new Error("npm pack --json did not return a tarball filename.");
+    }
 
-  const doctorOutput = runShellRaw(
-    `openclaw --profile ${shellQuote(profile)} fabrica doctor --workspace ${shellQuote(process.cwd())}`
-  );
-  if (doctorOutput.trim().length === 0) {
-    throw new Error("Doctor output was empty.");
-  }
+    const installArgs = ["--profile", profile, "plugins", "install", tarball];
+    const installResult = exec("openclaw", installArgs, { timeoutMs });
+    if (installResult.status !== 0) {
+      failCommand("openclaw", installArgs, installResult.status, installResult.output);
+    }
 
-  console.log("Installability smoke passed.");
-} finally {
-  if (tarball && fs.existsSync(tarball)) {
-    fs.rmSync(tarball, { force: true });
+    let inspectOutput = "";
+    const inspectArgs = ["--profile", profile, "plugins", "inspect", "fabrica"];
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      const inspectResult = exec("openclaw", inspectArgs, { timeoutMs });
+      if (inspectResult.status === 0) {
+        inspectOutput = inspectResult.output;
+        break;
+      }
+
+      if (attempt < 4 && inspectResult.output.includes("unknown command 'inspect'")) {
+        sleep(1_500);
+        continue;
+      }
+
+      failCommand("openclaw", inspectArgs, inspectResult.status, inspectResult.output);
+    }
+
+    if (!inspectOutput.includes("Status: loaded")) {
+      throw new Error(`Inspect output does not contain "Status: loaded".\n${inspectOutput}`);
+    }
+
+    const doctorArgs = ["--profile", profile, "fabrica", "doctor", "--help"];
+    const doctorResult = exec("openclaw", doctorArgs, { timeoutMs });
+    if (doctorResult.status !== 0) {
+      failCommand("openclaw", doctorArgs, doctorResult.status, doctorResult.output);
+    }
+    if (doctorResult.output.trim().length === 0) {
+      throw new Error("Doctor output was empty.");
+    }
+
+    console.log("Installability smoke passed.");
+  } finally {
+    if (tarball && fsImpl.existsSync(tarball)) {
+      fsImpl.rmSync(tarball, { force: true });
+    }
+    fsImpl.rmSync(profileDir, { recursive: true, force: true });
   }
+}
+
+function isMainModule() {
+  return !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+}
+
+if (isMainModule()) {
+  verifyInstallabilitySmoke();
 }
