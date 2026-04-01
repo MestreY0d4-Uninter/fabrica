@@ -472,6 +472,7 @@ describe("telegram bootstrap hook", () => {
 
     const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
     expect(session?.status).toBe("bootstrapping");
+    expect(session?.error).toContain("telegram down");
   });
 
   it("fails closed when pipeline succeeds without topic routing", async () => {
