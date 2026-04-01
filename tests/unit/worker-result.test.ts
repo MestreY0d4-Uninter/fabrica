@@ -53,6 +53,15 @@ describe("worker-result", () => {
     expect(rejectResult).toBeNull();
   });
 
+  it("returns null when the newest assistant message is empty even if an older one is valid", () => {
+    const result = extractWorkerResultFromMessages("developer", [
+      { role: "assistant", content: [{ type: "text", text: "Work result: DONE" }] },
+      { role: "assistant", content: [] },
+    ]);
+
+    expect(result).toBeNull();
+  });
+
   it("returns null when the line is missing or malformed", () => {
     const missingResult = extractWorkerResultFromMessages("architect", [
       { role: "assistant", content: [{ type: "text", text: "I finished the architecture work." }] },

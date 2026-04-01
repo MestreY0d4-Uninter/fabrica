@@ -54,13 +54,14 @@ export function extractWorkerResultFromMessages(
   messages: unknown[],
 ): WorkerResult | null {
   const prefix = ROLE_PREFIX[role];
-  const assistantTexts = messages
+  const assistantMessages = messages
     .filter((message): message is WorkerMessage => typeof message === "object" && message != null)
-    .filter((message) => message.role === "assistant")
-    .map((message) => extractTextContent(message.content))
-    .filter(Boolean);
+    .filter((message) => message.role === "assistant");
 
-  const text = assistantTexts.at(-1);
+  const latestAssistantMessage = assistantMessages.at(-1);
+  if (!latestAssistantMessage) return null;
+
+  const text = extractTextContent(latestAssistantMessage.content);
   if (!text) return null;
 
   for (const line of text.split("\n").map((value) => value.trim()).toReversed()) {
