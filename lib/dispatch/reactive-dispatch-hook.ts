@@ -6,8 +6,7 @@
  *   2. after_tool_call — when work_finish is called, wake the heartbeat
  *      immediately so the next worker is dispatched in <5s instead of 60–120s.
  *   3. agent_end — when any Fabrica worker run ends (with or without work_finish),
- *      wake the heartbeat for immediate triage. This path is wake-only because
- *      agent_end does not expose runId, so it cannot safely mutate reused slots.
+ *      apply lifecycle-driven completion and wake the heartbeat for immediate triage.
  *   4. subagent_spawned — record spawn timestamp per session key so
  *      subagent-lifecycle-hook can compute accurate durationMs.
  *
@@ -19,6 +18,7 @@ import { parseFabricaSessionKey } from "./bootstrap-hook.js";
 import { wakeHeartbeat } from "../services/heartbeat/wake-bridge.js";
 import { resolveWorkspaceDir } from "./attachment-hook.js";
 import { bindDispatchRunIdBySessionKey } from "../projects/index.js";
+import { handleWorkerAgentEnd } from "../services/worker-completion.js";
 
 /** Tools whose completion should immediately trigger heartbeat triage. */
 const COMPLETION_TOOLS = new Set(["work_finish"]);
@@ -61,13 +61,21 @@ export function registerReactiveDispatchHooks(
     wakeHeartbeat("work_finish").catch(() => {});
   });
 
-  // Wake heartbeat immediately when any Fabrica worker run ends.
-  // Covers the case where work_finish was NOT called — agent_end fires regardless.
-  api.on("agent_end", async (_event, eventCtx) => {
+  // Apply lifecycle-driven completion when any Fabrica worker run ends, then wake heartbeat.
+  api.on("agent_end", async (event, eventCtx) => {
     const sessionKey = eventCtx.sessionKey;
     if (!sessionKey) return;
     const parsed = parseFabricaSessionKey(sessionKey);
     if (!parsed) return;
+    if (workspaceDir) {
+      await handleWorkerAgentEnd({
+        sessionKey,
+        messages: event.messages,
+        workspaceDir,
+        runCommand: ctx.runCommand,
+        runtime: ctx.runtime as never,
+      }).catch(() => {});
+    }
     ctx.runtime?.system.requestHeartbeatNow({ reason: "agent_end", coalesceMs: 2000 });
     wakeHeartbeat("agent_end").catch(() => {});
   });

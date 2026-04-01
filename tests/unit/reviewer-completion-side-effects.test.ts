@@ -17,6 +17,8 @@ vi.mock("../../lib/audit.js", () => ({
 vi.mock("../../lib/projects/index.js", () => ({
   readProjects: mockReadProjects,
   deactivateWorker: mockDeactivateWorker,
+  getRoleWorker: (project: any, role: string) => project.workers[role],
+  getIssueRuntime: (project: any, issueId: number) => project.issueRuntime?.[String(issueId)],
 }));
 
 vi.mock("../../lib/config/index.js", () => ({

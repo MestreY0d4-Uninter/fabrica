@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockRequestHeartbeatNow = vi.fn();
+const mockHandleWorkerAgentEnd = vi.fn();
+
+vi.mock("../../lib/services/worker-completion.js", () => ({
+  handleWorkerAgentEnd: mockHandleWorkerAgentEnd,
+}));
 
 describe("reactive-dispatch-hook", () => {
   function captureHandlers(register: (api: any, ctx: any) => void) {
@@ -9,17 +14,21 @@ describe("reactive-dispatch-hook", () => {
       on: vi.fn((name: string, h: any) => { handlers[name] = h; }),
     };
     const ctx = {
-      config: {},
+      config: { agents: { defaults: { workspace: "/tmp/fabrica-workspace" } } },
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       runtime: {
         system: { requestHeartbeatNow: mockRequestHeartbeatNow },
       },
+      runCommand: vi.fn(),
     };
     register(api as any, ctx as any);
     return handlers;
   }
 
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockHandleWorkerAgentEnd.mockResolvedValue({ applied: true });
+  });
 
   describe("after_tool_call", () => {
     it("calls requestHeartbeatNow when toolName is work_finish", async () => {
@@ -86,7 +95,7 @@ describe("reactive-dispatch-hook", () => {
   });
 
   describe("agent_end", () => {
-    it("wakes heartbeat for reviewer sessions without mutating completion", async () => {
+    it("wakes heartbeat for reviewer sessions even though worker completion resolves as a no-op", async () => {
       const { registerReactiveDispatchHooks } = await import("../../lib/dispatch/reactive-dispatch-hook.js");
       const h = captureHandlers(registerReactiveDispatchHooks);
 
@@ -102,17 +111,26 @@ describe("reactive-dispatch-hook", () => {
       expect(mockRequestHeartbeatNow).toHaveBeenCalledWith(
         expect.objectContaining({ reason: "agent_end" }),
       );
+      expect(mockHandleWorkerAgentEnd).toHaveBeenCalledOnce();
     });
 
-    it("calls requestHeartbeatNow for a Fabrica worker session", async () => {
+    it("applies worker completion before waking heartbeat for a Fabrica worker session", async () => {
       const { registerReactiveDispatchHooks } = await import("../../lib/dispatch/reactive-dispatch-hook.js");
       const h = captureHandlers(registerReactiveDispatchHooks);
 
       await h["agent_end"](
-        { success: true },
+        { success: true, messages: [{ role: "assistant", content: [{ type: "text", text: "Work result: DONE" }] }] },
         { sessionKey: "agent:main:subagent:my-project-developer-junior-ada" },
       );
 
+      expect(mockHandleWorkerAgentEnd).toHaveBeenCalledOnce();
+      expect(mockHandleWorkerAgentEnd).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionKey: "agent:main:subagent:my-project-developer-junior-ada",
+          workspaceDir: "/tmp/fabrica-workspace",
+          messages: [{ role: "assistant", content: [{ type: "text", text: "Work result: DONE" }] }],
+        }),
+      );
       expect(mockRequestHeartbeatNow).toHaveBeenCalledOnce();
       expect(mockRequestHeartbeatNow).toHaveBeenCalledWith(
         expect.objectContaining({ reason: "agent_end" }),

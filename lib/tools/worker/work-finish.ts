@@ -304,7 +304,7 @@ export function createWorkFinishTool(ctx: PluginContext) {
 
       if (role === "reviewer") {
         throw new Error(
-          "Reviewer completion is no longer handled by work_finish. End your response with exactly one plain-text decision line: 'Review result: APPROVE' or 'Review result: REJECT'. Use the project slug from the 'Channel:' line in your task message for any follow-up task_create call.",
+          "Reviewer completion is handled by the final result line, not work_finish. End your response with exactly one plain-text decision line: 'Review result: APPROVE' or 'Review result: REJECT'. Use the project slug from the 'Channel:' line in your task message for any follow-up task_create call.",
         );
       }
 
@@ -324,6 +324,11 @@ export function createWorkFinishTool(ctx: PluginContext) {
         throw new Error(`${role.toUpperCase()} worker not active on ${project.name}`);
       }
       const { slotIndex, slotLevel, issueId, recovered } = workerSlot;
+      await auditLog(workspaceDir, "legacy_work_finish_observed", {
+        role,
+        issue: issueId,
+        sessionKey: toolCtx.sessionKey ?? null,
+      }).catch(() => {});
       const issueRuntime = project.issueRuntime?.[String(issueId)];
       const currentDispatchRunId = workerSlot.dispatchRunId ?? issueRuntime?.dispatchRunId ?? null;
       const hasCycleMismatch = Boolean(
