@@ -40,8 +40,8 @@ describe("developer prompt anti-pattern checklist", () => {
   it("keeps tester and architect prompts aligned to canonical lifecycle result lines", () => {
     expect(testerContent).toContain("Test result: PASS");
     expect(testerContent).toContain("Test result: FAIL_INFRA");
+    expect(testerContent).toContain("Test result: REFINE");
     expect(testerContent).toContain("Test result: BLOCKED");
-    expect(testerContent).not.toContain("Test result: REFINE");
     expect(testerContent).not.toContain("work_finish");
 
     expect(architectContent).toContain("Architecture result: DONE");
