@@ -24,10 +24,10 @@ const activeBootstrapResumes = new Set<string>();
 
 type BootstrapRequest = {
   rawIdea: string;
-  projectName?: string;
-  repoUrl?: string;
-  repoPath?: string;
-  stackHint?: string;
+  projectName?: string | null;
+  repoUrl?: string | null;
+  repoPath?: string | null;
+  stackHint?: string | null;
 };
 
 type TelegramBootstrapRoute = {
@@ -401,7 +401,11 @@ function buildProjectRoute(session: TelegramBootstrapSession): TelegramBootstrap
   };
 }
 
-function isRecoverableBootstrapSession(session: TelegramBootstrapSession | null | undefined): session is TelegramBootstrapSession {
+type RecoverableBootstrapSession = TelegramBootstrapSession & {
+  status: "bootstrapping" | "dispatching";
+};
+
+function isRecoverableBootstrapSession(session: TelegramBootstrapSession | null | undefined): session is RecoverableBootstrapSession {
   return session?.status === "bootstrapping" || session?.status === "dispatching";
 }
 
