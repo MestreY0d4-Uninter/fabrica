@@ -106,14 +106,15 @@ The plugin should load immediately after install, without manual remediation.
 openclaw plugins inspect fabrica
 ```
 
-**3. Configure operational state as needed**:
+**3. Configure operational state for a workspace**:
 
 ```bash
-openclaw fabrica doctor
-openclaw fabrica setup
+openclaw fabrica doctor workspace --workspace /path/to/workspace
+openclaw fabrica setup --workspace /path/to/workspace --new-agent fabrica
 ```
 
-GitHub, Telegram, and webhook behavior are separate operational concerns, not
+Use `openclaw fabrica setup --agent <id>` if you already have an agent. GitHub,
+Telegram, and webhook behavior are separate operational concerns, not
 installation dependencies.
 
 **4. Restart the gateway**:
