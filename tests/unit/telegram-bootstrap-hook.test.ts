@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate, _testClassifyDmIntent as classifyDmIntent, _testBuildTopicDeepLink as buildTopicDeepLink, _testInferProjectSlug as inferProjectSlug, _testNormalizeUserResponse as normalizeUserResponse } from "../../lib/dispatch/telegram-bootstrap-hook.js";
+import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate, _testClassifyDmIntent as classifyDmIntent, _testBuildTopicDeepLink as buildTopicDeepLink, _testInferProjectSlug as inferProjectSlug, _testNormalizeUserResponse as normalizeUserResponse, _testResumeBootstrapping as resumeBootstrapping } from "../../lib/dispatch/telegram-bootstrap-hook.js";
 import {
   buildBootstrapRequestHash,
   upsertTelegramBootstrapSession,
@@ -473,7 +473,68 @@ describe("telegram bootstrap hook", () => {
 
     const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
     expect(session?.status).toBe("bootstrapping");
+    expect(session?.attemptCount).toBe(1);
     expect(session?.error).toContain("telegram down");
+    expect(session?.nextRetryAt).toBeTruthy();
+  });
+
+  it("retries a failed bootstrap handoff from bootstrapping on the next recovery pass", async () => {
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    sendMessageTelegram
+      .mockRejectedValueOnce(new Error("temporary send failure"))
+      .mockResolvedValue(undefined);
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 778,
+          project_slug: "todo-summary-tool",
+        },
+      },
+    });
+    outerMockSubagentRun.mockResolvedValue({ runId: "classify-run" });
+    outerMockSubagentWait.mockResolvedValue({ status: "ok" });
+    outerMockSubagentGetMessages.mockResolvedValue([
+      { role: "assistant", content: JSON.stringify({
+        intent: "create_project",
+        confidence: 0.96,
+        stackHint: "python-cli",
+        projectSlug: "todo-summary-tool",
+        language: "en",
+      }) },
+    ]);
+
+    await handler?.(
+      {
+        content: "Build a simple Python CLI for todo summary",
+        metadata: {},
+      },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2000 });
+
+    let session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+    expect(session?.status).toBe("bootstrapping");
+    expect(session?.attemptCount).toBe(1);
+    expect(session?.ackSentAt).toBeNull();
+
+    await resumeBootstrapping(ctx, workspaceDir, "6951571380");
+
+    session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+    expect(mockRunPipeline).toHaveBeenCalledTimes(1);
+    expect(session?.status).toBe("completed");
+    expect(session?.ackSentAt).toBeTruthy();
+    expect(session?.lastError).toBeNull();
+    expect(session?.nextRetryAt).toBeNull();
   });
 
   it("fails closed when pipeline succeeds without topic routing", async () => {
@@ -1530,7 +1591,7 @@ describe("Layer 3: LLM classification via message_received", () => {
     );
   });
 
-  it("fails before ack on the LLM path when projectsForumChatId is missing", async () => {
+  it("records bootstrapping, sends ack, and then fails on the LLM path when projectsForumChatId is missing", async () => {
     const api = {
       on: vi.fn((name: string, fn: any) => {
         if (name === "message_received") handler = fn;
@@ -1557,11 +1618,14 @@ describe("Layer 3: LLM classification via message_received", () => {
       { channelId: "telegram", conversationId: "6951571380" },
     );
 
-    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 5000 });
 
     expect(mockRunPipeline).not.toHaveBeenCalled();
-    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("grupo de projetos configurado");
-    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).not.toContain("Recebi!");
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Recebi!");
+    expect(String(sendMessageTelegram.mock.calls[1]?.[1])).toContain("grupo de projetos configurado");
+
+    const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+    expect(session?.status).toBe("failed");
   });
 
   it("deletes session and does not bootstrap when LLM returns 'other'", async () => {

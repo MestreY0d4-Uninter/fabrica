@@ -21,6 +21,7 @@ import {
 import { raceWithTimeout } from "../utils/async.js";
 
 const BOOTSTRAP_TIMEOUT_MS = 5 * 60_000; // 5 minutes
+const BOOTSTRAP_RETRY_DELAY_MS = 15_000;
 const LAYER3_CONFIDENCE_THRESHOLD = 0.6;
 
 type BootstrapRequest = {
@@ -240,7 +241,7 @@ async function classifyDmIntent(
   }
 }
 
-export { isAmbiguousCandidate as _testIsAmbiguousCandidate, classifyDmIntent as _testClassifyDmIntent, buildTopicDeepLink as _testBuildTopicDeepLink, inferProjectSlug as _testInferProjectSlug, normalizeUserResponse as _testNormalizeUserResponse, continueBootstrap as _testContinueBootstrap };
+export { isAmbiguousCandidate as _testIsAmbiguousCandidate, classifyDmIntent as _testClassifyDmIntent, buildTopicDeepLink as _testBuildTopicDeepLink, inferProjectSlug as _testInferProjectSlug, normalizeUserResponse as _testNormalizeUserResponse, continueBootstrap as _testContinueBootstrap, resumeBootstrapping as _testResumeBootstrapping };
 
 function isBootstrapCandidate(text: string): boolean {
   const lower = text.toLowerCase();
@@ -342,6 +343,10 @@ function buildTopicKickoff(projectName: string, idea: string, language: Bootstra
   return `${header}\n${idea}`;
 }
 
+function normalizeTelegramChatTarget(target: string): string {
+  return target.startsWith("telegram:") ? target.slice("telegram:".length) : target;
+}
+
 async function sendTelegramText(
   ctx: PluginContext,
   target: string,
@@ -354,7 +359,7 @@ async function sendTelegramText(
   };
   if (opts?.accountId) sendOpts.accountId = opts.accountId;
   if (opts?.messageThreadId != null) sendOpts.messageThreadId = opts.messageThreadId;
-  await ctx.runtime.channel.telegram.sendMessageTelegram(target, message, sendOpts as any);
+  await ctx.runtime.channel.telegram.sendMessageTelegram(normalizeTelegramChatTarget(target), message, sendOpts as any);
 }
 
 function logBootstrapWarning(ctx: PluginContext, message: string): void {
@@ -365,6 +370,119 @@ function logBootstrapWarning(ctx: PluginContext, message: string): void {
   if (typeof ctx.logger?.info === "function") {
     ctx.logger.info(message);
   }
+}
+
+function buildBootstrapRequestFromSession(session: TelegramBootstrapSession): BootstrapRequest {
+  return {
+    rawIdea: session.rawIdea,
+    projectName: session.projectName ?? undefined,
+    repoUrl: session.repoUrl ?? undefined,
+    repoPath: session.repoPath ?? undefined,
+    stackHint: session.stackHint ?? undefined,
+  };
+}
+
+function buildSessionSourceRoute(session: TelegramBootstrapSession): TelegramBootstrapRoute {
+  return session.sourceRoute ?? {
+    channel: "telegram",
+    channelId: normalizeTelegramChatTarget(session.conversationId),
+  };
+}
+
+async function enterBootstrapping(
+  workspaceDir: string,
+  conversationId: string,
+  request: BootstrapRequest,
+  sourceRoute: TelegramBootstrapRoute,
+  language: BootstrapLanguage,
+): Promise<TelegramBootstrapSession> {
+  return upsertTelegramBootstrapSession(workspaceDir, {
+    conversationId,
+    rawIdea: request.rawIdea,
+    projectName: request.projectName ?? null,
+    stackHint: request.stackHint ?? null,
+    repoUrl: request.repoUrl ?? null,
+    repoPath: request.repoPath ?? null,
+    sourceRoute,
+    sourceChannel: "telegram",
+    status: "bootstrapping",
+    language,
+    lastError: null,
+    nextRetryAt: null,
+  });
+}
+
+async function recordBootstrapRetry(
+  workspaceDir: string,
+  session: TelegramBootstrapSession,
+  error: unknown,
+): Promise<TelegramBootstrapSession> {
+  const message = error instanceof Error ? error.message : String(error);
+  return upsertTelegramBootstrapSession(workspaceDir, {
+    conversationId: session.conversationId,
+    rawIdea: session.rawIdea,
+    status: "bootstrapping",
+    attemptCount: (session.attemptCount ?? 0) + 1,
+    lastError: message,
+    nextRetryAt: new Date(Date.now() + BOOTSTRAP_RETRY_DELAY_MS).toISOString(),
+    language: session.language,
+  });
+}
+
+async function runBootstrapHandoff(
+  ctx: PluginContext,
+  workspaceDir: string,
+  session: TelegramBootstrapSession,
+): Promise<TelegramBootstrapSession> {
+  if (!session.ackSentAt) {
+    await sendTelegramText(
+      ctx,
+      session.conversationId,
+      BOOTSTRAP_MESSAGES.ack[session.language ?? "pt"],
+    );
+    session = await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: session.conversationId,
+      rawIdea: session.rawIdea,
+      status: "bootstrapping",
+      ackSentAt: new Date().toISOString(),
+      lastError: null,
+      nextRetryAt: null,
+      language: session.language,
+    });
+  }
+
+  await continueBootstrap(
+    ctx,
+    session.conversationId,
+    workspaceDir,
+    buildBootstrapRequestFromSession(session),
+    buildSessionSourceRoute(session),
+  );
+
+  return await readTelegramBootstrapSession(workspaceDir, session.conversationId) ?? session;
+}
+
+async function resumeBootstrappingSession(
+  ctx: PluginContext,
+  workspaceDir: string,
+  session: TelegramBootstrapSession,
+): Promise<TelegramBootstrapSession> {
+  try {
+    return await runBootstrapHandoff(ctx, workspaceDir, session);
+  } catch (error) {
+    const latestSession = await readTelegramBootstrapSession(workspaceDir, session.conversationId) ?? session;
+    return await recordBootstrapRetry(workspaceDir, latestSession, error);
+  }
+}
+
+async function resumeBootstrapping(
+  ctx: PluginContext,
+  workspaceDir: string,
+  conversationId: string,
+): Promise<TelegramBootstrapSession | null> {
+  const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
+  if (!session || session.status !== "bootstrapping") return session;
+  return resumeBootstrappingSession(ctx, workspaceDir, session);
 }
 
 async function runBootstrapPreflightOrFail(
@@ -505,48 +623,14 @@ async function classifyAndBootstrap(
   }
 
   const sourceRoute: TelegramBootstrapRoute = { channel: "telegram", channelId: conversationId };
-
-  if (parsed.stackHint) {
-    const handled = await runBootstrapPreflightOrFail(
-      ctx,
-      conversationId,
-      workspaceDir,
-      incomingRequest,
-      sourceRoute,
-      { language },
-    );
-    if (handled) return;
-  }
-
-  await sendTelegramText(ctx, conversationId, BOOTSTRAP_MESSAGES.ack[language]);
-
-  // Upsert session with "received" status
-  const session = await upsertTelegramBootstrapSession(workspaceDir, {
+  const session = await enterBootstrapping(
+    workspaceDir,
     conversationId,
-    ...incomingRequest,
+    incomingRequest,
     sourceRoute,
-    sourceChannel: "telegram",
-    status: "received",
     language,
-  });
-
-  // If no stack hint, enter clarification flow (same as Layer 2)
-  if (!parsed.stackHint) {
-    const pendingClarification = !parsed.projectName ? "stack_and_name" as const : "stack" as const;
-    await upsertTelegramBootstrapSession(workspaceDir, {
-      conversationId,
-      ...incomingRequest,
-      sourceRoute: session.sourceRoute,
-      status: "clarifying",
-      pendingClarification,
-      language,
-    });
-    await sendTelegramText(ctx, conversationId, buildClarificationMessage(parsed, pendingClarification, language));
-    return;
-  }
-
-  // Fire-and-forget pipeline
-  bootstrapWithTimeout(ctx, conversationId, workspaceDir, incomingRequest, sourceRoute);
+  );
+  await resumeBootstrappingSession(ctx, workspaceDir, session);
 }
 
 function bootstrapWithTimeout(

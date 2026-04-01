@@ -12,7 +12,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { registerTelegramBootstrapHook, _testContinueBootstrap } from "../../lib/dispatch/telegram-bootstrap-hook.js";
+import { registerTelegramBootstrapHook, _testContinueBootstrap, _testResumeBootstrapping as resumeBootstrapping } from "../../lib/dispatch/telegram-bootstrap-hook.js";
 
 const {
   mockRunPipeline,
@@ -88,6 +88,7 @@ describe("telegram bootstrap clarification flow", () => {
     mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: workspaceDir }]);
     mockProjectTick.mockResolvedValue({ pickups: [], skipped: [] });
     ctx.config.agents.defaults.workspace = workspaceDir;
+    delete ctx.runtime.subagent;
     // Clean up session files from prior tests
     await fs.rm(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true, force: true });
 
@@ -549,6 +550,55 @@ describe("telegram bootstrap clarification flow", () => {
     const pipelinePayload = mockRunPipeline.mock.calls[0]?.[0];
     expect(pipelinePayload.metadata.project_name).toBeTruthy();
     expect(String(pipelinePayload.metadata.project_name)).toMatch(/^project-\d+$/);
+  });
+
+  it("does not send duplicate bootstrap acks after a resumed handoff", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 831,
+          project_slug: "todo-summary-tool",
+        },
+      },
+    });
+
+    ctx.runtime.subagent = {
+      run: vi.fn().mockResolvedValue({ runId: "classify-run" }),
+      waitForRun: vi.fn().mockResolvedValue({ status: "ok" }),
+      getSessionMessages: vi.fn().mockResolvedValue([
+        { role: "assistant", content: JSON.stringify({
+          intent: "create_project",
+          confidence: 0.95,
+          stackHint: "python-cli",
+          projectSlug: "todo-summary-tool",
+          language: "en",
+        }) },
+      ]),
+    };
+
+    sendMessageTelegram
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("temporary send failure"))
+      .mockResolvedValue(undefined);
+
+    await handler?.(
+      { content: "Build a simple Python CLI for todo summary", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
+
+    await resumeBootstrapping(ctx, workspaceDir, CONVERSATION_ID);
+
+    const ackCalls = sendMessageTelegram.mock.calls.filter(
+      ([target, message]) =>
+        target === CONVERSATION_ID &&
+        String(message).includes("Got it! I'll analyze your request and start setting up the project..."),
+    );
+
+    expect(ackCalls).toHaveLength(1);
   });
 
   it("treats metadata.project_registered as the single registration truth on pipeline failure", async () => {
