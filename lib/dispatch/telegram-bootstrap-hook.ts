@@ -470,7 +470,7 @@ function createBootstrapAttemptOwner(
 }
 
 function buildBootstrapAttemptOwner(session: TelegramBootstrapSession | null | undefined): BootstrapAttemptOwner | null {
-  if (!session.attemptId || session.attemptSeq == null) {
+  if (!session?.attemptId || session.attemptSeq == null) {
     return null;
   }
   return {
@@ -1282,7 +1282,7 @@ async function continueBootstrap(
         // First time asking: enter clarification
         const lang: BootstrapLanguage = existingSession?.language ?? "pt";
         const owner = existingSession ? buildBootstrapAttemptOwner(existingSession) : null;
-        if (owner) {
+        if (existingSession && owner) {
           await persistOwnedBootstrapCheckpoint(workspaceDir, owner, {
             rawIdea: request.rawIdea,
             stackHint: request.stackHint ?? undefined,
@@ -1620,6 +1620,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
     // Layer 1: Active clarifying OR classifying session?
     const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
     if (isRecoverableTelegramBootstrapSession(existingSession)) {
+      const nextRetryAt = existingSession.nextRetryAt ?? null;
       if (isClaimableTelegramBootstrapSession(existingSession)) {
         startFreshBootstrapResume(
           ctx,
@@ -1628,7 +1629,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
           () => leaseBootstrapRecovery(workspaceDir, existingSession.conversationId),
         );
       } else {
-        ctx.logger.info(`[telegram-bootstrap] recovery deferred until ${existingSession.nextRetryAt} for ${conversationId}`);
+        ctx.logger.info(`[telegram-bootstrap] recovery deferred until ${nextRetryAt} for ${conversationId}`);
       }
       return;
     }
