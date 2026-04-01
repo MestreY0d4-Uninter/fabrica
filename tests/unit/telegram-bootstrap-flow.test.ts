@@ -717,6 +717,78 @@ describe("telegram bootstrap clarification flow", () => {
     expect(persisted.nextRetryAt).toBeNull();
   });
 
+  it("keeps projectTick retryable when pickup fails during dispatch recovery", async () => {
+    await fs.mkdir(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+      JSON.stringify({
+        id: "tgdm-projecttick-retry",
+        conversationId: CONVERSATION_ID,
+        sourceChannel: "telegram",
+        sourceRoute: { channel: "telegram", channelId: CONVERSATION_ID },
+        projectRoute: {
+          channel: "telegram",
+          channelId: "-1003709213169",
+          messageThreadId: 945,
+        },
+        requestHash: "req-hash",
+        requestFingerprint: "req-hash",
+        rawIdea: "Build a simple Python CLI for todo summary",
+        projectName: "todo-summary-tool",
+        stackHint: "python-cli",
+        projectSlug: "todo-summary-tool",
+        messageThreadId: 945,
+        projectChannelId: "-1003709213169",
+        status: "dispatching",
+        ackSentAt: "2026-04-01T00:00:01.000Z",
+        projectRegisteredAt: "2026-04-01T00:00:02.000Z",
+        topicKickoffSentAt: "2026-04-01T00:00:03.000Z",
+        lastError: "temporary send failure",
+        nextRetryAt: "2026-04-01T00:00:05.000Z",
+        language: "en",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:05.000Z",
+        suppressUntil: new Date(Date.now() + 60_000).toISOString(),
+      }, null, 2) + "\n",
+      "utf-8",
+    );
+
+    mockProjectTick
+      .mockRejectedValueOnce(new Error("pickup failed"))
+      .mockResolvedValueOnce({ pickups: [], skipped: [] });
+
+    await resumeBootstrapping(ctx, workspaceDir, CONVERSATION_ID);
+
+    let persisted = JSON.parse(
+      await fs.readFile(
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        "utf-8",
+      ),
+    );
+    expect(mockProjectTick).toHaveBeenCalledTimes(1);
+    expect(sendMessageTelegram).not.toHaveBeenCalled();
+    expect(persisted.status).toBe("dispatching");
+    expect(persisted.projectTickedAt).toBeNull();
+    expect(persisted.completionAckSentAt).toBeNull();
+    expect(persisted.lastError).toContain("pickup failed");
+    expect(persisted.nextRetryAt).toBeTruthy();
+
+    await resumeBootstrapping(ctx, workspaceDir, CONVERSATION_ID);
+
+    persisted = JSON.parse(
+      await fs.readFile(
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        "utf-8",
+      ),
+    );
+    expect(mockProjectTick).toHaveBeenCalledTimes(2);
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe(CONVERSATION_ID);
+    expect(persisted.status).toBe("completed");
+    expect(persisted.projectTickedAt).toBeTruthy();
+    expect(persisted.completionAckSentAt).toBeTruthy();
+  });
+
   it("treats metadata.project_registered as the single registration truth on pipeline failure", async () => {
     mockRunPipeline.mockResolvedValue({
       success: false,
