@@ -361,6 +361,11 @@ function normalizeTelegramChatTarget(target: string): string {
   return target.startsWith("telegram:") ? target.slice("telegram:".length) : target;
 }
 
+function isRecoverableRuntimeTelegramSendError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /Cannot read properties of undefined|is not a function|runtime unavailable/i.test(message);
+}
+
 async function sendTelegramText(
   ctx: PluginContext,
   target: string,
@@ -373,7 +378,39 @@ async function sendTelegramText(
   };
   if (opts?.accountId) sendOpts.accountId = opts.accountId;
   if (opts?.messageThreadId != null) sendOpts.messageThreadId = opts.messageThreadId;
-  await ctx.runtime.channel.telegram.sendMessageTelegram(normalizeTelegramChatTarget(target), message, sendOpts as any);
+  const normalizedTarget = normalizeTelegramChatTarget(target);
+  const telegramChannel = (ctx.runtime as any)?.channel?.telegram as
+    | { sendMessageTelegram?: (to: string, text: string, options?: Record<string, unknown>) => Promise<unknown> }
+    | undefined;
+
+  if (telegramChannel?.sendMessageTelegram) {
+    try {
+      await telegramChannel.sendMessageTelegram(normalizedTarget, message, sendOpts as any);
+      return;
+    } catch (err) {
+      if (!isRecoverableRuntimeTelegramSendError(err)) throw err;
+    }
+  }
+
+  const cliArgs = [
+    "openclaw",
+    "message",
+    "send",
+    "--channel",
+    "telegram",
+    "--target",
+    normalizedTarget,
+    "--message",
+    message,
+    "--json",
+  ];
+  if (opts?.accountId) {
+    cliArgs.push("--account", opts.accountId);
+  }
+  if (opts?.messageThreadId != null) {
+    cliArgs.push("--thread-id", String(opts.messageThreadId));
+  }
+  await ctx.runCommand(cliArgs, { timeoutMs: 30_000 });
 }
 
 function logBootstrapWarning(ctx: PluginContext, message: string): void {

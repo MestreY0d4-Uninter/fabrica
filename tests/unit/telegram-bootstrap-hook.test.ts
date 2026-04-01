@@ -956,6 +956,57 @@ describe("telegram bootstrap hook", () => {
     }
   });
 
+  it("falls back to CLI send when runtime telegram sender is unavailable on the first ack", async () => {
+    const originalTelegramRuntime = ctx.runtime.channel.telegram;
+    delete ctx.runtime.channel.telegram;
+
+    try {
+      mockRunPipeline.mockResolvedValue({
+        success: true,
+        payload: {
+          metadata: {
+            channel_id: "-1003709213169",
+            message_thread_id: 903,
+            project_slug: "todo-summary",
+          },
+        },
+      });
+
+      await upsertTelegramBootstrapSession(workspaceDir, {
+        conversationId: "telegram:6951571380",
+        rawIdea: "Build a simple Python CLI for todo summary",
+        projectName: "todo-summary",
+        stackHint: "python-cli",
+        sourceRoute: { channel: "telegram", channelId: "6951571380" },
+        status: "bootstrapping",
+        bootstrapStep: "awaiting_ack",
+        attemptId: "attempt-cli-fallback",
+        attemptSeq: 1,
+        nextRetryAt: new Date(Date.now() - 1_000).toISOString(),
+        language: "en",
+      });
+
+      await resumeBootstrapping(ctx, workspaceDir, "telegram:6951571380");
+
+      await vi.waitFor(() => expect(ctx.runCommand).toHaveBeenCalled(), { timeout: 5000 });
+      expect(ctx.runCommand.mock.calls[0]?.[0]).toEqual(expect.arrayContaining([
+        "openclaw",
+        "message",
+        "send",
+        "--channel",
+        "telegram",
+        "--target",
+        "6951571380",
+      ]));
+      await vi.waitFor(async () => {
+        const session = await readTelegramBootstrapSession(workspaceDir, "telegram:6951571380");
+        expect(session?.status).toBe("completed");
+      }, { timeout: 5000 });
+    } finally {
+      ctx.runtime.channel.telegram = originalTelegramRuntime;
+    }
+  }, 15000);
+
   it("persists bootstrapping before retrying ack on the clarification-resolved path", async () => {
     const api = {
       on: vi.fn((name, fn) => {
