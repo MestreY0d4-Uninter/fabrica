@@ -739,6 +739,90 @@ describe("telegram bootstrap hook", () => {
     expect(session?.nextRetryAt).toBeNull();
   });
 
+  it("persists bootstrapping before the direct structured-path ack send", async () => {
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    sendMessageTelegram.mockRejectedValueOnce(new Error("temporary ack failure"));
+
+    await handler?.(
+      {
+        content: [
+          "Build and register a new project.",
+          "Project name: todo-summary-tool",
+          "Stack: python-cli",
+          "Idea:",
+          "Build a simple Python CLI for todo summary",
+        ].join("\n"),
+        metadata: {},
+      },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2000 });
+
+    await vi.waitFor(async () => {
+      const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+      expect(session?.lastError).toContain("temporary ack failure");
+      expect(session?.nextRetryAt).toBeTruthy();
+    }, { timeout: 2000 });
+
+    const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+    expect(session?.status).toBe("bootstrapping");
+    expect(session?.ackSentAt).toBeNull();
+    expect(session?.pendingClarification).toBeNull();
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+  });
+
+  it("persists bootstrapping before retrying ack on the clarification-resolved path", async () => {
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: "6951571380",
+      rawIdea: "Build a simple Python CLI for todo summary",
+      sourceRoute: { channel: "telegram", channelId: "6951571380" },
+      status: "clarifying",
+      pendingClarification: "stack",
+      ackSentAt: null,
+      language: "en",
+    });
+
+    sendMessageTelegram.mockRejectedValueOnce(new Error("clarification ack failed"));
+
+    await handler?.(
+      {
+        content: "python-cli",
+        metadata: {},
+      },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2000 });
+
+    await vi.waitFor(async () => {
+      const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+      expect(session?.lastError).toContain("clarification ack failed");
+      expect(session?.nextRetryAt).toBeTruthy();
+    }, { timeout: 2000 });
+
+    const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+    expect(session?.status).toBe("bootstrapping");
+    expect(session?.ackSentAt).toBeNull();
+    expect(session?.pendingClarification).toBeNull();
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+  });
+
   it("resumes an existing dispatching bootstrap session instead of starting a new classification cycle", async () => {
     const api = {
       on: vi.fn((name, fn) => {

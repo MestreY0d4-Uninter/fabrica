@@ -416,6 +416,7 @@ function freshBootstrapResetFields(request: BootstrapRequest): {
   projectSlug: string | null;
   issueId: null;
   attemptCount: number;
+  pendingClarification: null;
   messageThreadId: null;
   projectChannelId: null;
   lastError: null;
@@ -431,6 +432,7 @@ function freshBootstrapResetFields(request: BootstrapRequest): {
     projectSlug: request.projectName ?? null,
     issueId: null,
     attemptCount: 0,
+    pendingClarification: null,
     messageThreadId: null,
     projectChannelId: null,
     lastError: null,
@@ -877,7 +879,7 @@ async function classifyAndBootstrap(
     sourceRoute,
     language,
   );
-  await resumeBootstrappingSession(ctx, workspaceDir, session);
+  launchBootstrapResume(ctx, workspaceDir, session);
 }
 
 /**
@@ -1262,7 +1264,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
         },
         existingSession.language ?? "pt",
         {
-          ackSentAt: existingSession.ackSentAt ?? new Date().toISOString(),
+          ackSentAt: existingSession.ackSentAt ?? null,
         },
       );
       launchBootstrapResume(ctx, workspaceDir, session);
@@ -1401,9 +1403,6 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
     );
     if (handled) return;
 
-    // Immediate ack — user knows message was received before pipeline starts
-    const ackSentAt = new Date().toISOString();
-    await sendTelegramText(ctx, conversationId, BOOTSTRAP_MESSAGES.ack[language]);
     const session = await enterBootstrapping(
       workspaceDir,
       conversationId,
@@ -1413,7 +1412,6 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
         channelId: conversationId,
       },
       language,
-      { ackSentAt },
     );
 
     launchBootstrapResume(ctx, workspaceDir, session);

@@ -601,6 +601,57 @@ describe("telegram bootstrap clarification flow", () => {
     expect(ackCalls).toHaveLength(1);
   });
 
+  it("uses the same single-flight launch path for LLM-started bootstraps", async () => {
+    ctx.runtime.subagent = {
+      run: vi.fn().mockResolvedValue({ runId: "classify-run" }),
+      waitForRun: vi.fn().mockResolvedValue({ status: "ok" }),
+      getSessionMessages: vi.fn().mockResolvedValue([
+        { role: "assistant", content: JSON.stringify({
+          intent: "create_project",
+          confidence: 0.95,
+          stackHint: "python-cli",
+          projectSlug: "todo-summary-tool",
+          language: "en",
+        }) },
+      ]),
+    };
+
+    let releaseAck: (() => void) | undefined;
+    sendMessageTelegram
+      .mockImplementationOnce(() => new Promise<void>((resolve) => {
+        releaseAck = resolve;
+      }))
+      .mockResolvedValue(undefined);
+
+    const content = "Build me a Python CLI that validates CPF numbers";
+
+    await handler?.(
+      { content, metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    await vi.waitFor(async () => {
+      const sessionRaw = await fs.readFile(
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        "utf-8",
+      );
+      const session = JSON.parse(sessionRaw);
+      expect(session.status).toBe("bootstrapping");
+    }, { timeout: 2000 });
+
+    await handler?.(
+      { content, metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+
+    releaseAck?.();
+
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
+  });
+
   it("resumes from projectRegisteredAt without rerunning registration", async () => {
     await fs.mkdir(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true });
     await fs.writeFile(
