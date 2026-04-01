@@ -719,6 +719,9 @@ async function resumeBootstrappingSession(
     return await runBootstrapHandoff(ctx, workspaceDir, session);
   } catch (error) {
     const latestSession = await readTelegramBootstrapSession(workspaceDir, session.conversationId) ?? session;
+    if (latestSession.status === "failed") {
+      return latestSession;
+    }
     return await recordBootstrapRetry(workspaceDir, latestSession, error);
   }
 }
@@ -1240,20 +1243,6 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
         repoPath: existingSession.repoPath ?? null,
       };
       ctx.logger.info(`[telegram-bootstrap] clarification resolved: stack=${mergedRequest.stackHint}, idea="${mergedRequest.rawIdea}" (conversation: ${conversationId})`);
-      if (mergedRequest.stackHint) {
-        const handled = await runBootstrapPreflightOrFail(
-          ctx,
-          conversationId,
-          workspaceDir,
-          mergedRequest,
-          existingSession.sourceRoute ?? {
-            channel: "telegram",
-            channelId: conversationId,
-          },
-          { language: existingSession.language ?? "pt" },
-        );
-        if (handled) return;
-      }
       const session = await enterBootstrapping(
         workspaceDir,
         conversationId,
@@ -1361,32 +1350,17 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       ? "pt" : "en";
 
     if (!parsed.stackHint) {
-      const ackSentAt = new Date().toISOString();
-      await sendTelegramText(ctx, conversationId, BOOTSTRAP_MESSAGES.ack[language]);
-      const session = await upsertTelegramBootstrapSession(workspaceDir, {
+      const session = await enterBootstrapping(
+        workspaceDir,
         conversationId,
-        ...incomingRequest,
-        sourceRoute: {
+        incomingRequest,
+        {
           channel: "telegram",
           channelId: conversationId,
         },
-        sourceChannel: "telegram",
-        status: "received",
         language,
-        ackSentAt,
-        ...freshBootstrapResetFields(incomingRequest),
-      });
-      const pendingClarification = !parsed.projectName ? "stack_and_name" as const : "stack" as const;
-      await upsertTelegramBootstrapSession(workspaceDir, {
-        conversationId,
-        ...incomingRequest,
-        sourceRoute: session.sourceRoute,
-        status: "clarifying",
-        pendingClarification,
-        language,
-        ackSentAt,
-      });
-      await sendTelegramText(ctx, conversationId, buildClarificationMessage(parsed, pendingClarification, language));
+      );
+      await resumeBootstrappingSession(ctx, workspaceDir, session);
       return;
     }
 
