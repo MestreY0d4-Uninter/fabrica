@@ -19,6 +19,15 @@ export type TelegramBootstrapStatus =
   | "failed"
   | "orphaned_repo";
 
+export type TelegramBootstrapStep =
+  | "awaiting_ack"
+  | "awaiting_pipeline"
+  | "project_registered"
+  | "topic_kickoff_sent"
+  | "project_ticked"
+  | "completion_ack_sent"
+  | "completed";
+
 type TelegramBootstrapRoute = {
   channel: string;
   channelId: string;
@@ -45,6 +54,9 @@ export type TelegramBootstrapSession = {
   messageThreadId?: number | null;
   projectChannelId?: string | null;
   status: TelegramBootstrapStatus;
+  attemptId?: string | null;
+  attemptSeq?: number | null;
+  bootstrapStep?: TelegramBootstrapStep | null;
   attemptCount?: number | null;
   lastError?: string | null;
   nextRetryAt?: string | null;
@@ -125,6 +137,16 @@ function resolveNullableField<T>(
   return inputValue !== undefined ? inputValue : existingValue ?? fallback;
 }
 
+function defaultNextRetryAtForStatus(
+  status: TelegramBootstrapStatus,
+  existingValue: string | null | undefined,
+): string | null {
+  if (status === "bootstrapping" || status === "dispatching") {
+    return existingValue ?? null;
+  }
+  return null;
+}
+
 export async function readTelegramBootstrapSession(
   workspaceDir: string,
   conversationId: string,
@@ -187,6 +209,9 @@ export async function upsertTelegramBootstrapSession(
     projectChannelId?: string | null;
     language?: "pt" | "en";
     attemptCount?: number | null;
+    attemptId?: string | null;
+    attemptSeq?: number | null;
+    bootstrapStep?: TelegramBootstrapStep | null;
     lastError?: string | null;
     nextRetryAt?: string | null;
     ackSentAt?: string | null;
@@ -208,7 +233,13 @@ export async function upsertTelegramBootstrapSession(
   const resolvedMessageThreadId = resolveNullableField(input.messageThreadId, existing?.messageThreadId);
   const resolvedProjectChannelId = resolveNullableField(input.projectChannelId, existing?.projectChannelId);
   const resolvedAttemptCount = resolveNullableField(input.attemptCount, existing?.attemptCount, 0);
-  const resolvedNextRetryAt = resolveNullableField(input.nextRetryAt, existing?.nextRetryAt);
+  const resolvedAttemptId = resolveNullableField(input.attemptId, existing?.attemptId);
+  const resolvedAttemptSeq = resolveNullableField(input.attemptSeq, existing?.attemptSeq);
+  const resolvedBootstrapStep = resolveNullableField(input.bootstrapStep, existing?.bootstrapStep);
+  const resolvedNextRetryAt =
+    input.nextRetryAt !== undefined
+      ? input.nextRetryAt
+      : defaultNextRetryAtForStatus(input.status, existing?.nextRetryAt);
   const resolvedAckSentAt = resolveNullableField(input.ackSentAt, existing?.ackSentAt);
   const resolvedProjectRegisteredAt = resolveNullableField(input.projectRegisteredAt, existing?.projectRegisteredAt);
   const resolvedTopicKickoffSentAt = resolveNullableField(input.topicKickoffSentAt, existing?.topicKickoffSentAt);
@@ -251,6 +282,9 @@ export async function upsertTelegramBootstrapSession(
     projectChannelId: resolvedProjectChannelId,
     language: input.language ?? existing?.language,
     status: input.status,
+    attemptId: resolvedAttemptId,
+    attemptSeq: resolvedAttemptSeq,
+    bootstrapStep: resolvedBootstrapStep,
     attemptCount: resolvedAttemptCount,
     lastError: resolvedError,
     nextRetryAt: resolvedNextRetryAt,

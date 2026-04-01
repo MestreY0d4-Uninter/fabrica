@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate, _testClassifyDmIntent as classifyDmIntent, _testBuildTopicDeepLink as buildTopicDeepLink, _testInferProjectSlug as inferProjectSlug, _testNormalizeUserResponse as normalizeUserResponse, _testResumeBootstrapping as resumeBootstrapping } from "../../lib/dispatch/telegram-bootstrap-hook.js";
+import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate, _testClassifyDmIntent as classifyDmIntent, _testBuildTopicDeepLink as buildTopicDeepLink, _testInferProjectSlug as inferProjectSlug, _testNormalizeUserResponse as normalizeUserResponse, _testRecoverDueBootstraps as recoverDueBootstraps, _testResetActiveBootstrapResumes as resetActiveBootstrapResumes, _testResumeBootstrapping as resumeBootstrapping } from "../../lib/dispatch/telegram-bootstrap-hook.js";
 import {
   buildBootstrapRequestHash,
   upsertTelegramBootstrapSession,
@@ -89,6 +89,7 @@ describe("telegram bootstrap hook", () => {
   } as any;
 
   beforeEach(async () => {
+    resetActiveBootstrapResumes();
     workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-telegram-bootstrap-"));
     handler = undefined;
     beforePromptBuildHandler = undefined;
@@ -114,6 +115,7 @@ describe("telegram bootstrap hook", () => {
   });
 
   afterEach(async () => {
+    resetActiveBootstrapResumes();
     await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
@@ -606,6 +608,237 @@ describe("telegram bootstrap hook", () => {
     expect(session?.nextRetryAt).toBeNull();
   });
 
+  it("falls back to CLI sending when the Telegram runtime channel is unavailable", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 778,
+          project_slug: "todo-summary-tool",
+        },
+      },
+    });
+
+    const runCommand = vi.fn(async () => ({ stdout: "{\"ok\":true}", stderr: "", code: 0 }));
+    const ctxWithoutTelegramRuntime = {
+      ...ctx,
+      runtime: {
+        ...ctx.runtime,
+        channel: {},
+      },
+      runCommand,
+    } as any;
+
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: "telegram:6951571380",
+      rawIdea: "Build a simple Python CLI for todo summary",
+      projectName: "todo-summary-tool",
+      stackHint: "python-cli",
+      sourceRoute: { channel: "telegram", channelId: "6951571380" },
+      status: "bootstrapping",
+      attemptCount: 1,
+      lastError: "telegram runtime unavailable",
+      nextRetryAt: new Date(Date.now() - 1_000).toISOString(),
+      language: "en",
+    });
+
+    await resumeBootstrapping(ctxWithoutTelegramRuntime, workspaceDir, "telegram:6951571380");
+
+    const session = await readTelegramBootstrapSession(workspaceDir, "telegram:6951571380");
+    expect(session?.status).toBe("completed");
+    expect(runCommand).toHaveBeenCalledTimes(3);
+    expect(runCommand.mock.calls[0]?.[0]).toEqual([
+      "openclaw",
+      "message",
+      "send",
+      "--channel",
+      "telegram",
+      "--target",
+      "6951571380",
+      "--message",
+      expect.stringContaining("Got it!"),
+      "--json",
+    ]);
+    expect(runCommand.mock.calls[1]?.[0]).toEqual([
+      "openclaw",
+      "message",
+      "send",
+      "--channel",
+      "telegram",
+      "--target",
+      "-1003709213169",
+      "--message",
+      expect.stringContaining("Project automatically registered"),
+      "--json",
+      "--thread-id",
+      "778",
+    ]);
+    expect(runCommand.mock.calls[2]?.[0]).toEqual([
+      "openclaw",
+      "message",
+      "send",
+      "--channel",
+      "telegram",
+      "--target",
+      "6951571380",
+      "--message",
+      expect.stringContaining("https://t.me/c/3709213169/778"),
+      "--json",
+    ]);
+  });
+
+  it("recovers due bootstrapping sessions without requiring a new inbound Telegram message", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 778,
+          project_slug: "todo-summary-tool",
+        },
+      },
+    });
+
+    const runCommand = vi.fn(async () => ({ stdout: "{\"ok\":true}", stderr: "", code: 0 }));
+    const ctxWithoutTelegramRuntime = {
+      ...ctx,
+      runtime: {
+        ...ctx.runtime,
+        channel: {},
+      },
+      runCommand,
+    } as any;
+
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: "telegram:6951571380",
+      rawIdea: "Build a simple Python CLI for todo summary",
+      projectName: "todo-summary-tool",
+      stackHint: "python-cli",
+      sourceRoute: { channel: "telegram", channelId: "6951571380" },
+      status: "bootstrapping",
+      attemptCount: 1,
+      lastError: "temporary bootstrap failure",
+      nextRetryAt: new Date(Date.now() - 1_000).toISOString(),
+      language: "en",
+    });
+
+    const recoveredCount = await recoverDueBootstraps(ctxWithoutTelegramRuntime, workspaceDir);
+
+    const session = await readTelegramBootstrapSession(workspaceDir, "telegram:6951571380");
+    expect(recoveredCount).toBe(1);
+    expect(session?.status).toBe("completed");
+    expect(runCommand).toHaveBeenCalledTimes(3);
+  });
+
+  it("falls back to CLI sending when the Telegram runtime sender exists but fails structurally", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 778,
+          project_slug: "todo-summary-tool",
+        },
+      },
+    });
+
+    sendMessageTelegram.mockRejectedValue(
+      new TypeError("Cannot read properties of undefined (reading 'sendMessageTelegram')"),
+    );
+
+    const runCommand = vi.fn(async () => ({ stdout: "{\"ok\":true}", stderr: "", code: 0 }));
+    const ctxWithBrokenTelegramRuntime = {
+      ...ctx,
+      runCommand,
+    } as any;
+
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: "telegram:6951571380",
+      rawIdea: "Build a simple Python CLI for todo summary",
+      projectName: "todo-summary-tool",
+      stackHint: "python-cli",
+      sourceRoute: { channel: "telegram", channelId: "6951571380" },
+      status: "bootstrapping",
+      attemptCount: 1,
+      lastError: "telegram runtime failed",
+      nextRetryAt: new Date(Date.now() - 1_000).toISOString(),
+      language: "en",
+    });
+
+    await resumeBootstrapping(ctxWithBrokenTelegramRuntime, workspaceDir, "telegram:6951571380");
+
+    const session = await readTelegramBootstrapSession(workspaceDir, "telegram:6951571380");
+    expect(session?.status).toBe("completed");
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(3);
+    expect(runCommand).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not let an older recovery resume overwrite a newer bootstrap attempt", async () => {
+    const sessionPath = path.join(workspaceDir, "fabrica", "bootstrap-sessions", "telegram:6951571380.json");
+    await fs.mkdir(path.dirname(sessionPath), { recursive: true });
+
+    const initialSession = await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: "telegram:6951571380",
+      rawIdea: "old idea",
+      projectName: "old-project",
+      stackHint: "python-cli",
+      sourceRoute: { channel: "telegram", channelId: "6951571380" },
+      status: "bootstrapping",
+      nextRetryAt: new Date(Date.now() - 1_000).toISOString(),
+      language: "en",
+    });
+
+    const seeded = JSON.parse(await fs.readFile(sessionPath, "utf-8"));
+    seeded.attemptId = "attempt-old";
+    seeded.updatedAt = new Date(Date.now() - 5_000).toISOString();
+    seeded.requestHash = buildBootstrapRequestHash({
+      rawIdea: initialSession.rawIdea,
+      projectName: initialSession.projectName,
+      stackHint: initialSession.stackHint,
+      repoUrl: initialSession.repoUrl,
+      repoPath: initialSession.repoPath,
+    });
+    seeded.requestFingerprint = seeded.requestHash;
+    await fs.writeFile(sessionPath, JSON.stringify(seeded, null, 2) + "\n", "utf-8");
+
+    let releaseAck!: () => void;
+    const ackGate = new Promise<void>((resolve) => {
+      releaseAck = resolve;
+    });
+
+    sendMessageTelegram.mockImplementationOnce(async () => {
+      await ackGate;
+    });
+
+    const recovered = recoverDueBootstraps(ctx, workspaceDir);
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 3000 });
+
+    const newerSession = JSON.parse(await fs.readFile(sessionPath, "utf-8"));
+    newerSession.attemptId = "attempt-new";
+    newerSession.rawIdea = "new idea";
+    newerSession.projectName = "new-project";
+    newerSession.updatedAt = new Date().toISOString();
+    newerSession.requestHash = buildBootstrapRequestHash({
+      rawIdea: newerSession.rawIdea,
+      projectName: newerSession.projectName,
+      stackHint: newerSession.stackHint,
+      repoUrl: newerSession.repoUrl,
+      repoPath: newerSession.repoPath,
+    });
+    newerSession.requestFingerprint = newerSession.requestHash;
+    await fs.writeFile(sessionPath, JSON.stringify(newerSession, null, 2) + "\n", "utf-8");
+
+    releaseAck();
+    await recovered;
+
+    const finalSession = await readTelegramBootstrapSession(workspaceDir, "telegram:6951571380");
+    expect(finalSession).not.toBeNull();
+    expect((finalSession as any)?.attemptId).toBe("attempt-new");
+    expect(finalSession?.rawIdea).toBe("new idea");
+    expect(finalSession?.projectName).toBe("new-project");
+  });
+
   it("takes a recovery lease before launching hook-driven bootstrap resume", async () => {
     const api = {
       on: vi.fn((name, fn) => {
@@ -663,7 +896,7 @@ describe("telegram bootstrap hook", () => {
       ),
     ]);
 
-    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2000 });
     expect(mockRunPipeline).not.toHaveBeenCalled();
 
     releaseAck?.();
@@ -778,6 +1011,75 @@ describe("telegram bootstrap hook", () => {
     expect(session?.ackSentAt).toBeNull();
     expect(session?.pendingClarification).toBeNull();
     expect(mockRunPipeline).not.toHaveBeenCalled();
+  });
+
+  it("persists bootstrapping state before the first acknowledgment send", async () => {
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+        if (name === "before_prompt_build") beforePromptBuildHandler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    registerTelegramBootstrapHook(api, ctx);
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 782,
+          project_slug: "todo-summary",
+        },
+      },
+    });
+
+    outerMockSubagentRun.mockResolvedValue({ runId: "classify-run-persist" });
+    outerMockSubagentWait.mockResolvedValue({ status: "ok" });
+    outerMockSubagentGetMessages.mockResolvedValue([
+      {
+        role: "assistant",
+        content: JSON.stringify({
+          intent: "create_project",
+          confidence: 0.95,
+          stackHint: "python-cli",
+          projectSlug: "todo-summary",
+          language: "en",
+        }),
+      },
+    ]);
+
+    let releaseAck!: () => void;
+    const ackGate = new Promise<void>((resolve) => {
+      releaseAck = resolve;
+    });
+
+    sendMessageTelegram.mockImplementationOnce(async () => {
+      await ackGate;
+    });
+
+    const run = handler?.(
+      {
+        content: "I need a CLI tool that converts numbers between bases",
+        metadata: {},
+      },
+      { channelId: "telegram", conversationId: "111222333" },
+    );
+
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 3000 });
+
+    try {
+      const session = await readTelegramBootstrapSession(workspaceDir, "111222333");
+      expect(session).not.toBeNull();
+      expect(session?.status).toBe("bootstrapping");
+      expect((session as any)?.attemptId).toBeDefined();
+    } finally {
+      releaseAck();
+      await run;
+      await vi.waitFor(async () => {
+        const session = await readTelegramBootstrapSession(workspaceDir, "111222333");
+        expect(session?.status).toBe("completed");
+      }, { timeout: 2000 });
+    }
   });
 
   it("persists bootstrapping before retrying ack on the clarification-resolved path", async () => {
@@ -907,6 +1209,16 @@ describe("telegram bootstrap hook", () => {
     registerTelegramBootstrapHook(api, ctx);
 
     const upsertSpy = vi.spyOn(telegramBootstrapSessionModule, "upsertTelegramBootstrapSession");
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 781,
+          project_slug: "todo-summary-tool",
+        },
+      },
+    });
 
     let releaseAck: (() => void) | undefined;
     sendMessageTelegram
@@ -944,6 +1256,10 @@ describe("telegram bootstrap hook", () => {
 
     releaseAck?.();
     await Promise.all([first, second]);
+    await vi.waitFor(async () => {
+      const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+      expect(session?.status).toBe("completed");
+    }, { timeout: 2000 });
     upsertSpy.mockRestore();
   });
 
@@ -2758,5 +3074,206 @@ describe("Layer 2 suppress race (Bug B)", () => {
 
     // Session must have existed with pending_classify status DURING the LLM call
     expect(callOrder).toContain("session_found_during_llm");
+  });
+});
+
+describe("telegram bootstrap regression coverage", () => {
+  let workspaceDir: string;
+  const sendMessageTelegram = vi.fn(async () => undefined);
+  const outerMockSubagentRun = vi.fn().mockResolvedValue({ runId: "outer-run" });
+  const outerMockSubagentWait = vi.fn().mockResolvedValue({ status: "ok" });
+  const outerMockSubagentGetMessages = vi.fn().mockResolvedValue([]);
+  const ctx = {
+    pluginConfig: {
+      telegram: {
+        bootstrapDmEnabled: true,
+        projectsForumChatId: "-1003709213169",
+      },
+    },
+    config: {
+      agents: {
+        defaults: {
+          workspace: "",
+        },
+      },
+    },
+    logger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+    },
+    runtime: {
+      channel: {
+        telegram: {
+          sendMessageTelegram,
+        },
+      },
+      subagent: {
+        run: outerMockSubagentRun,
+        waitForRun: outerMockSubagentWait,
+        getSessionMessages: outerMockSubagentGetMessages,
+      },
+    },
+    runCommand: vi.fn(async () => ({ stdout: "", stderr: "", code: 0 })),
+  } as any;
+
+  beforeEach(async () => {
+    resetActiveBootstrapResumes();
+    workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-telegram-bootstrap-regression-"));
+    sendMessageTelegram.mockClear();
+    sendMessageTelegram.mockResolvedValue(undefined);
+    outerMockSubagentRun.mockClear();
+    outerMockSubagentWait.mockClear();
+    outerMockSubagentGetMessages.mockClear();
+    outerMockSubagentRun.mockResolvedValue({ runId: "outer-run" });
+    outerMockSubagentWait.mockResolvedValue({ status: "ok" });
+    outerMockSubagentGetMessages.mockResolvedValue([]);
+    mockRunPipeline.mockReset();
+    mockReadProjects.mockReset();
+    mockProjectTick.mockReset();
+    mockDiscoverAgents.mockReset();
+    mockReadProjects.mockResolvedValue({ projects: {} });
+    mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: workspaceDir }]);
+    mockProjectTick.mockResolvedValue({ pickups: [], skipped: [] });
+    ctx.config.agents.defaults.workspace = workspaceDir;
+    ctx.runCommand.mockClear();
+    ctx.runCommand.mockResolvedValue({ stdout: "", stderr: "", code: 0 });
+  });
+
+  afterEach(async () => {
+    resetActiveBootstrapResumes();
+    await fs.rm(workspaceDir, { recursive: true, force: true });
+  });
+
+  it("keeps a successfully classified bootstrapping session on disk even if an older classifier later falls back", async () => {
+    let handler: ((event: any, eventCtx: any) => Promise<void>) | undefined;
+    let resolveFirstWait!: (value: { status: "ok" }) => void;
+    let releaseAck!: () => void;
+    const firstWait = new Promise<{ status: "ok" }>((resolve) => {
+      resolveFirstWait = resolve;
+    });
+    const ackBlocked = new Promise<void>((resolve) => {
+      releaseAck = resolve;
+    });
+
+    outerMockSubagentRun
+      .mockResolvedValueOnce({ runId: "classify-a" })
+      .mockResolvedValueOnce({ runId: "classify-b" });
+    outerMockSubagentWait
+      .mockImplementationOnce(() => firstWait)
+      .mockResolvedValueOnce({ status: "ok" });
+    outerMockSubagentGetMessages
+      .mockResolvedValueOnce([
+        { role: "assistant", content: JSON.stringify({
+          intent: "create_project",
+          confidence: 0.97,
+          stackHint: null,
+          projectSlug: "fresh-project",
+          language: "en",
+        }) },
+      ])
+      .mockResolvedValueOnce([
+        { role: "assistant", content: JSON.stringify({
+          intent: "other",
+          confidence: 0.99,
+          stackHint: null,
+          projectSlug: null,
+          language: "en",
+        }) },
+      ]);
+    sendMessageTelegram.mockImplementationOnce(async () => ackBlocked);
+
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    try {
+      await handler?.(
+        { content: "Simple todo summary tool for my notes", metadata: {} },
+        { channelId: "telegram", conversationId: "6951571380" },
+      );
+
+      await vi.waitFor(() => expect(outerMockSubagentWait).toHaveBeenCalledTimes(1), { timeout: 2000 });
+
+      const sessionFile = path.join(workspaceDir, "fabrica", "bootstrap-sessions", "6951571380.json");
+      const staleSession = JSON.parse(await fs.readFile(sessionFile, "utf-8")) as Record<string, unknown>;
+      staleSession.suppressUntil = new Date(Date.now() - 60_000).toISOString();
+      await fs.writeFile(sessionFile, JSON.stringify(staleSession, null, 2) + "\n", "utf-8");
+
+      await handler?.(
+        { content: "Simple todo summary tool for my notes", metadata: {} },
+        { channelId: "telegram", conversationId: "6951571380" },
+      );
+
+      await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2000 });
+
+      const bootstrappingSession = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+      expect(bootstrappingSession?.status).toBe("bootstrapping");
+      expect(bootstrappingSession?.projectSlug).toBe("fresh-project");
+
+      resolveFirstWait({ status: "ok" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const persistedSession = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+      expect(persistedSession?.status).toBe("bootstrapping");
+      expect(persistedSession?.projectSlug).toBe("fresh-project");
+    } finally {
+      resolveFirstWait?.({ status: "ok" });
+      releaseAck?.();
+      await vi.waitFor(() => expect(sendMessageTelegram.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 2000 });
+    }
+  });
+
+  it("does not let a stale recovery lease overwrite a newer completed bootstrap attempt", async () => {
+    const conversationId = "telegram:6951571380";
+
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId,
+      rawIdea: "Build an older Python CLI for summaries",
+      projectName: "old-summary-cli",
+      stackHint: "python-cli",
+      sourceRoute: { channel: "telegram", channelId: "6951571380" },
+      status: "bootstrapping",
+      attemptCount: 1,
+      nextRetryAt: new Date(Date.now() - 1_000).toISOString(),
+      language: "en",
+    });
+
+    sendMessageTelegram.mockImplementationOnce(async () => {
+      await upsertTelegramBootstrapSession(workspaceDir, {
+        conversationId,
+        rawIdea: "Build the newer summary service",
+        projectName: "new-summary-service",
+        stackHint: "python-cli",
+        projectSlug: "new-summary-service",
+        sourceRoute: { channel: "telegram", channelId: "6951571380" },
+        projectRoute: {
+          channel: "telegram",
+          channelId: "-1003709213169",
+          messageThreadId: 778,
+        },
+        projectChannelId: "-1003709213169",
+        messageThreadId: 778,
+        status: "completed",
+        ackSentAt: "2026-04-01T12:00:01.000Z",
+        projectRegisteredAt: "2026-04-01T12:00:02.000Z",
+        topicKickoffSentAt: "2026-04-01T12:00:03.000Z",
+        projectTickedAt: "2026-04-01T12:00:04.000Z",
+        completionAckSentAt: "2026-04-01T12:00:05.000Z",
+        language: "en",
+      });
+      throw new Error("stale recovery send failed");
+    });
+
+    await recoverDueBootstraps(ctx, workspaceDir);
+
+    const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
+    expect(session?.status).toBe("completed");
+    expect(session?.projectSlug).toBe("new-summary-service");
+    expect(session?.lastError).toBeNull();
+    expect(session?.nextRetryAt).toBeNull();
   });
 });
