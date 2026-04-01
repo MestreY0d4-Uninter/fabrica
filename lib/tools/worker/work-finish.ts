@@ -375,7 +375,7 @@ export function createWorkFinishTool(ctx: PluginContext) {
           reason: "already_completed",
           sessionKey: toolCtx.sessionKey ?? null,
           currentDispatchRunId,
-          completedAt: issueRuntime.sessionCompletedAt,
+          completedAt: issueRuntime?.sessionCompletedAt ?? null,
         });
         return jsonResult({
           success: false,
