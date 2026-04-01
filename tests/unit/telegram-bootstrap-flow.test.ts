@@ -12,7 +12,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { registerTelegramBootstrapHook, _testContinueBootstrap } from "../../lib/dispatch/telegram-bootstrap-hook.js";
+import { registerTelegramBootstrapHook, _testContinueBootstrap, _testResumeBootstrapping as resumeBootstrapping } from "../../lib/dispatch/telegram-bootstrap-hook.js";
 
 const {
   mockRunPipeline,
@@ -88,6 +88,7 @@ describe("telegram bootstrap clarification flow", () => {
     mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: workspaceDir }]);
     mockProjectTick.mockResolvedValue({ pickups: [], skipped: [] });
     ctx.config.agents.defaults.workspace = workspaceDir;
+    delete ctx.runtime.subagent;
     // Clean up session files from prior tests
     await fs.rm(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true, force: true });
 
@@ -549,6 +550,294 @@ describe("telegram bootstrap clarification flow", () => {
     const pipelinePayload = mockRunPipeline.mock.calls[0]?.[0];
     expect(pipelinePayload.metadata.project_name).toBeTruthy();
     expect(String(pipelinePayload.metadata.project_name)).toMatch(/^project-\d+$/);
+  });
+
+  it("does not send duplicate bootstrap acks after a resumed handoff", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 831,
+          project_slug: "todo-summary-tool",
+        },
+      },
+    });
+
+    ctx.runtime.subagent = {
+      run: vi.fn().mockResolvedValue({ runId: "classify-run" }),
+      waitForRun: vi.fn().mockResolvedValue({ status: "ok" }),
+      getSessionMessages: vi.fn().mockResolvedValue([
+        { role: "assistant", content: JSON.stringify({
+          intent: "create_project",
+          confidence: 0.95,
+          stackHint: "python-cli",
+          projectSlug: "todo-summary-tool",
+          language: "en",
+        }) },
+      ]),
+    };
+
+    sendMessageTelegram
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("temporary send failure"))
+      .mockResolvedValue(undefined);
+
+    await handler?.(
+      { content: "Build a simple Python CLI for todo summary", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
+
+    await resumeBootstrapping(ctx, workspaceDir, CONVERSATION_ID);
+
+    const ackCalls = sendMessageTelegram.mock.calls.filter(
+      ([target, message]) =>
+        target === CONVERSATION_ID &&
+        String(message).includes("Got it! I'll analyze your request and start setting up the project..."),
+    );
+
+    expect(ackCalls).toHaveLength(1);
+  });
+
+  it("uses the same single-flight launch path for LLM-started bootstraps", async () => {
+    ctx.runtime.subagent = {
+      run: vi.fn().mockResolvedValue({ runId: "classify-run" }),
+      waitForRun: vi.fn().mockResolvedValue({ status: "ok" }),
+      getSessionMessages: vi.fn().mockResolvedValue([
+        { role: "assistant", content: JSON.stringify({
+          intent: "create_project",
+          confidence: 0.95,
+          stackHint: "python-cli",
+          projectSlug: "todo-summary-tool",
+          language: "en",
+        }) },
+      ]),
+    };
+
+    let releaseAck: (() => void) | undefined;
+    sendMessageTelegram
+      .mockImplementationOnce(() => new Promise<void>((resolve) => {
+        releaseAck = resolve;
+      }))
+      .mockResolvedValue(undefined);
+
+    const content = "Build me a Python CLI that validates CPF numbers";
+
+    await handler?.(
+      { content, metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    await vi.waitFor(async () => {
+      const sessionRaw = await fs.readFile(
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        "utf-8",
+      );
+      const session = JSON.parse(sessionRaw);
+      expect(session.status).toBe("bootstrapping");
+    }, { timeout: 2000 });
+
+    await handler?.(
+      { content, metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+
+    releaseAck?.();
+
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
+  });
+
+  it("resumes from projectRegisteredAt without rerunning registration", async () => {
+    await fs.mkdir(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+      JSON.stringify({
+        id: "tgdm-checkpointed",
+        conversationId: CONVERSATION_ID,
+        sourceChannel: "telegram",
+        sourceRoute: { channel: "telegram", channelId: CONVERSATION_ID },
+        projectRoute: {
+          channel: "telegram",
+          channelId: "-1003709213169",
+          messageThreadId: 932,
+        },
+        requestHash: "req-hash",
+        requestFingerprint: "req-hash",
+        rawIdea: "Build a simple Python CLI for todo summary",
+        projectName: "todo-summary-tool",
+        stackHint: "python-cli",
+        projectSlug: "todo-summary-tool",
+        messageThreadId: 932,
+        projectChannelId: "-1003709213169",
+        status: "dispatching",
+        ackSentAt: "2026-04-01T00:00:01.000Z",
+        projectRegisteredAt: "2026-04-01T00:00:02.000Z",
+        lastError: "temporary send failure",
+        nextRetryAt: "2026-04-01T00:00:03.000Z",
+        language: "en",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:02.000Z",
+        suppressUntil: new Date(Date.now() + 60_000).toISOString(),
+      }, null, 2) + "\n",
+      "utf-8",
+    );
+
+    await resumeBootstrapping(ctx, workspaceDir, CONVERSATION_ID);
+
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    expect(mockProjectTick).toHaveBeenCalledTimes(1);
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
+    expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("-1003709213169");
+    expect(sendMessageTelegram.mock.calls[1]?.[0]).toBe(CONVERSATION_ID);
+
+    const persisted = JSON.parse(
+      await fs.readFile(
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        "utf-8",
+      ),
+    );
+    expect(persisted.status).toBe("completed");
+    expect(persisted.lastError).toBeNull();
+    expect(persisted.nextRetryAt).toBeNull();
+  });
+
+  it("does not replay kickoff or projectTick after a later dispatch failure", async () => {
+    await fs.mkdir(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+      JSON.stringify({
+        id: "tgdm-dispatch-retry",
+        conversationId: CONVERSATION_ID,
+        sourceChannel: "telegram",
+        sourceRoute: { channel: "telegram", channelId: CONVERSATION_ID },
+        projectRoute: {
+          channel: "telegram",
+          channelId: "-1003709213169",
+          messageThreadId: 944,
+        },
+        requestHash: "req-hash",
+        requestFingerprint: "req-hash",
+        rawIdea: "Build a simple Python CLI for todo summary",
+        projectName: "todo-summary-tool",
+        stackHint: "python-cli",
+        projectSlug: "todo-summary-tool",
+        messageThreadId: 944,
+        projectChannelId: "-1003709213169",
+        status: "dispatching",
+        ackSentAt: "2026-04-01T00:00:01.000Z",
+        projectRegisteredAt: "2026-04-01T00:00:02.000Z",
+        topicKickoffSentAt: "2026-04-01T00:00:03.000Z",
+        projectTickedAt: "2026-04-01T00:00:04.000Z",
+        lastError: "dm ack failed",
+        nextRetryAt: "2026-04-01T00:00:05.000Z",
+        language: "en",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:05.000Z",
+        suppressUntil: new Date(Date.now() + 60_000).toISOString(),
+      }, null, 2) + "\n",
+      "utf-8",
+    );
+
+    sendMessageTelegram
+      .mockRejectedValueOnce(new Error("dm ack failed"))
+      .mockResolvedValue(undefined);
+
+    await resumeBootstrapping(ctx, workspaceDir, CONVERSATION_ID);
+    await resumeBootstrapping(ctx, workspaceDir, CONVERSATION_ID);
+
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    expect(mockProjectTick).not.toHaveBeenCalled();
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
+    expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe(CONVERSATION_ID);
+    expect(sendMessageTelegram.mock.calls[1]?.[0]).toBe(CONVERSATION_ID);
+    expect(sendMessageTelegram.mock.calls.some(([target]) => target === "-1003709213169")).toBe(false);
+
+    const persisted = JSON.parse(
+      await fs.readFile(
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        "utf-8",
+      ),
+    );
+    expect(persisted.status).toBe("completed");
+    expect(persisted.lastError).toBeNull();
+    expect(persisted.nextRetryAt).toBeNull();
+  });
+
+  it("keeps projectTick retryable when pickup fails during dispatch recovery", async () => {
+    await fs.mkdir(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+      JSON.stringify({
+        id: "tgdm-projecttick-retry",
+        conversationId: CONVERSATION_ID,
+        sourceChannel: "telegram",
+        sourceRoute: { channel: "telegram", channelId: CONVERSATION_ID },
+        projectRoute: {
+          channel: "telegram",
+          channelId: "-1003709213169",
+          messageThreadId: 945,
+        },
+        requestHash: "req-hash",
+        requestFingerprint: "req-hash",
+        rawIdea: "Build a simple Python CLI for todo summary",
+        projectName: "todo-summary-tool",
+        stackHint: "python-cli",
+        projectSlug: "todo-summary-tool",
+        messageThreadId: 945,
+        projectChannelId: "-1003709213169",
+        status: "dispatching",
+        ackSentAt: "2026-04-01T00:00:01.000Z",
+        projectRegisteredAt: "2026-04-01T00:00:02.000Z",
+        topicKickoffSentAt: "2026-04-01T00:00:03.000Z",
+        lastError: "temporary send failure",
+        nextRetryAt: "2026-04-01T00:00:05.000Z",
+        language: "en",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:05.000Z",
+        suppressUntil: new Date(Date.now() + 60_000).toISOString(),
+      }, null, 2) + "\n",
+      "utf-8",
+    );
+
+    mockProjectTick
+      .mockRejectedValueOnce(new Error("pickup failed"))
+      .mockResolvedValueOnce({ pickups: [], skipped: [] });
+
+    await resumeBootstrapping(ctx, workspaceDir, CONVERSATION_ID);
+
+    let persisted = JSON.parse(
+      await fs.readFile(
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        "utf-8",
+      ),
+    );
+    expect(mockProjectTick).toHaveBeenCalledTimes(1);
+    expect(sendMessageTelegram).not.toHaveBeenCalled();
+    expect(persisted.status).toBe("dispatching");
+    expect(persisted.projectTickedAt).toBeNull();
+    expect(persisted.completionAckSentAt).toBeNull();
+    expect(persisted.lastError).toContain("pickup failed");
+    expect(persisted.nextRetryAt).toBeTruthy();
+
+    await resumeBootstrapping(ctx, workspaceDir, CONVERSATION_ID);
+
+    persisted = JSON.parse(
+      await fs.readFile(
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        "utf-8",
+      ),
+    );
+    expect(mockProjectTick).toHaveBeenCalledTimes(2);
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe(CONVERSATION_ID);
+    expect(persisted.status).toBe("completed");
+    expect(persisted.projectTickedAt).toBeTruthy();
+    expect(persisted.completionAckSentAt).toBeTruthy();
   });
 
   it("treats metadata.project_registered as the single registration truth on pipeline failure", async () => {

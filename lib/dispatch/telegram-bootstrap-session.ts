@@ -8,6 +8,7 @@ export type TelegramBootstrapStatus =
   | "pending_classify"  // session created, LLM classification not yet started
   | "received"
   | "classifying"       // LLM classification in progress
+  | "bootstrapping"
   | "clarifying"
   | "provisioning_repo"
   | "creating_topic"
@@ -44,6 +45,14 @@ export type TelegramBootstrapSession = {
   messageThreadId?: number | null;
   projectChannelId?: string | null;
   status: TelegramBootstrapStatus;
+  attemptCount?: number | null;
+  lastError?: string | null;
+  nextRetryAt?: string | null;
+  ackSentAt?: string | null;
+  projectRegisteredAt?: string | null;
+  topicKickoffSentAt?: string | null;
+  projectTickedAt?: string | null;
+  completionAckSentAt?: string | null;
   pendingClarification?: "stack" | "stack_and_name" | "name" | null;
   orphanedArtifacts?: PipelineArtifact[] | null;
   createdAt: string;
@@ -108,6 +117,14 @@ function nextSuppressUntil(status?: TelegramBootstrapStatus): string {
   return new Date(Date.now() + ttl).toISOString();
 }
 
+function resolveNullableField<T>(
+  inputValue: T | null | undefined,
+  existingValue: T | null | undefined,
+  fallback: T | null = null,
+): T | null {
+  return inputValue !== undefined ? inputValue : existingValue ?? fallback;
+}
+
 export async function readTelegramBootstrapSession(
   workspaceDir: string,
   conversationId: string,
@@ -169,23 +186,54 @@ export async function upsertTelegramBootstrapSession(
     messageThreadId?: number | null;
     projectChannelId?: string | null;
     language?: "pt" | "en";
+    attemptCount?: number | null;
+    lastError?: string | null;
+    nextRetryAt?: string | null;
+    ackSentAt?: string | null;
+    projectRegisteredAt?: string | null;
+    topicKickoffSentAt?: string | null;
+    projectTickedAt?: string | null;
+    completionAckSentAt?: string | null;
   },
 ): Promise<TelegramBootstrapSession> {
   const existing = await readTelegramBootstrapSession(workspaceDir, input.conversationId);
+  const resolvedSourceRoute = resolveNullableField(input.sourceRoute, existing?.sourceRoute);
+  const resolvedProjectRoute = resolveNullableField(input.projectRoute, existing?.projectRoute);
+  const resolvedProjectName = resolveNullableField(input.projectName, existing?.projectName);
+  const resolvedStackHint = resolveNullableField(input.stackHint, existing?.stackHint);
+  const resolvedRepoUrl = resolveNullableField(input.repoUrl, existing?.repoUrl);
+  const resolvedRepoPath = resolveNullableField(input.repoPath, existing?.repoPath);
+  const resolvedProjectSlug = resolveNullableField(input.projectSlug, existing?.projectSlug);
+  const resolvedIssueId = resolveNullableField(input.issueId, existing?.issueId);
+  const resolvedMessageThreadId = resolveNullableField(input.messageThreadId, existing?.messageThreadId);
+  const resolvedProjectChannelId = resolveNullableField(input.projectChannelId, existing?.projectChannelId);
+  const resolvedAttemptCount = resolveNullableField(input.attemptCount, existing?.attemptCount, 0);
+  const resolvedNextRetryAt = resolveNullableField(input.nextRetryAt, existing?.nextRetryAt);
+  const resolvedAckSentAt = resolveNullableField(input.ackSentAt, existing?.ackSentAt);
+  const resolvedProjectRegisteredAt = resolveNullableField(input.projectRegisteredAt, existing?.projectRegisteredAt);
+  const resolvedTopicKickoffSentAt = resolveNullableField(input.topicKickoffSentAt, existing?.topicKickoffSentAt);
+  const resolvedProjectTickedAt = resolveNullableField(input.projectTickedAt, existing?.projectTickedAt);
+  const resolvedCompletionAckSentAt = resolveNullableField(input.completionAckSentAt, existing?.completionAckSentAt);
+  const resolvedError =
+    input.error !== undefined
+      ? input.error
+      : input.lastError !== undefined
+        ? input.lastError
+        : existing?.error ?? existing?.lastError ?? null;
   const requestHash = buildBootstrapRequestHash({
     rawIdea: input.rawIdea,
-    projectName: input.projectName,
-    stackHint: input.stackHint,
-    repoUrl: input.repoUrl,
-    repoPath: input.repoPath,
+    projectName: resolvedProjectName,
+    stackHint: resolvedStackHint,
+    repoUrl: resolvedRepoUrl,
+    repoPath: resolvedRepoPath,
   });
   const now = new Date().toISOString();
   const session: TelegramBootstrapSession = {
     id: existing?.id ?? buildBootstrapSessionId(input.conversationId, input.rawIdea),
     conversationId: input.conversationId,
     sourceChannel: input.sourceChannel ?? input.sourceRoute?.channel ?? existing?.sourceChannel ?? "telegram",
-    sourceRoute: input.sourceRoute ?? existing?.sourceRoute ?? null,
-    projectRoute: input.projectRoute ?? existing?.projectRoute ?? null,
+    sourceRoute: resolvedSourceRoute,
+    projectRoute: resolvedProjectRoute,
     requestHash,
     requestFingerprint: requestHash,
     lastCompletedRequestHash:
@@ -193,16 +241,24 @@ export async function upsertTelegramBootstrapSession(
         ? requestHash
         : existing?.lastCompletedRequestHash ?? null,
     rawIdea: input.rawIdea,
-    projectName: input.projectName ?? existing?.projectName ?? null,
-    stackHint: input.stackHint ?? existing?.stackHint ?? null,
-    repoUrl: input.repoUrl ?? existing?.repoUrl ?? null,
-    repoPath: input.repoPath ?? existing?.repoPath ?? null,
-    projectSlug: input.projectSlug ?? existing?.projectSlug ?? null,
-    issueId: input.issueId ?? existing?.issueId ?? null,
-    messageThreadId: input.messageThreadId ?? existing?.messageThreadId ?? null,
-    projectChannelId: input.projectChannelId ?? existing?.projectChannelId ?? null,
+    projectName: resolvedProjectName,
+    stackHint: resolvedStackHint,
+    repoUrl: resolvedRepoUrl,
+    repoPath: resolvedRepoPath,
+    projectSlug: resolvedProjectSlug,
+    issueId: resolvedIssueId,
+    messageThreadId: resolvedMessageThreadId,
+    projectChannelId: resolvedProjectChannelId,
     language: input.language ?? existing?.language,
     status: input.status,
+    attemptCount: resolvedAttemptCount,
+    lastError: resolvedError,
+    nextRetryAt: resolvedNextRetryAt,
+    ackSentAt: resolvedAckSentAt,
+    projectRegisteredAt: resolvedProjectRegisteredAt,
+    topicKickoffSentAt: resolvedTopicKickoffSentAt,
+    projectTickedAt: resolvedProjectTickedAt,
+    completionAckSentAt: resolvedCompletionAckSentAt,
     pendingClarification: input.pendingClarification !== undefined
       ? input.pendingClarification
       : existing?.pendingClarification ?? null,
@@ -212,7 +268,7 @@ export async function upsertTelegramBootstrapSession(
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     suppressUntil: nextSuppressUntil(input.status),
-    error: input.error ?? null,
+    error: resolvedError,
   };
   await writeTelegramBootstrapSession(workspaceDir, session);
   return session;
