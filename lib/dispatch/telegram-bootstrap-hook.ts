@@ -403,6 +403,16 @@ function buildProjectRoute(session: TelegramBootstrapSession): TelegramBootstrap
   };
 }
 
+function isRecoverableBootstrapSession(session: TelegramBootstrapSession | null | undefined): session is TelegramBootstrapSession {
+  return session?.status === "bootstrapping" || session?.status === "dispatching";
+}
+
+function shouldResumeBootstrapNow(session: TelegramBootstrapSession): boolean {
+  if (!session.nextRetryAt) return true;
+  const retryAt = Date.parse(session.nextRetryAt);
+  return Number.isNaN(retryAt) || retryAt <= Date.now();
+}
+
 async function enterBootstrapping(
   workspaceDir: string,
   conversationId: string,
@@ -556,6 +566,8 @@ async function completeRegisteredBootstrap(
     projectRoute,
     projectChannelId,
     messageThreadId,
+    lastError: null,
+    nextRetryAt: null,
     projectRegisteredAt: session.projectRegisteredAt,
     language: session.language,
   });
@@ -582,7 +594,7 @@ async function resumeBootstrapping(
   conversationId: string,
 ): Promise<TelegramBootstrapSession | null> {
   const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
-  if (!session || session.status !== "bootstrapping") return session;
+  if (!isRecoverableBootstrapSession(session)) return session;
   return resumeBootstrappingSession(ctx, workspaceDir, session);
 }
 
@@ -1085,6 +1097,14 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
 
     // Layer 1: Active clarifying OR classifying session?
     const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
+    if (isRecoverableBootstrapSession(existingSession)) {
+      if (shouldResumeBootstrapNow(existingSession)) {
+        void resumeBootstrappingSession(ctx, workspaceDir, existingSession);
+      } else {
+        ctx.logger.info(`[telegram-bootstrap] recovery deferred until ${existingSession.nextRetryAt} for ${conversationId}`);
+      }
+      return;
+    }
     // If the clarifying session has expired, treat any new bootstrap candidate as a fresh request
     const sessionIsExpired = existingSession != null && Date.parse(existingSession.suppressUntil) < Date.now();
     if (existingSession && !sessionIsExpired && (existingSession.status === "classifying" || existingSession.status === "pending_classify")) {

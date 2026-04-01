@@ -537,6 +537,57 @@ describe("telegram bootstrap hook", () => {
     expect(session?.nextRetryAt).toBeNull();
   });
 
+  it("resumes an existing dispatching bootstrap session instead of starting a new classification cycle", async () => {
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: "6951571380",
+      rawIdea: "Build a simple Python CLI for todo summary",
+      projectName: "todo-summary-tool",
+      stackHint: "python-cli",
+      sourceRoute: { channel: "telegram", channelId: "6951571380" },
+      projectRoute: {
+        channel: "telegram",
+        channelId: "-1003709213169",
+        messageThreadId: 932,
+      },
+      projectSlug: "todo-summary-tool",
+      status: "dispatching",
+      ackSentAt: "2026-04-01T00:00:01.000Z",
+      projectRegisteredAt: "2026-04-01T00:00:02.000Z",
+      lastError: "temporary send failure",
+      nextRetryAt: new Date(Date.now() - 1_000).toISOString(),
+      projectChannelId: "-1003709213169",
+      messageThreadId: 932,
+      language: "en",
+    });
+
+    await handler?.(
+      {
+        content: "Build a simple Python CLI for todo summary",
+        metadata: {},
+      },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
+
+    expect(outerMockSubagentRun).not.toHaveBeenCalled();
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    expect(mockProjectTick).toHaveBeenCalledTimes(1);
+
+    const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+    expect(session?.status).toBe("completed");
+    expect(session?.lastError).toBeNull();
+    expect(session?.nextRetryAt).toBeNull();
+  });
+
   it("fails closed when pipeline succeeds without topic routing", async () => {
     const api = {
       on: vi.fn((name, fn) => {

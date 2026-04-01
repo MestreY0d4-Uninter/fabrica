@@ -623,9 +623,11 @@ describe("telegram bootstrap clarification flow", () => {
         projectSlug: "todo-summary-tool",
         messageThreadId: 932,
         projectChannelId: "-1003709213169",
-        status: "bootstrapping",
+        status: "dispatching",
         ackSentAt: "2026-04-01T00:00:01.000Z",
         projectRegisteredAt: "2026-04-01T00:00:02.000Z",
+        lastError: "temporary send failure",
+        nextRetryAt: "2026-04-01T00:00:03.000Z",
         language: "en",
         createdAt: "2026-04-01T00:00:00.000Z",
         updatedAt: "2026-04-01T00:00:02.000Z",
@@ -641,6 +643,16 @@ describe("telegram bootstrap clarification flow", () => {
     expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
     expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("-1003709213169");
     expect(sendMessageTelegram.mock.calls[1]?.[0]).toBe(CONVERSATION_ID);
+
+    const persisted = JSON.parse(
+      await fs.readFile(
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        "utf-8",
+      ),
+    );
+    expect(persisted.status).toBe("completed");
+    expect(persisted.lastError).toBeNull();
+    expect(persisted.nextRetryAt).toBeNull();
   });
 
   it("treats metadata.project_registered as the single registration truth on pipeline failure", async () => {
