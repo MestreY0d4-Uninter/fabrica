@@ -91,13 +91,25 @@ Call \`workflow_guide\` for the full config reference.
   }
 }
 
+function getProjectDir(workspaceDir: string, projectName: string): string {
+  return path.join(workspaceDir, DATA_DIR, "projects", projectName);
+}
+
+function getProjectWorkflowPath(workspaceDir: string, projectName: string): string {
+  return path.join(getProjectDir(workspaceDir, projectName), "workflow.yaml");
+}
+
+function getProjectReadmePath(workspaceDir: string, projectName: string): string {
+  return path.join(getProjectDir(workspaceDir, projectName), "README.md");
+}
+
 async function ensureAutonomousWorkflowOverride(
   workspaceDir: string,
   projectName: string,
   reviewPolicy = "agent",
 ): Promise<boolean> {
-  const projectDir = path.join(workspaceDir, DATA_DIR, "projects", projectName);
-  const workflowPath = path.join(projectDir, "workflow.yaml");
+  const projectDir = getProjectDir(workspaceDir, projectName);
+  const workflowPath = getProjectWorkflowPath(workspaceDir, projectName);
   await fs.mkdir(projectDir, { recursive: true });
 
   try {
@@ -113,13 +125,73 @@ async function hasProjectWorkflowOverride(
   workspaceDir: string,
   projectName: string,
 ): Promise<boolean> {
-  const workflowPath = path.join(workspaceDir, DATA_DIR, "projects", projectName, "workflow.yaml");
+  const workflowPath = getProjectWorkflowPath(workspaceDir, projectName);
   try {
     await fs.access(workflowPath);
     return true;
   } catch {
     return false;
   }
+}
+
+async function pruneEmptyProjectDirs(workspaceDir: string, projectName: string): Promise<void> {
+  const stopDir = path.join(workspaceDir, DATA_DIR, "projects");
+  const candidateDirs = [
+    path.join(getProjectDir(workspaceDir, projectName), "prompts"),
+    getProjectDir(workspaceDir, projectName),
+  ];
+
+  for (const dir of candidateDirs) {
+    if (!dir.startsWith(stopDir)) continue;
+    try {
+      await fs.rmdir(dir);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTEMPTY") {
+        throw error;
+      }
+    }
+  }
+}
+
+async function cleanupLocalRegisterResidue(
+  workspaceDir: string,
+  projectName: string,
+  opts: { removeWorkflowOverride: boolean; removePromptReadme: boolean },
+): Promise<void> {
+  if (opts.removeWorkflowOverride) {
+    await fs.rm(getProjectWorkflowPath(workspaceDir, projectName), { force: true });
+  }
+  if (opts.removePromptReadme) {
+    await fs.rm(getProjectReadmePath(workspaceDir, projectName), { force: true });
+  }
+  await pruneEmptyProjectDirs(workspaceDir, projectName);
+}
+
+function cloneProjectData<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function applyAutonomousReviewPolicy<T extends { workflow: { reviewPolicy: string } }>(
+  config: T,
+  reviewPolicy: string,
+): T {
+  return {
+    ...config,
+    workflow: {
+      ...config.workflow,
+      reviewPolicy,
+    },
+  };
+}
+
+function appendCleanupContext(error: unknown, details: string[]): Error {
+  const err = error instanceof Error ? error : new Error(String(error));
+  if (details.length === 0) {
+    return err;
+  }
+  err.message = `${err.message} (cleanup: ${details.join("; ")})`;
+  return err;
 }
 
 function normalizeRepoIdentity(value?: string | null): string | null {
@@ -211,6 +283,7 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
   } = params;
 
   const slug = name.toLowerCase().replace(/\s+/g, "-");
+  const expectedReviewPolicy = projectWorkflowConfig?.workflow?.reviewPolicy ?? "agent";
   const initialRoute = buildRouteRef({
     channel: route.channel ?? (channel as RouteRef["channel"]),
     channelId: route.channelId,
@@ -218,9 +291,15 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
     accountId: route.accountId,
   });
   let createdArtifacts: PipelineArtifact[] = [];
+  let projectsPersisted = false;
+  let registrationCompleted = false;
+  let workflowOverrideCreated = false;
+  let promptsCreated = false;
+  let originalData: Awaited<ReturnType<typeof readProjects>> | null = null;
   await acquireLock(workspaceDir);
   try {
     const data = await readProjects(workspaceDir);
+    originalData = cloneProjectData(data);
     const existing = data.projects[slug];
     const autonomousProject = createProjectTopic;
     let targetRoute = initialRoute;
@@ -284,25 +363,10 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
 
     await provider.ensureAllStateLabels();
 
-    const workflowOverrideCreated = autonomousProject
-      ? await ensureAutonomousWorkflowOverride(
-        workspaceDir,
-        slug,
-        projectWorkflowConfig?.workflow?.reviewPolicy ?? "agent",
-      )
-      : false;
-    const hasWorkflowOverride = autonomousProject
-      ? await hasProjectWorkflowOverride(workspaceDir, slug)
-      : false;
-    const resolvedConfig = await loadConfig(workspaceDir, slug);
-    if (autonomousProject && !hasWorkflowOverride) {
-      throw new Error(`Autonomous DM bootstrap requires a materialized workflow override for "${slug}"`);
-    }
-    if (autonomousProject && resolvedConfig.workflow.reviewPolicy !== (projectWorkflowConfig?.workflow?.reviewPolicy ?? "agent")) {
-      throw new Error(
-        `Autonomous DM bootstrap resolved reviewPolicy="${resolvedConfig.workflow.reviewPolicy}" for "${slug}", expected "${projectWorkflowConfig?.workflow?.reviewPolicy ?? "agent"}"`,
-      );
-    }
+    const resolvedConfigBase = await loadConfig(workspaceDir, slug);
+    const resolvedConfig = autonomousProject
+      ? applyAutonomousReviewPolicy(resolvedConfigBase, expectedReviewPolicy)
+      : resolvedConfigBase;
     const roleLabels = getRoleLabels(resolvedConfig.roles);
     for (const { name: labelName, color } of roleLabels) {
       await provider.ensureLabel(labelName, color);
@@ -389,7 +453,27 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
     }
 
     await writeProjects(workspaceDir, data);
-    const promptsCreated = await scaffoldPromptFiles(workspaceDir, slug);
+    projectsPersisted = true;
+
+    if (autonomousProject) {
+      workflowOverrideCreated = await ensureAutonomousWorkflowOverride(
+        workspaceDir,
+        slug,
+        expectedReviewPolicy,
+      );
+      const hasWorkflowOverride = await hasProjectWorkflowOverride(workspaceDir, slug);
+      const persistedConfig = await loadConfig(workspaceDir, slug);
+      if (!hasWorkflowOverride) {
+        throw new Error(`Autonomous DM bootstrap requires a materialized workflow override for "${slug}"`);
+      }
+      if (persistedConfig.workflow.reviewPolicy !== expectedReviewPolicy) {
+        throw new Error(
+          `Autonomous DM bootstrap resolved reviewPolicy="${persistedConfig.workflow.reviewPolicy}" for "${slug}", expected "${expectedReviewPolicy}"`,
+        );
+      }
+    }
+
+    promptsCreated = await scaffoldPromptFiles(workspaceDir, slug);
 
     await auditLog(workspaceDir, "project_register", {
       project: name,
@@ -408,6 +492,7 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
 
     const action = existing ? "Channel added to existing project" : `Project "${name}" created`;
     const promptsNote = promptsCreated ? " Prompt files scaffolded." : "";
+    registrationCompleted = true;
     return {
       success: true,
       project: name,
@@ -432,10 +517,28 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
       announcement: `${action}. Labels ensured.${promptsNote} Ready for tasks.`,
     };
   } catch (err) {
-    if (createdArtifacts.length > 0) {
-      throw attachArtifactsToError(err, createdArtifacts);
+    let failure = err;
+    if (projectsPersisted && !registrationCompleted && originalData) {
+      const cleanupDetails: string[] = [];
+      try {
+        await writeProjects(workspaceDir, cloneProjectData(originalData));
+      } catch (rollbackError) {
+        cleanupDetails.push(`projects rollback failed: ${String(rollbackError)}`);
+      }
+      try {
+        await cleanupLocalRegisterResidue(workspaceDir, slug, {
+          removeWorkflowOverride: workflowOverrideCreated,
+          removePromptReadme: promptsCreated,
+        });
+      } catch (cleanupError) {
+        cleanupDetails.push(`local residue cleanup failed: ${String(cleanupError)}`);
+      }
+      failure = appendCleanupContext(failure, cleanupDetails);
     }
-    throw err;
+    if (createdArtifacts.length > 0) {
+      throw attachArtifactsToError(failure, createdArtifacts);
+    }
+    throw failure;
   } finally {
     await releaseLock(workspaceDir);
   }
