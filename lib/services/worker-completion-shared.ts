@@ -15,6 +15,23 @@ import { getRootLogger } from "../observability/logger.js";
 
 export const INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD = 2;
 
+export function hasCurrentDispatchAlreadyCompleted(issueRuntime?: {
+  dispatchRequestedAt?: string | null;
+  sessionCompletedAt?: string | null;
+} | null): boolean {
+  const completedAt = issueRuntime?.sessionCompletedAt ?? null;
+  if (!completedAt) return false;
+
+  const dispatchRequestedAt = issueRuntime?.dispatchRequestedAt ?? null;
+  if (!dispatchRequestedAt) return true;
+
+  const completedMs = Date.parse(completedAt);
+  const dispatchRequestedMs = Date.parse(dispatchRequestedAt);
+  if (Number.isNaN(completedMs) || Number.isNaN(dispatchRequestedMs)) return true;
+
+  return completedMs >= dispatchRequestedMs;
+}
+
 export function resolveWorkerSlot(
   roleWorker: ReturnType<typeof getRoleWorker>,
   sessionKey?: string,

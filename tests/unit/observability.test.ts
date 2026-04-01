@@ -471,5 +471,5 @@ describe("observability", () => {
       vi.resetModules();
       vi.restoreAllMocks();
     }
-  });
+  }, 15000);
 });

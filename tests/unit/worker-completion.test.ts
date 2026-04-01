@@ -324,6 +324,7 @@ describe("worker-completion", () => {
             "7": {
               lastDispatchCycleId: "cycle-1",
               dispatchRunId: "run-1",
+              dispatchRequestedAt: "2026-03-31T12:00:00.000Z",
               sessionCompletedAt: "2026-03-31T12:30:00.000Z",
               lastSessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
             },
@@ -350,6 +351,62 @@ describe("worker-completion", () => {
         reason: "already_completed",
       }),
     );
+  });
+
+  it("skips active same-cycle agent_end completion once sessionCompletedAt is already set", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    mockReadProjects.mockResolvedValueOnce({
+      projects: {
+        demo: {
+          name: "todo-summary",
+          slug: "demo",
+          repo: "org/repo",
+          provider: "github",
+          channels: [],
+          workers: {
+            developer: {
+              levels: {
+                medior: [
+                  {
+                    active: true,
+                    issueId: 7,
+                    lastIssueId: null,
+                    sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+                    startTime: "2026-04-01T12:00:00.000Z",
+                    previousLabel: "To Do",
+                    name: "brittne",
+                    dispatchCycleId: "cycle-1",
+                    dispatchRunId: "run-1",
+                  },
+                ],
+              },
+            },
+          },
+          issueRuntime: {
+            "7": {
+              lastDispatchCycleId: "cycle-1",
+              dispatchRunId: "run-1",
+              dispatchRequestedAt: "2026-04-01T12:00:00.000Z",
+              sessionCompletedAt: "2026-04-01T12:30:00.000Z",
+              lastSessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+            },
+          },
+        },
+      },
+    });
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      runId: "run-1",
+      messages: [{ role: "assistant", content: [{ type: "text", text: "Work result: DONE" }] }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+      validateDeveloperDone: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "already_completed" });
+    expect(mockExecuteCompletion).not.toHaveBeenCalled();
   });
 
   it("does not treat a new active dispatch cycle as already completed just because the issue has an older completion timestamp", async () => {
@@ -386,6 +443,7 @@ describe("worker-completion", () => {
             "7": {
               lastDispatchCycleId: "cycle-2",
               dispatchRunId: "run-2",
+              dispatchRequestedAt: "2026-04-01T12:00:00.000Z",
               sessionCompletedAt: "2026-03-31T12:30:00.000Z",
               lastSessionKey: "agent:main:subagent:todo-summary-developer-medior-grace",
             },

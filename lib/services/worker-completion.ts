@@ -16,7 +16,7 @@ import { parseFabricaSessionKey } from "../dispatch/bootstrap-hook.js";
 import { executeCompletion } from "./pipeline.js";
 import { extractWorkerResultFromMessages, type WorkerResult, type WorkerRole } from "./worker-result.js";
 import { validatePrExistsForDeveloper } from "../tools/worker/work-finish.js";
-import { applyTesterInfraFailureCompletion, resolveWorkerSlot } from "./worker-completion-shared.js";
+import { applyTesterInfraFailureCompletion, hasCurrentDispatchAlreadyCompleted, resolveWorkerSlot } from "./worker-completion-shared.js";
 
 type WorkerCompletionOutcome = { applied: boolean; reason?: string };
 
@@ -227,10 +227,7 @@ export async function applyWorkerResult(opts: {
     return { applied: false, reason: "stale_dispatch_cycle" };
   }
 
-  if (
-    context.recovered &&
-    context.issueRuntime?.sessionCompletedAt
-  ) {
+  if (hasCurrentDispatchAlreadyCompleted(context.issueRuntime)) {
     await auditLog(opts.workspaceDir, "worker_completion_skipped", {
       sessionKey: context.sessionKey,
       projectSlug: context.projectSlug,

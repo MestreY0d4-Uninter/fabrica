@@ -161,6 +161,20 @@ describe("reactive-dispatch-hook", () => {
       resolveCompletion();
     });
 
+    it("forwards eventCtx.runId to worker completion as the per-dispatch idempotence key", async () => {
+      const { registerReactiveDispatchHooks } = await import("../../lib/dispatch/reactive-dispatch-hook.js");
+      const h = captureHandlers(registerReactiveDispatchHooks);
+
+      await h["agent_end"](
+        { success: true, messages: [{ role: "assistant", content: [{ type: "text", text: "Work result: DONE" }] }] },
+        { sessionKey: "agent:main:subagent:my-project-developer-junior-ada", runId: "run-77" },
+      );
+
+      const call = mockHandleWorkerAgentEnd.mock.calls[0]?.[0];
+      expect(call?.sessionKey).toBe("agent:main:subagent:my-project-developer-junior-ada");
+      expect(call?.runId).toBe("run-77");
+    });
+
     it("does NOT call requestHeartbeatNow for a non-Fabrica session", async () => {
       const { registerReactiveDispatchHooks } = await import("../../lib/dispatch/reactive-dispatch-hook.js");
       const h = captureHandlers(registerReactiveDispatchHooks);

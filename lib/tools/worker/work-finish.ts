@@ -30,6 +30,7 @@ import {
 import { getRootLogger } from "../../observability/logger.js";
 import {
   applyTesterInfraFailureCompletion,
+  hasCurrentDispatchAlreadyCompleted,
   INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD,
   resolveWorkerSlot,
 } from "../../services/worker-completion-shared.js";
@@ -361,6 +362,29 @@ export function createWorkFinishTool(ctx: PluginContext) {
           role,
           result,
           reason: "stale_dispatch_cycle",
+        });
+      }
+
+      if (hasCurrentDispatchAlreadyCompleted(issueRuntime)) {
+        await auditLog(workspaceDir, "work_finish_rejected", {
+          project: project.name,
+          projectSlug: project.slug,
+          issue: issueId,
+          role,
+          result,
+          reason: "already_completed",
+          sessionKey: toolCtx.sessionKey ?? null,
+          currentDispatchRunId,
+          completedAt: issueRuntime.sessionCompletedAt,
+        });
+        return jsonResult({
+          success: false,
+          project: project.name,
+          projectSlug: project.slug,
+          issueId,
+          role,
+          result,
+          reason: "already_completed",
         });
       }
 

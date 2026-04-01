@@ -84,7 +84,8 @@ describe("E2E pipeline", () => {
       const taskMsg = h.commands.taskMessages()[0];
       assert.ok(taskMsg.includes("Add login page"), "Task message should include title");
       assert.ok(taskMsg.includes(h.project.slug), "Task message should include project slug");
-      assert.ok(taskMsg.includes("work_finish"), "Task message should reference work_finish");
+      assert.ok(taskMsg.includes("Work result: DONE"), "Task message should include the canonical developer completion line");
+      assert.ok(taskMsg.includes("Work result: BLOCKED"), "Task message should include the canonical developer blocked line");
     });
 
     it("should set resolved model via sessions.patch, not agent RPC (#436)", async () => {

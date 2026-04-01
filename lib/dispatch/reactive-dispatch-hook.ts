@@ -67,9 +67,11 @@ export function registerReactiveDispatchHooks(
     if (!sessionKey) return;
     const parsed = parseFabricaSessionKey(sessionKey);
     if (!parsed) return;
+    const lifecycleRunId = (eventCtx as { runId?: string }).runId ?? (event as { runId?: string }).runId;
     if (workspaceDir) {
       handleWorkerAgentEnd({
         sessionKey,
+        runId: lifecycleRunId,
         messages: event.messages,
         workspaceDir,
         runCommand: ctx.runCommand,
