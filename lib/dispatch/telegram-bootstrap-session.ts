@@ -183,20 +183,28 @@ export async function upsertTelegramBootstrapSession(
   },
 ): Promise<TelegramBootstrapSession> {
   const existing = await readTelegramBootstrapSession(workspaceDir, input.conversationId);
+  const resolvedProjectName =
+    input.projectName !== undefined ? input.projectName : existing?.projectName ?? null;
+  const resolvedStackHint =
+    input.stackHint !== undefined ? input.stackHint : existing?.stackHint ?? null;
+  const resolvedRepoUrl =
+    input.repoUrl !== undefined ? input.repoUrl : existing?.repoUrl ?? null;
+  const resolvedRepoPath =
+    input.repoPath !== undefined ? input.repoPath : existing?.repoPath ?? null;
+  const resolvedError =
+    input.error !== undefined
+      ? input.error
+      : input.lastError !== undefined
+        ? input.lastError
+        : existing?.error ?? existing?.lastError ?? null;
   const requestHash = buildBootstrapRequestHash({
     rawIdea: input.rawIdea,
-    projectName: input.projectName,
-    stackHint: input.stackHint,
-    repoUrl: input.repoUrl,
-    repoPath: input.repoPath,
+    projectName: resolvedProjectName,
+    stackHint: resolvedStackHint,
+    repoUrl: resolvedRepoUrl,
+    repoPath: resolvedRepoPath,
   });
   const now = new Date().toISOString();
-  const resolvedError =
-    input.error ??
-    input.lastError ??
-    existing?.error ??
-    existing?.lastError ??
-    null;
   const session: TelegramBootstrapSession = {
     id: existing?.id ?? buildBootstrapSessionId(input.conversationId, input.rawIdea),
     conversationId: input.conversationId,
@@ -210,10 +218,10 @@ export async function upsertTelegramBootstrapSession(
         ? requestHash
         : existing?.lastCompletedRequestHash ?? null,
     rawIdea: input.rawIdea,
-    projectName: input.projectName ?? existing?.projectName ?? null,
-    stackHint: input.stackHint ?? existing?.stackHint ?? null,
-    repoUrl: input.repoUrl ?? existing?.repoUrl ?? null,
-    repoPath: input.repoPath ?? existing?.repoPath ?? null,
+    projectName: resolvedProjectName,
+    stackHint: resolvedStackHint,
+    repoUrl: resolvedRepoUrl,
+    repoPath: resolvedRepoPath,
     projectSlug: input.projectSlug ?? existing?.projectSlug ?? null,
     issueId: input.issueId ?? existing?.issueId ?? null,
     messageThreadId: input.messageThreadId ?? existing?.messageThreadId ?? null,
