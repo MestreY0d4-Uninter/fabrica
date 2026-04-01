@@ -428,6 +428,52 @@ describe("telegram bootstrap hook", () => {
     await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(6), { timeout: 2000 });
   });
 
+  it("moves the session to bootstrapping before post-classification side effects run", async () => {
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    sendMessageTelegram.mockRejectedValueOnce(new Error("telegram down"));
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 777,
+          project_slug: "todo-summary-tool",
+        },
+      },
+    });
+    outerMockSubagentRun.mockResolvedValue({ runId: "classify-run" });
+    outerMockSubagentWait.mockResolvedValue({ status: "ok" });
+    outerMockSubagentGetMessages.mockResolvedValue([
+      { role: "assistant", content: JSON.stringify({
+        intent: "create_project",
+        confidence: 0.96,
+        stackHint: null,
+        projectSlug: null,
+        language: "en",
+      }) },
+    ]);
+
+    await handler?.(
+      {
+        content: "Simple todo summary tool for my notes",
+        metadata: {},
+      },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2000 });
+
+    const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+    expect(session?.status).toBe("bootstrapping");
+  });
+
   it("fails closed when pipeline succeeds without topic routing", async () => {
     const api = {
       on: vi.fn((name, fn) => {

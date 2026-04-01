@@ -8,6 +8,7 @@ export type TelegramBootstrapStatus =
   | "pending_classify"  // session created, LLM classification not yet started
   | "received"
   | "classifying"       // LLM classification in progress
+  | "bootstrapping"
   | "clarifying"
   | "provisioning_repo"
   | "creating_topic"
@@ -44,6 +45,11 @@ export type TelegramBootstrapSession = {
   messageThreadId?: number | null;
   projectChannelId?: string | null;
   status: TelegramBootstrapStatus;
+  attemptCount?: number | null;
+  lastError?: string | null;
+  nextRetryAt?: string | null;
+  ackSentAt?: string | null;
+  projectRegisteredAt?: string | null;
   pendingClarification?: "stack" | "stack_and_name" | "name" | null;
   orphanedArtifacts?: PipelineArtifact[] | null;
   createdAt: string;
@@ -169,6 +175,11 @@ export async function upsertTelegramBootstrapSession(
     messageThreadId?: number | null;
     projectChannelId?: string | null;
     language?: "pt" | "en";
+    attemptCount?: number | null;
+    lastError?: string | null;
+    nextRetryAt?: string | null;
+    ackSentAt?: string | null;
+    projectRegisteredAt?: string | null;
   },
 ): Promise<TelegramBootstrapSession> {
   const existing = await readTelegramBootstrapSession(workspaceDir, input.conversationId);
@@ -203,6 +214,11 @@ export async function upsertTelegramBootstrapSession(
     projectChannelId: input.projectChannelId ?? existing?.projectChannelId ?? null,
     language: input.language ?? existing?.language,
     status: input.status,
+    attemptCount: input.attemptCount ?? existing?.attemptCount ?? 0,
+    lastError: input.lastError ?? existing?.lastError ?? null,
+    nextRetryAt: input.nextRetryAt ?? existing?.nextRetryAt ?? null,
+    ackSentAt: input.ackSentAt ?? existing?.ackSentAt ?? null,
+    projectRegisteredAt: input.projectRegisteredAt ?? existing?.projectRegisteredAt ?? null,
     pendingClarification: input.pendingClarification !== undefined
       ? input.pendingClarification
       : existing?.pendingClarification ?? null,
