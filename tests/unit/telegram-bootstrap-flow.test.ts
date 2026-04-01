@@ -601,6 +601,48 @@ describe("telegram bootstrap clarification flow", () => {
     expect(ackCalls).toHaveLength(1);
   });
 
+  it("resumes from projectRegisteredAt without rerunning registration", async () => {
+    await fs.mkdir(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+      JSON.stringify({
+        id: "tgdm-checkpointed",
+        conversationId: CONVERSATION_ID,
+        sourceChannel: "telegram",
+        sourceRoute: { channel: "telegram", channelId: CONVERSATION_ID },
+        projectRoute: {
+          channel: "telegram",
+          channelId: "-1003709213169",
+          messageThreadId: 932,
+        },
+        requestHash: "req-hash",
+        requestFingerprint: "req-hash",
+        rawIdea: "Build a simple Python CLI for todo summary",
+        projectName: "todo-summary-tool",
+        stackHint: "python-cli",
+        projectSlug: "todo-summary-tool",
+        messageThreadId: 932,
+        projectChannelId: "-1003709213169",
+        status: "bootstrapping",
+        ackSentAt: "2026-04-01T00:00:01.000Z",
+        projectRegisteredAt: "2026-04-01T00:00:02.000Z",
+        language: "en",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:02.000Z",
+        suppressUntil: new Date(Date.now() + 60_000).toISOString(),
+      }, null, 2) + "\n",
+      "utf-8",
+    );
+
+    await resumeBootstrapping(ctx, workspaceDir, CONVERSATION_ID);
+
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    expect(mockProjectTick).toHaveBeenCalledTimes(1);
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
+    expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe("-1003709213169");
+    expect(sendMessageTelegram.mock.calls[1]?.[0]).toBe(CONVERSATION_ID);
+  });
+
   it("treats metadata.project_registered as the single registration truth on pipeline failure", async () => {
     mockRunPipeline.mockResolvedValue({
       success: false,

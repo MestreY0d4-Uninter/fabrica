@@ -389,6 +389,20 @@ function buildSessionSourceRoute(session: TelegramBootstrapSession): TelegramBoo
   };
 }
 
+function buildProjectRoute(session: TelegramBootstrapSession): TelegramBootstrapRoute | null {
+  if (session.projectRoute) return session.projectRoute;
+
+  if (!session.projectChannelId || session.messageThreadId == null) {
+    return null;
+  }
+
+  return {
+    channel: "telegram",
+    channelId: session.projectChannelId,
+    messageThreadId: session.messageThreadId,
+  };
+}
+
 async function enterBootstrapping(
   workspaceDir: string,
   conversationId: string,
@@ -451,6 +465,10 @@ async function runBootstrapHandoff(
     });
   }
 
+  if (session.projectRegisteredAt) {
+    return completeRegisteredBootstrap(ctx, workspaceDir, session);
+  }
+
   await continueBootstrap(
     ctx,
     session.conversationId,
@@ -460,6 +478,89 @@ async function runBootstrapHandoff(
   );
 
   return await readTelegramBootstrapSession(workspaceDir, session.conversationId) ?? session;
+}
+
+async function completeRegisteredBootstrap(
+  ctx: PluginContext,
+  workspaceDir: string,
+  session: TelegramBootstrapSession,
+): Promise<TelegramBootstrapSession> {
+  const projectRoute = buildProjectRoute(session);
+  const projectChannelId = projectRoute?.channelId;
+  const messageThreadId = projectRoute?.messageThreadId;
+
+  if (!projectChannelId || messageThreadId == null) {
+    const resolvedProjectName = session.projectName ?? session.projectSlug ?? "projeto";
+    logBootstrapWarning(ctx, `[telegram-bootstrap] projectRegisteredAt checkpoint missing topic route for "${resolvedProjectName}"`);
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: session.conversationId,
+      rawIdea: session.rawIdea,
+      projectName: session.projectName ?? undefined,
+      stackHint: session.stackHint ?? undefined,
+      repoUrl: session.repoUrl ?? undefined,
+      repoPath: session.repoPath ?? undefined,
+      sourceRoute: buildSessionSourceRoute(session),
+      status: "failed",
+      projectSlug: session.projectSlug ?? undefined,
+      error: "missing_telegram_topic",
+      language: session.language,
+    });
+    await sendTelegramText(
+      ctx,
+      session.conversationId,
+      `Nao consegui concluir o bootstrap do projeto "${resolvedProjectName}" porque faltou a associacao obrigatoria com um topico Telegram. O projeto nao foi considerado registrado para o fluxo automatico.`,
+    );
+    return await readTelegramBootstrapSession(workspaceDir, session.conversationId) ?? session;
+  }
+
+  const resolvedProjectName = session.projectName ?? session.projectSlug ?? "projeto";
+  const sessionLang: BootstrapLanguage = session.language ?? "pt";
+
+  await sendTelegramText(ctx, projectChannelId, buildTopicKickoff(resolvedProjectName, session.rawIdea, sessionLang), {
+    accountId: projectRoute.accountId ?? undefined,
+    messageThreadId,
+  });
+
+  const agents = discoverAgents(ctx.config);
+  const primaryAgent = agents[0];
+  if (session.projectSlug && primaryAgent) {
+    await projectTick({
+      workspaceDir: primaryAgent.workspace,
+      projectSlug: session.projectSlug,
+      agentId: primaryAgent.agentId,
+      pluginConfig: ctx.pluginConfig,
+      runtime: ctx.runtime,
+      runCommand: ctx.runCommand,
+      maxPickups: 1,
+    }).catch((error) => {
+      logBootstrapWarning(ctx, `[telegram-bootstrap] immediate projectTick failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+
+  await sendTelegramText(
+    ctx,
+    session.conversationId,
+    buildDmAck(resolvedProjectName, buildTopicDeepLink(String(projectChannelId), messageThreadId), sessionLang),
+  );
+
+  const completedSession = await upsertTelegramBootstrapSession(workspaceDir, {
+    conversationId: session.conversationId,
+    rawIdea: session.rawIdea,
+    projectName: resolvedProjectName,
+    stackHint: session.stackHint ?? undefined,
+    repoUrl: session.repoUrl ?? undefined,
+    repoPath: session.repoPath ?? undefined,
+    sourceRoute: buildSessionSourceRoute(session),
+    status: "completed",
+    projectSlug: session.projectSlug ?? undefined,
+    projectRoute,
+    projectChannelId,
+    messageThreadId,
+    projectRegisteredAt: session.projectRegisteredAt,
+    language: session.language,
+  });
+
+  return completedSession;
 }
 
 async function resumeBootstrappingSession(
@@ -846,52 +947,29 @@ async function continueBootstrap(
   const projectSlug = result.payload.metadata.project_slug ?? result.payload.scaffold?.project_slug ?? null;
 
   if (projectChannelId && messageThreadId) {
-    await upsertTelegramBootstrapSession(workspaceDir, {
+    const registeredSession = await upsertTelegramBootstrapSession(workspaceDir, {
       conversationId,
       ...incomingRequest,
       sourceRoute,
       status: "dispatching",
+      projectName: resolvedProjectName,
       projectSlug: projectSlug ?? undefined,
-      projectRoute: {
-        channel: "telegram",
-        channelId: String(projectChannelId),
-        messageThreadId,
-        accountId: telegramConfig.projectsForumAccountId ?? undefined,
-      },
-    });
-    const sessionLang: BootstrapLanguage = currentSession?.language ?? "pt";
-    await sendTelegramText(ctx, projectChannelId, buildTopicKickoff(resolvedProjectName, request.rawIdea, sessionLang), {
-      accountId: telegramConfig.projectsForumAccountId,
+      projectRegisteredAt: new Date().toISOString(),
+      projectChannelId: String(projectChannelId),
       messageThreadId,
-    });
-    const agents = discoverAgents(ctx.config);
-    const primaryAgent = agents[0];
-    if (projectSlug && primaryAgent) {
-      await projectTick({
-        workspaceDir: primaryAgent.workspace,
-        projectSlug,
-        agentId: primaryAgent.agentId,
-        pluginConfig: ctx.pluginConfig,
-        runtime: ctx.runtime,
-        runCommand: ctx.runCommand,
-        maxPickups: 1,
-      }).catch((error) => {
-        logBootstrapWarning(ctx, `[telegram-bootstrap] immediate projectTick failed: ${error instanceof Error ? error.message : String(error)}`);
-      });
-    }
-    await sendTelegramText(ctx, conversationId, buildDmAck(resolvedProjectName, buildTopicDeepLink(String(projectChannelId), messageThreadId), sessionLang));
-    await upsertTelegramBootstrapSession(workspaceDir, {
-      conversationId,
-      ...incomingRequest,
-      sourceRoute,
-      status: "completed",
-      projectSlug: projectSlug ?? undefined,
       projectRoute: {
         channel: "telegram",
         channelId: String(projectChannelId),
         messageThreadId,
         accountId: telegramConfig.projectsForumAccountId ?? undefined,
       },
+    });
+    await completeRegisteredBootstrap(ctx, workspaceDir, {
+      ...registeredSession,
+      projectName: resolvedProjectName,
+      projectSlug: projectSlug ?? registeredSession.projectSlug ?? undefined,
+      projectRegisteredAt: registeredSession.projectRegisteredAt ?? new Date().toISOString(),
+      language: (currentSession?.language ?? "pt"),
     });
     return;
   }
