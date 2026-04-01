@@ -59,6 +59,7 @@ import { registerSubagentLifecycleHook } from "./lib/dispatch/subagent-lifecycle
 import { registerModelResolveHook } from "./lib/dispatch/model-resolve-hook.js";
 import { registerWorkerContextHook } from "./lib/dispatch/worker-context-hook.js";
 import { registerReactiveDispatchHooks } from "./lib/dispatch/reactive-dispatch-hook.js";
+import { isGatewayServerProcess } from "./lib/runtime-mode.js";
 
 const plugin = {
   id: "fabrica",
@@ -237,9 +238,13 @@ const plugin = {
     registerWorkerContextHook(api, ctx);
     registerReactiveDispatchHooks(api, ctx);
 
-    ctx.logger.info(
-      "Fabrica plugin registered (25 tools, 1 CLI command group, 1 service, 9 hooks total: bootstrap, telegram-dm bootstrap, attachment, gateway lifecycle, subagent lifecycle, model-resolve, worker-context, reactive-dispatch, optional GitHub webhook route)",
-    );
+    const startupMessage =
+      "Fabrica plugin registered (25 tools, 1 CLI command group, 1 service, 9 hooks total: bootstrap, telegram-dm bootstrap, attachment, gateway lifecycle, subagent lifecycle, model-resolve, worker-context, reactive-dispatch, optional GitHub webhook route)";
+    if (isGatewayServerProcess()) {
+      ctx.logger.info(startupMessage);
+    } else {
+      ctx.logger.debug?.(startupMessage);
+    }
   },
 };
 

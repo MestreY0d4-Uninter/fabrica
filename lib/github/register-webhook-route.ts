@@ -148,6 +148,11 @@ export function registerGitHubWebhookRoute(api: OpenClawPluginApi, ctx: PluginCo
   });
 
   if ("child" in routeLogger) {
-    routeLogger.child({ webhookPath: path.posix.normalize(webhookPath), workspaceDir }).info("GitHub webhook route registered");
+    const registrationLogger = routeLogger.child({ webhookPath: path.posix.normalize(webhookPath), workspaceDir });
+    if (isGatewayServerProcess()) {
+      registrationLogger.info("GitHub webhook route registered");
+    } else {
+      registrationLogger.debug?.("GitHub webhook route registered");
+    }
   }
 }

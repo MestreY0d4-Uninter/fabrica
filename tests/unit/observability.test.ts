@@ -1,5 +1,5 @@
 import { Writable } from "node:stream";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { trace } from "@opentelemetry/api";
 import {
   BasicTracerProvider,
@@ -8,6 +8,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { withCorrelationContext } from "../../lib/observability/context.js";
 import { createFabricaLogger } from "../../lib/observability/logger.js";
+import { registerGitHubWebhookRoute } from "../../lib/github/register-webhook-route.js";
 import { withTelemetrySpan } from "../../lib/observability/telemetry.js";
 
 const exporter = new InMemorySpanExporter();
@@ -86,5 +87,135 @@ describe("observability", () => {
     expect(spans[0]?.attributes.issueId).toBe("42");
     expect(spans[0]?.attributes.prNumber).toBe(3);
     expect(spans[0]?.attributes.headSha).toBe("deadbeef");
+  });
+
+  it("keeps GitHub webhook route registration out of normal CLI info output", () => {
+    const originalArgv = process.argv.slice();
+    process.argv = ["node", "openclaw", "plugins", "doctor"];
+    vi.stubEnv("FABRICA_GITHUB_WEBHOOK_SECRET", "supersecret");
+
+    const registerHttpRoute = vi.fn();
+    const childLogger = {
+      child: vi.fn(() => childLogger),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const logger = {
+      child: vi.fn(() => childLogger),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    try {
+      registerGitHubWebhookRoute(
+        {
+          registerHttpRoute,
+          logger,
+        } as any,
+        {
+          pluginConfig: {
+            providers: {
+              github: {
+                webhookSecretEnv: "FABRICA_GITHUB_WEBHOOK_SECRET",
+              },
+            },
+          },
+          runtime: {
+            config: {
+              loadConfig: () => ({
+                agents: {
+                  defaults: {
+                    workspace: "/tmp/fabrica-workspace",
+                  },
+                },
+              }),
+            },
+          },
+        } as any,
+      );
+
+      expect(registerHttpRoute).toHaveBeenCalledTimes(1);
+      expect(childLogger.info).not.toHaveBeenCalledWith(
+        expect.stringContaining("GitHub webhook route registered"),
+      );
+      expect(childLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining("GitHub webhook route registered"),
+      );
+    } finally {
+      process.argv = originalArgv;
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("keeps the plugin registration banner out of normal CLI info output", async () => {
+    const originalArgv = process.argv.slice();
+    process.argv = ["node", "openclaw", "plugins", "doctor"];
+
+    const pluginInfo = vi.fn();
+    const fakeLogger = {
+      child: vi.fn().mockReturnThis(),
+      debug: vi.fn(),
+      error: vi.fn(),
+      info: pluginInfo,
+      warn: vi.fn(),
+    };
+
+    try {
+      vi.resetModules();
+      vi.doMock("../../lib/observability/bootstrap.js", () => ({
+        bootstrapTelemetry: vi.fn(),
+      }));
+      vi.doMock("../../lib/observability/logger.js", async () => {
+        const actual = await vi.importActual<typeof import("../../lib/observability/logger.js")>(
+          "../../lib/observability/logger.js",
+        );
+        return {
+          ...actual,
+          getLogger: vi.fn(() => fakeLogger),
+          getRootLogger: vi.fn(() => fakeLogger),
+        };
+      });
+      vi.doMock("../../lib/github/register-webhook-route.js", () => ({
+        registerGitHubWebhookRoute: vi.fn(),
+      }));
+
+      const plugin = (await import("../../index.js")).default;
+      const api = {
+        config: {},
+        logger: fakeLogger,
+        on: vi.fn(),
+        pluginConfig: {},
+        registerCli: vi.fn(),
+        registerHttpRoute: vi.fn(),
+        registerService: vi.fn(),
+        registerTool: vi.fn(),
+        registerHook: vi.fn(),
+        runtime: {
+          config: {
+            loadConfig: vi.fn(() => ({
+              agents: {
+                list: [],
+              },
+            })),
+          },
+          system: {
+            runCommandWithTimeout: vi.fn(),
+          },
+        },
+      } as any;
+
+      plugin.register(api);
+
+      expect(pluginInfo).not.toHaveBeenCalledWith(
+        expect.stringContaining("Fabrica plugin registered"),
+      );
+    } finally {
+      process.argv = originalArgv;
+      vi.resetModules();
+    }
   });
 });
