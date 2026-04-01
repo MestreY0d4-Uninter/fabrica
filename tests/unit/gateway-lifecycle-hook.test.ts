@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { registerGatewayLifecycleHook } from "../../lib/setup/gateway-lifecycle-hook.js";
+import { _testListBootstrapRecoveryWorkspaces as listBootstrapRecoveryWorkspaces } from "../../lib/services/heartbeat/index.js";
 
 // Hoist mocks before any imports are resolved
 const { mockAccess, mockReadFile, mockAuditLog, mockRecoverDueBootstraps } = vi.hoisted(() => ({
@@ -196,5 +197,21 @@ describe("gateway_start hook", () => {
     mockAuditLog.mockRejectedValue(new Error("disk full"));
 
     await expect(handler({ port: 18789 }, { port: 18789 })).resolves.toBeUndefined();
+  });
+
+  it("selects configured recovery workspaces even when no projects are discovered", () => {
+    expect(listBootstrapRecoveryWorkspaces({
+      agents: {
+        defaults: { workspace: "/tmp/default-workspace" },
+        list: [
+          { id: "one", workspace: "/tmp/default-workspace" },
+          { id: "two", workspace: "/tmp/secondary-workspace" },
+          { id: "three" },
+        ],
+      },
+    })).toEqual([
+      "/tmp/default-workspace",
+      "/tmp/secondary-workspace",
+    ]);
   });
 });

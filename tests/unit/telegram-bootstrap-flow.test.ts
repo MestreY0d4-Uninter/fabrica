@@ -12,7 +12,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { registerTelegramBootstrapHook, _testContinueBootstrap, _testResumeBootstrapping as resumeBootstrapping } from "../../lib/dispatch/telegram-bootstrap-hook.js";
+import {
+  registerTelegramBootstrapHook,
+  _testContinueBootstrap,
+  _testResumeBootstrapping as resumeBootstrapping,
+  _testResetActiveBootstrapResumes as resetActiveBootstrapResumes,
+} from "../../lib/dispatch/telegram-bootstrap-hook.js";
 
 const {
   mockRunPipeline,
@@ -79,7 +84,9 @@ describe("telegram bootstrap clarification flow", () => {
   beforeEach(async () => {
     workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-telegram-flow-"));
     handler = undefined;
-    sendMessageTelegram.mockClear();
+    resetActiveBootstrapResumes();
+    sendMessageTelegram.mockReset();
+    sendMessageTelegram.mockResolvedValue(undefined);
     mockRunPipeline.mockReset();
     mockReadProjects.mockReset();
     mockProjectTick.mockReset();
@@ -97,6 +104,7 @@ describe("telegram bootstrap clarification flow", () => {
   });
 
   afterEach(async () => {
+    resetActiveBootstrapResumes();
     await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
@@ -823,6 +831,7 @@ describe("telegram bootstrap clarification flow", () => {
     expect(persisted.completionAckSentAt).toBeNull();
     expect(persisted.lastError).toContain("pickup failed");
     expect(persisted.nextRetryAt).toBeTruthy();
+    expect(Date.parse(persisted.nextRetryAt)).toBeGreaterThan(Date.now());
 
     await resumeBootstrapping(ctx, workspaceDir, CONVERSATION_ID);
 
@@ -838,6 +847,7 @@ describe("telegram bootstrap clarification flow", () => {
     expect(persisted.status).toBe("completed");
     expect(persisted.projectTickedAt).toBeTruthy();
     expect(persisted.completionAckSentAt).toBeTruthy();
+    expect(persisted.nextRetryAt).toBeNull();
   });
 
   it("treats metadata.project_registered as the single registration truth on pipeline failure", async () => {

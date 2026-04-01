@@ -3151,6 +3151,55 @@ describe("telegram bootstrap regression coverage", () => {
     expect(session?.nextRetryAt).toBeNull();
   });
 
+  it("scopes active bootstrap recovery by workspace and conversation", async () => {
+    const conversationId = "telegram:shared-conversation";
+    const secondWorkspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-telegram-bootstrap-"));
+
+    try {
+      await upsertTelegramBootstrapSession(workspaceDir, {
+        conversationId,
+        rawIdea: "Build a shared Python CLI",
+        projectName: "shared-cli-one",
+        stackHint: "python-cli",
+        sourceRoute: { channel: "telegram", channelId: "shared-conversation" },
+        status: "bootstrapping",
+        nextRetryAt: new Date(Date.now() - 1_000).toISOString(),
+        language: "en",
+      });
+
+      await upsertTelegramBootstrapSession(secondWorkspaceDir, {
+        conversationId,
+        rawIdea: "Build another shared Python CLI",
+        projectName: "shared-cli-two",
+        stackHint: "python-cli",
+        sourceRoute: { channel: "telegram", channelId: "shared-conversation" },
+        status: "bootstrapping",
+        nextRetryAt: new Date(Date.now() - 1_000).toISOString(),
+        language: "en",
+      });
+
+      let releaseFirstAck!: () => void;
+      sendMessageTelegram
+        .mockImplementationOnce(() => new Promise<void>((resolve) => {
+          releaseFirstAck = resolve;
+        }))
+        .mockResolvedValueOnce(undefined);
+
+      const firstRecovery = recoverDueBootstraps(ctx, workspaceDir);
+      await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2_000 });
+
+      const secondRecovery = recoverDueBootstraps(ctx, secondWorkspaceDir);
+      await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2_000 });
+
+      releaseFirstAck();
+
+      await expect(firstRecovery).resolves.toBe(1);
+      await expect(secondRecovery).resolves.toBe(1);
+    } finally {
+      await fs.rm(secondWorkspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it("does not stamp retry metadata onto a newer attempt after a stale recovery fails", async () => {
     const conversationId = "telegram:6951571380";
 

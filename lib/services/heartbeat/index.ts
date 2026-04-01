@@ -48,6 +48,28 @@ type ServiceContext = {
   };
 };
 
+function listBootstrapRecoveryWorkspaces(config: {
+  agents?: { list?: Array<{ id: string; workspace?: string }>; defaults?: { workspace?: string } };
+}): string[] {
+  const workspaces: string[] = [];
+  const seen = new Set<string>();
+
+  const addWorkspace = (workspace?: string) => {
+    if (!workspace || seen.has(workspace)) return;
+    seen.add(workspace);
+    workspaces.push(workspace);
+  };
+
+  addWorkspace(config.agents?.defaults?.workspace);
+  for (const agent of config.agents?.list ?? []) {
+    addWorkspace(agent.workspace);
+  }
+
+  return workspaces;
+}
+
+export { listBootstrapRecoveryWorkspaces as _testListBootstrapRecoveryWorkspaces };
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -154,7 +176,8 @@ async function runHeartbeatTick(
   _tickRunning[mode] = true;
   let timedOut = false;
   try {
-    const workspace = discoverAgents(ctx.config)[0]?.workspace;
+    const recoveryWorkspaces = listBootstrapRecoveryWorkspaces(ctx.config);
+    const workspace = discoverAgents(ctx.config)[0]?.workspace ?? recoveryWorkspaces[0];
     const resolvedWorkspaceConfig = workspace
       ? await loadConfig(workspace).catch(() => null)
       : null;
@@ -165,14 +188,8 @@ async function runHeartbeatTick(
         const config = resolveHeartbeatConfig(ctx.pluginConfig);
         if (!config.enabled) return;
 
-        const agents = discoverAgents(ctx.config);
-        if (agents.length === 0) return;
-
         if (mode !== "triage") {
-          const recoveredWorkspaces = new Set<string>();
-          for (const { workspace } of agents) {
-            if (recoveredWorkspaces.has(workspace)) continue;
-            recoveredWorkspaces.add(workspace);
+          for (const workspace of recoveryWorkspaces) {
             try {
               const recoveredCount = await recoverDueTelegramBootstrapSessions(ctx, workspace);
               if (recoveredCount > 0) {
@@ -183,6 +200,9 @@ async function runHeartbeatTick(
             }
           }
         }
+
+        const agents = discoverAgents(ctx.config);
+        if (agents.length === 0) return;
 
         const result = await processAllAgents(agents, config, ctx.pluginConfig, logger, ctx.runCommand, ctx.runtime, mode);
         logTickResult(result, logger, mode);

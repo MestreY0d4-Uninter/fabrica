@@ -30,6 +30,10 @@ const BOOTSTRAP_RETRY_DELAY_MS = 15_000;
 const LAYER3_CONFIDENCE_THRESHOLD = 0.6;
 const activeBootstrapResumes = new Set<string>();
 
+function buildActiveBootstrapResumeKey(workspaceDir: string, conversationId: string): string {
+  return `${workspaceDir}::${conversationId}`;
+}
+
 type BootstrapRequest = {
   rawIdea: string;
   projectName?: string | null;
@@ -646,9 +650,15 @@ async function recordBootstrapRetry(
 async function leaseBootstrapRecovery(
   workspaceDir: string,
   conversationId: string,
+  options?: {
+    requireClaimable?: boolean;
+  },
 ): Promise<TelegramBootstrapSession | null> {
   const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
-  if (!isClaimableTelegramBootstrapSession(session)) {
+  if (!isRecoverableTelegramBootstrapSession(session)) {
+    return null;
+  }
+  if (options?.requireClaimable !== false && !isClaimableTelegramBootstrapSession(session)) {
     return null;
   }
 
@@ -663,7 +673,10 @@ async function leaseBootstrapRecovery(
     bootstrapStep: session.bootstrapStep ?? (session.projectRegisteredAt ? "project_registered" : "awaiting_ack"),
     attemptId: owner.attemptId,
     attemptSeq: owner.attemptSeq,
-    nextRetryAt: new Date(Date.now() + BOOTSTRAP_RETRY_DELAY_MS).toISOString(),
+    nextRetryAt:
+      options?.requireClaimable === false
+        ? session.nextRetryAt ?? null
+        : new Date(Date.now() + BOOTSTRAP_RETRY_DELAY_MS).toISOString(),
     lastError: session.lastError ?? null,
     language: session.language,
   });
@@ -675,11 +688,12 @@ function startFreshBootstrapResume(
   conversationId: string,
   start: () => Promise<TelegramBootstrapSession | null>,
 ): Promise<TelegramBootstrapSession | null> | null {
-  if (activeBootstrapResumes.has(conversationId)) {
+  const resumeKey = buildActiveBootstrapResumeKey(workspaceDir, conversationId);
+  if (activeBootstrapResumes.has(resumeKey)) {
     return null;
   }
 
-  activeBootstrapResumes.add(conversationId);
+  activeBootstrapResumes.add(resumeKey);
   const resumePromise = (async () => {
     const session = await start();
     if (!session) {
@@ -687,7 +701,7 @@ function startFreshBootstrapResume(
     }
     return await resumeBootstrappingSession(ctx, workspaceDir, session);
   })().finally(() => {
-    activeBootstrapResumes.delete(conversationId);
+    activeBootstrapResumes.delete(resumeKey);
   });
   return resumePromise;
 }
@@ -992,12 +1006,18 @@ async function resumeBootstrapping(
 ): Promise<TelegramBootstrapSession | null> {
   const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
   if (!isRecoverableTelegramBootstrapSession(session)) return session;
-  if (activeBootstrapResumes.has(conversationId)) return session;
-  const leasedSession = await leaseBootstrapRecovery(workspaceDir, conversationId);
-  if (!leasedSession) {
-    return await readTelegramBootstrapSession(workspaceDir, conversationId);
-  }
-  return resumeBootstrappingSession(ctx, workspaceDir, leasedSession);
+  const resumed = startFreshBootstrapResume(
+    ctx,
+    workspaceDir,
+    conversationId,
+    async () => {
+      const leasedSession = await leaseBootstrapRecovery(workspaceDir, conversationId, {
+        requireClaimable: false,
+      });
+      return leasedSession ?? session;
+    },
+  );
+  return resumed ? await resumed : session;
 }
 
 export async function recoverDueTelegramBootstrapSessions(
@@ -1020,16 +1040,17 @@ export async function recoverDueTelegramBootstrapSessions(
     const conversationId = file.replace(/\.json$/, "");
     const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
     if (!isClaimableTelegramBootstrapSession(session)) continue;
-    if (activeBootstrapResumes.has(session.conversationId)) continue;
+    const resumeKey = buildActiveBootstrapResumeKey(workspaceDir, session.conversationId);
+    if (activeBootstrapResumes.has(resumeKey)) continue;
 
     const leasedSession = await leaseBootstrapRecovery(workspaceDir, conversationId);
     if (!leasedSession) continue;
-    activeBootstrapResumes.add(leasedSession.conversationId);
+    activeBootstrapResumes.add(resumeKey);
     try {
       await resumeBootstrappingSession(ctx, workspaceDir, leasedSession);
       resumedCount++;
     } finally {
-      activeBootstrapResumes.delete(leasedSession.conversationId);
+      activeBootstrapResumes.delete(resumeKey);
     }
   }
 
