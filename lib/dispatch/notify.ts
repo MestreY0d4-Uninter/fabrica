@@ -414,27 +414,72 @@ async function sendMessageOnce(
   // Use runtime API when available (avoids CLI subprocess timeouts)
   if (runtime) {
     if (channel === "telegram") {
+      const telegramChannel = (runtime as any)?.channel?.telegram as
+        | { sendMessageTelegram?: (to: string, text: string, options?: Record<string, unknown>) => Promise<unknown> }
+        | undefined;
       // Cast to any to bypass TypeScript type limitation; disableWebPagePreview and messageThreadId are valid in Telegram API
       const telegramOpts: Record<string, unknown> = { silent: true, disableWebPagePreview: true, accountId };
       if (messageThreadId != null) telegramOpts.messageThreadId = messageThreadId;
-      await runtime.channel.telegram.sendMessageTelegram(target, message, telegramOpts as any);
-      return;
+      if (telegramChannel?.sendMessageTelegram) {
+        try {
+          await telegramChannel.sendMessageTelegram(target, message, telegramOpts as any);
+          return;
+        } catch (err) {
+          if (!isRecoverableRuntimeSendError(err)) throw err;
+        }
+      }
     }
     if (channel === "whatsapp") {
-      await runtime.channel.whatsapp.sendMessageWhatsApp(target, message, { verbose: false, accountId });
-      return;
+      const whatsappChannel = (runtime as any)?.channel?.whatsapp as
+        | { sendMessageWhatsApp?: (to: string, text: string, options?: Record<string, unknown>) => Promise<unknown> }
+        | undefined;
+      if (whatsappChannel?.sendMessageWhatsApp) {
+        try {
+          await whatsappChannel.sendMessageWhatsApp(target, message, { verbose: false, accountId });
+          return;
+        } catch (err) {
+          if (!isRecoverableRuntimeSendError(err)) throw err;
+        }
+      }
     }
     if (channel === "discord") {
-      await runtime.channel.discord.sendMessageDiscord(target, message, { accountId });
-      return;
+      const discordChannel = (runtime as any)?.channel?.discord as
+        | { sendMessageDiscord?: (to: string, text: string, options?: Record<string, unknown>) => Promise<unknown> }
+        | undefined;
+      if (discordChannel?.sendMessageDiscord) {
+        try {
+          await discordChannel.sendMessageDiscord(target, message, { accountId });
+          return;
+        } catch (err) {
+          if (!isRecoverableRuntimeSendError(err)) throw err;
+        }
+      }
     }
     if (channel === "slack") {
-      await runtime.channel.slack.sendMessageSlack(target, message, { accountId });
-      return;
+      const slackChannel = (runtime as any)?.channel?.slack as
+        | { sendMessageSlack?: (to: string, text: string, options?: Record<string, unknown>) => Promise<unknown> }
+        | undefined;
+      if (slackChannel?.sendMessageSlack) {
+        try {
+          await slackChannel.sendMessageSlack(target, message, { accountId });
+          return;
+        } catch (err) {
+          if (!isRecoverableRuntimeSendError(err)) throw err;
+        }
+      }
     }
     if (channel === "signal") {
-      await runtime.channel.signal.sendMessageSignal(target, message, { accountId });
-      return;
+      const signalChannel = (runtime as any)?.channel?.signal as
+        | { sendMessageSignal?: (to: string, text: string, options?: Record<string, unknown>) => Promise<unknown> }
+        | undefined;
+      if (signalChannel?.sendMessageSignal) {
+        try {
+          await signalChannel.sendMessageSignal(target, message, { accountId });
+          return;
+        } catch (err) {
+          if (!isRecoverableRuntimeSendError(err)) throw err;
+        }
+      }
     }
   }
 
@@ -465,6 +510,11 @@ async function sendMessageOnce(
 
 function isTransientNotifyError(err: Error): boolean {
   return /\b(5\d\d|gateway timeout|timeout|timed out|etimedout|econnreset|temporarily unavailable)\b/i.test(err.message);
+}
+
+function isRecoverableRuntimeSendError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /Cannot read properties of undefined|is not a function|runtime unavailable/i.test(message);
 }
 
 /**

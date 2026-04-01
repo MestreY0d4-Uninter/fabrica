@@ -125,6 +125,134 @@ describe("notify", () => {
     }
   });
 
+  it("falls back to the CLI when runtime exists but the Telegram channel sender is unavailable", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-notify-cli-missing-telegram-"));
+    const calls: Array<{ args: string[]; opts?: Record<string, unknown> }> = [];
+    const runtime = {
+      channel: {},
+    } as any;
+    const runCommand = async (args: string[], opts?: Record<string, unknown>) => {
+      calls.push({ args, opts });
+      return {
+        stdout: "{}",
+        stderr: "",
+        code: 0,
+        exitCode: 0,
+        signal: null,
+        killed: false,
+        termination: "exit",
+      } as any;
+    };
+
+    try {
+      const ok = await notify(
+        {
+          type: "workerStart",
+          project: "demo",
+          issueId: 10,
+          issueUrl: "https://example.com/issues/10",
+          issueTitle: "Started",
+          role: "developer",
+          level: "senior",
+          sessionAction: "spawn",
+        },
+        {
+          workspaceDir,
+          runtime,
+          runCommand,
+          target: {
+            channelId: "-100999",
+            channel: "telegram",
+            accountId: "acct-1",
+            messageThreadId: 77,
+          },
+        },
+      );
+
+      expect(ok).toBe(true);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.args).toEqual(expect.arrayContaining([
+        "--channel",
+        "telegram",
+        "--target",
+        "-100999",
+        "--account",
+        "acct-1",
+        "--thread-id",
+        "77",
+      ]));
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the CLI when the Telegram runtime sender exists but fails structurally", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-notify-cli-broken-telegram-"));
+    const calls: Array<{ args: string[]; opts?: Record<string, unknown> }> = [];
+    const runtime = {
+      channel: {
+        telegram: {
+          sendMessageTelegram: async () => {
+            throw new TypeError("Cannot read properties of undefined (reading 'sendMessageTelegram')");
+          },
+        },
+      },
+    } as any;
+    const runCommand = async (args: string[], opts?: Record<string, unknown>) => {
+      calls.push({ args, opts });
+      return {
+        stdout: "{}",
+        stderr: "",
+        code: 0,
+        exitCode: 0,
+        signal: null,
+        killed: false,
+        termination: "exit",
+      } as any;
+    };
+
+    try {
+      const ok = await notify(
+        {
+          type: "workerStart",
+          project: "demo",
+          issueId: 11,
+          issueUrl: "https://example.com/issues/11",
+          issueTitle: "Started",
+          role: "developer",
+          level: "senior",
+          sessionAction: "spawn",
+        },
+        {
+          workspaceDir,
+          runtime,
+          runCommand,
+          target: {
+            channelId: "-100999",
+            channel: "telegram",
+            accountId: "acct-1",
+            messageThreadId: 77,
+          },
+        },
+      );
+
+      expect(ok).toBe(true);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.args).toEqual(expect.arrayContaining([
+        "--channel",
+        "telegram",
+        "--target",
+        "-100999",
+        "--account",
+        "acct-1",
+        "--thread-id",
+        "77",
+      ]));
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it("passes accountId and thread-id through the CLI fallback when runtime is unavailable", async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-notify-cli-"));
     const calls: string[][] = [];
