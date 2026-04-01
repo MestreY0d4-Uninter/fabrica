@@ -151,6 +151,7 @@ describe("observability", () => {
   it("does not emit polling-only webhook banners at info level outside gateway mode", () => {
     const originalArgv = process.argv.slice();
     process.argv = ["node", "openclaw", "plugins", "doctor"];
+    vi.stubEnv("OPENCLAW_SERVICE_KIND", "");
     vi.stubEnv("FABRICA_GITHUB_WEBHOOK_SECRET", "");
 
     const registerHttpRoute = vi.fn();
@@ -272,6 +273,7 @@ describe("observability", () => {
   it("does not emit disabled webhook banners at info level outside gateway mode", () => {
     const originalArgv = process.argv.slice();
     process.argv = ["node", "openclaw", "plugins", "doctor"];
+    vi.stubEnv("OPENCLAW_SERVICE_KIND", "");
 
     const registerHttpRoute = vi.fn();
     const childLogger = {
@@ -333,6 +335,7 @@ describe("observability", () => {
   it("does not emit missing-workspace webhook banners at info level outside gateway mode", () => {
     const originalArgv = process.argv.slice();
     process.argv = ["node", "openclaw", "plugins", "doctor"];
+    vi.stubEnv("OPENCLAW_SERVICE_KIND", "");
     vi.stubEnv("FABRICA_GITHUB_WEBHOOK_SECRET", "supersecret");
 
     const registerHttpRoute = vi.fn();
@@ -393,6 +396,7 @@ describe("observability", () => {
   it("does not emit the plugin registration banner at info level outside gateway mode", async () => {
     const originalArgv = process.argv.slice();
     process.argv = ["node", "openclaw", "plugins", "doctor"];
+    vi.stubEnv("OPENCLAW_SERVICE_KIND", "");
 
     const pluginInfo = vi.fn();
     const fakeLogger = {
