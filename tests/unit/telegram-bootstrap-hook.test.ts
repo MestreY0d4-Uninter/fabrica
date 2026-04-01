@@ -11,6 +11,7 @@ import {
   deleteTelegramBootstrapSession,
   shouldSuppressTelegramBootstrapReply,
 } from "../../lib/dispatch/telegram-bootstrap-session.js";
+import * as telegramBootstrapSessionModule from "../../lib/dispatch/telegram-bootstrap-session.js";
 
 const {
   mockRunPipeline,
@@ -894,6 +895,56 @@ describe("telegram bootstrap hook", () => {
     await Promise.all([first, second]);
     await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
     expect(String(sendMessageTelegram.mock.calls[1]?.[1])).toContain("stack");
+  });
+
+  it("acquires single-flight before fresh bootstrapping reset on concurrent first-hit starts", async () => {
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    const upsertSpy = vi.spyOn(telegramBootstrapSessionModule, "upsertTelegramBootstrapSession");
+
+    let releaseAck: (() => void) | undefined;
+    sendMessageTelegram
+      .mockImplementationOnce(() => new Promise<void>((resolve) => {
+        releaseAck = resolve;
+      }))
+      .mockResolvedValue(undefined);
+
+    const content = [
+      "Build and register a new project.",
+      "Project name: todo-summary-tool",
+      "Stack: python-cli",
+      "Idea:",
+      "Build a simple Python CLI for todo summary",
+    ].join("\n");
+
+    const first = handler?.(
+      { content, metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+    const second = handler?.(
+      { content, metadata: {} },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    await vi.waitFor(() => {
+      const freshBootstrappingCalls = upsertSpy.mock.calls.filter(([, input]) => (
+        input.status === "bootstrapping" &&
+        input.ackSentAt === null &&
+        input.nextRetryAt === null &&
+        input.lastError === null
+      ));
+      expect(freshBootstrappingCalls).toHaveLength(1);
+    }, { timeout: 2000 });
+
+    releaseAck?.();
+    await Promise.all([first, second]);
+    upsertSpy.mockRestore();
   });
 
   it("keeps terminal clarification-resolved preflight failures failed when the failure DM send breaks", async () => {

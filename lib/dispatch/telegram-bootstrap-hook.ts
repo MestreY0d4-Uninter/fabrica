@@ -519,6 +519,26 @@ function launchBootstrapResume(
   return resumePromise;
 }
 
+function startFreshBootstrapResume(
+  ctx: PluginContext,
+  workspaceDir: string,
+  conversationId: string,
+  start: () => Promise<TelegramBootstrapSession>,
+): Promise<TelegramBootstrapSession> | null {
+  if (activeBootstrapResumes.has(conversationId)) {
+    return null;
+  }
+
+  activeBootstrapResumes.add(conversationId);
+  const resumePromise = (async () => {
+    const session = await start();
+    return await resumeBootstrappingSession(ctx, workspaceDir, session);
+  })().finally(() => {
+    activeBootstrapResumes.delete(conversationId);
+  });
+  return resumePromise;
+}
+
 async function persistDispatchProgress(
   workspaceDir: string,
   session: TelegramBootstrapSession,
@@ -875,14 +895,13 @@ async function classifyAndBootstrap(
   }
 
   const sourceRoute: TelegramBootstrapRoute = { channel: "telegram", channelId: conversationId };
-  const session = await enterBootstrapping(
+  startFreshBootstrapResume(ctx, workspaceDir, conversationId, () => enterBootstrapping(
     workspaceDir,
     conversationId,
     incomingRequest,
     sourceRoute,
     language,
-  );
-  launchBootstrapResume(ctx, workspaceDir, session);
+  ));
 }
 
 /**
@@ -1243,7 +1262,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
         repoPath: existingSession.repoPath ?? null,
       };
       ctx.logger.info(`[telegram-bootstrap] clarification resolved: stack=${mergedRequest.stackHint}, idea="${mergedRequest.rawIdea}" (conversation: ${conversationId})`);
-      const session = await enterBootstrapping(
+      startFreshBootstrapResume(ctx, workspaceDir, conversationId, () => enterBootstrapping(
         workspaceDir,
         conversationId,
         mergedRequest,
@@ -1255,8 +1274,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
         {
           ackSentAt: existingSession.ackSentAt ?? null,
         },
-      );
-      launchBootstrapResume(ctx, workspaceDir, session);
+      ));
       return;
     }
 
@@ -1350,7 +1368,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       ? "pt" : "en";
 
     if (!parsed.stackHint) {
-      const session = await enterBootstrapping(
+      await startFreshBootstrapResume(ctx, workspaceDir, conversationId, () => enterBootstrapping(
         workspaceDir,
         conversationId,
         incomingRequest,
@@ -1359,8 +1377,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
           channelId: conversationId,
         },
         language,
-      );
-      await launchBootstrapResume(ctx, workspaceDir, session);
+      ));
       return;
     }
 
@@ -1377,7 +1394,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
     );
     if (handled) return;
 
-    const session = await enterBootstrapping(
+    startFreshBootstrapResume(ctx, workspaceDir, conversationId, () => enterBootstrapping(
       workspaceDir,
       conversationId,
       incomingRequest,
@@ -1386,8 +1403,6 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
         channelId: conversationId,
       },
       language,
-    );
-
-    launchBootstrapResume(ctx, workspaceDir, session);
+    ));
   });
 }
