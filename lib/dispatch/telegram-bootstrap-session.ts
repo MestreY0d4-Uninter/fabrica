@@ -74,6 +74,11 @@ export type TelegramBootstrapSession = {
   error?: string | null;
 };
 
+export type TelegramBootstrapAttemptSnapshot = Pick<
+  TelegramBootstrapSession,
+  "conversationId" | "attemptId" | "attemptSeq" | "requestHash" | "status" | "updatedAt"
+>;
+
 const SESSION_TTL_MS = 10 * 60_000;
 const CLASSIFYING_TTL_MS = 15_000; // 15s — matches LLM timeout
 
@@ -323,4 +328,40 @@ export function shouldSuppressTelegramBootstrapReply(
   if (session.status !== "completed" && session.status !== "failed") return true;
   if (!request) return true;
   return buildBootstrapRequestFingerprint(request) === session.requestHash;
+}
+
+export function isRecoverableTelegramBootstrapSession(
+  session: TelegramBootstrapSession | null | undefined,
+): session is TelegramBootstrapSession & { status: "bootstrapping" | "dispatching" } {
+  return session?.status === "bootstrapping" || session?.status === "dispatching";
+}
+
+export function isClaimableTelegramBootstrapSession(
+  session: TelegramBootstrapSession | null | undefined,
+  now = Date.now(),
+): session is TelegramBootstrapSession & { status: "bootstrapping" | "dispatching" } {
+  if (!isRecoverableTelegramBootstrapSession(session)) return false;
+  if (!session.nextRetryAt) return true;
+  const retryAt = Date.parse(session.nextRetryAt);
+  return Number.isNaN(retryAt) || retryAt <= now;
+}
+
+export function isSupersededTelegramBootstrapAttempt(
+  current: TelegramBootstrapSession | null | undefined,
+  candidate: TelegramBootstrapAttemptSnapshot | null | undefined,
+): boolean {
+  if (!current || !candidate) return false;
+  if (current.conversationId !== candidate.conversationId) return true;
+
+  const currentHasAttempt = current.attemptId != null && current.attemptSeq != null;
+  const candidateHasAttempt = candidate.attemptId != null && candidate.attemptSeq != null;
+  if (currentHasAttempt || candidateHasAttempt) {
+    return current.attemptId !== candidate.attemptId || current.attemptSeq !== candidate.attemptSeq;
+  }
+
+  return (
+    current.requestHash !== candidate.requestHash ||
+    current.status !== candidate.status ||
+    current.updatedAt !== candidate.updatedAt
+  );
 }

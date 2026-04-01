@@ -598,6 +598,13 @@ describe("telegram bootstrap hook", () => {
     expect(session?.attemptCount).toBe(1);
     expect(session?.ackSentAt).toBeNull();
 
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: "6951571380",
+      rawIdea: "Build a simple Python CLI for todo summary",
+      status: "bootstrapping",
+      nextRetryAt: new Date(Date.now() - 1_000).toISOString(),
+    });
+
     await resumeBootstrapping(ctx, workspaceDir, "6951571380");
 
     session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
@@ -3140,6 +3147,65 @@ describe("telegram bootstrap regression coverage", () => {
     const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
     expect(session?.status).toBe("completed");
     expect(session?.projectSlug).toBe("new-summary-service");
+    expect(session?.lastError).toBeNull();
+    expect(session?.nextRetryAt).toBeNull();
+  });
+
+  it("does not stamp retry metadata onto a newer attempt after a stale recovery fails", async () => {
+    const conversationId = "telegram:6951571380";
+
+    const seeded = await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId,
+      rawIdea: "Build an older Python CLI for summaries",
+      projectName: "old-summary-cli",
+      stackHint: "python-cli",
+      sourceRoute: { channel: "telegram", channelId: "6951571380" },
+      status: "bootstrapping",
+      attemptCount: 1,
+      nextRetryAt: new Date(Date.now() - 1_000).toISOString(),
+      language: "en",
+    });
+
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId,
+      rawIdea: seeded.rawIdea,
+      projectName: seeded.projectName,
+      stackHint: seeded.stackHint,
+      sourceRoute: seeded.sourceRoute,
+      status: seeded.status,
+      attemptId: "attempt-old",
+      attemptSeq: 1,
+      attemptCount: seeded.attemptCount,
+      nextRetryAt: seeded.nextRetryAt,
+      language: "en",
+    });
+
+    sendMessageTelegram.mockImplementationOnce(async () => {
+      await upsertTelegramBootstrapSession(workspaceDir, {
+        conversationId,
+        rawIdea: "Build the newer summary service",
+        projectName: "new-summary-service",
+        stackHint: "python-cli",
+        projectSlug: "new-summary-service",
+        sourceRoute: { channel: "telegram", channelId: "6951571380" },
+        status: "bootstrapping",
+        attemptId: "attempt-new",
+        attemptSeq: 2,
+        attemptCount: 4,
+        lastError: null,
+        nextRetryAt: null,
+        language: "en",
+      });
+      throw new Error("stale recovery send failed");
+    });
+
+    await recoverDueBootstraps(ctx, workspaceDir);
+
+    const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
+    expect(session?.status).toBe("bootstrapping");
+    expect(session?.attemptId).toBe("attempt-new");
+    expect(session?.attemptSeq).toBe(2);
+    expect(session?.attemptCount).toBe(4);
     expect(session?.lastError).toBeNull();
     expect(session?.nextRetryAt).toBeNull();
   });

@@ -3,10 +3,11 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { registerGatewayLifecycleHook } from "../../lib/setup/gateway-lifecycle-hook.js";
 
 // Hoist mocks before any imports are resolved
-const { mockAccess, mockReadFile, mockAuditLog } = vi.hoisted(() => ({
+const { mockAccess, mockReadFile, mockAuditLog, mockRecoverDueBootstraps } = vi.hoisted(() => ({
   mockAccess: vi.fn(),
   mockReadFile: vi.fn(),
   mockAuditLog: vi.fn(),
+  mockRecoverDueBootstraps: vi.fn(),
 }));
 
 vi.mock("node:fs/promises", () => ({
@@ -20,6 +21,10 @@ vi.mock("node:fs/promises", () => ({
 
 vi.mock("../../lib/audit.js", () => ({
   log: mockAuditLog,
+}));
+
+vi.mock("../../lib/dispatch/telegram-bootstrap-hook.js", () => ({
+  recoverDueTelegramBootstrapSessions: mockRecoverDueBootstraps,
 }));
 
 const workspaceDir = "/tmp/test-workspace";
@@ -52,6 +57,7 @@ function makeCtx(ws?: string) {
 describe("gateway_start hook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRecoverDueBootstraps.mockResolvedValue(0);
   });
 
   it("registers a gateway_start hook via api.on when workspace is configured", () => {
@@ -79,6 +85,7 @@ describe("gateway_start hook", () => {
 
     expect(mockAccess).toHaveBeenCalled();
     expect(mockReadFile).toHaveBeenCalled();
+    expect(mockRecoverDueBootstraps).toHaveBeenCalledWith(expect.anything(), workspaceDir);
     expect(mockAuditLog).toHaveBeenCalledWith(
       workspaceDir,
       "gateway_start",
@@ -86,6 +93,25 @@ describe("gateway_start hook", () => {
         port: 18789,
         bootTime: expect.any(String),
       }),
+    );
+  });
+
+  it("audits recovered Telegram bootstrap sessions on gateway start", async () => {
+    const { api, getHandler } = makeApi();
+    registerGatewayLifecycleHook(api, makeCtx(workspaceDir));
+    const handler = getHandler()!;
+
+    mockAccess.mockResolvedValue(undefined);
+    mockReadFile.mockResolvedValue(JSON.stringify({ projects: [] }));
+    mockAuditLog.mockResolvedValue(undefined);
+    mockRecoverDueBootstraps.mockResolvedValue(2);
+
+    await handler({ port: 18789 }, { port: 18789 });
+
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      workspaceDir,
+      "gateway_start_bootstrap_recovery",
+      expect.objectContaining({ recoveredCount: 2 }),
     );
   });
 

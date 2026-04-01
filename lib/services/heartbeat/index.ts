@@ -25,6 +25,7 @@ import { getLifecycleService } from "../../machines/lifecycle-service.js";
 import { raceWithTimeout } from "../../utils/async.js";
 export { raceWithTimeout } from "../../utils/async.js";
 import { loadConfig } from "../../config/index.js";
+import { recoverDueTelegramBootstrapSessions } from "../../dispatch/telegram-bootstrap-hook.js";
 
 export { HEARTBEAT_DEFAULTS };
 import { tick, type TickMode } from "./tick-runner.js";
@@ -166,6 +167,22 @@ async function runHeartbeatTick(
 
         const agents = discoverAgents(ctx.config);
         if (agents.length === 0) return;
+
+        if (mode !== "triage") {
+          const recoveredWorkspaces = new Set<string>();
+          for (const { workspace } of agents) {
+            if (recoveredWorkspaces.has(workspace)) continue;
+            recoveredWorkspaces.add(workspace);
+            try {
+              const recoveredCount = await recoverDueTelegramBootstrapSessions(ctx, workspace);
+              if (recoveredCount > 0) {
+                logger.info(`telegram_bootstrap_recovery: resumed ${recoveredCount} due session(s) in ${workspace}`);
+              }
+            } catch (err) {
+              logger.warn(`Telegram bootstrap recovery failed for ${workspace}: ${(err as Error).message}`);
+            }
+          }
+        }
 
         const result = await processAllAgents(agents, config, ctx.pluginConfig, logger, ctx.runCommand, ctx.runtime, mode);
         logTickResult(result, logger, mode);

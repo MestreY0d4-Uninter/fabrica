@@ -16,6 +16,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { log as auditLog } from "../audit.js";
 import { resolveWorkspaceDir } from "../dispatch/attachment-hook.js";
+import { recoverDueTelegramBootstrapSessions } from "../dispatch/telegram-bootstrap-hook.js";
 
 export function registerGatewayLifecycleHook(
   api: OpenClawPluginApi,
@@ -46,6 +47,20 @@ export function registerGatewayLifecycleHook(
     } catch (err) {
       await auditLog(workspaceDir, "gateway_start_warning", {
         message: `projects.json invalid or missing: ${projectsPath}`,
+        error: String(err),
+      }).catch(() => {});
+    }
+
+    try {
+      const recoveredCount = await recoverDueTelegramBootstrapSessions(ctx, workspaceDir);
+      if (recoveredCount > 0) {
+        await auditLog(workspaceDir, "gateway_start_bootstrap_recovery", {
+          recoveredCount,
+        }).catch(() => {});
+      }
+    } catch (err) {
+      await auditLog(workspaceDir, "gateway_start_warning", {
+        message: "telegram bootstrap recovery failed during gateway start",
         error: String(err),
       }).catch(() => {});
     }

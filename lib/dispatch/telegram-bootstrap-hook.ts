@@ -16,6 +16,9 @@ import { z } from "zod";
 import {
   buildBootstrapRequestHash,
   deleteTelegramBootstrapSession,
+  isClaimableTelegramBootstrapSession,
+  isRecoverableTelegramBootstrapSession,
+  isSupersededTelegramBootstrapAttempt,
   readTelegramBootstrapSession,
   shouldSuppressTelegramBootstrapReply,
   upsertTelegramBootstrapSession,
@@ -410,25 +413,11 @@ function buildProjectRoute(session: TelegramBootstrapSession): TelegramBootstrap
   };
 }
 
-type RecoverableBootstrapSession = TelegramBootstrapSession & {
-  status: "bootstrapping" | "dispatching";
-};
-
 type BootstrapAttemptOwner = {
   conversationId: string;
   attemptId: string;
   attemptSeq: number;
 };
-
-function isRecoverableBootstrapSession(session: TelegramBootstrapSession | null | undefined): session is RecoverableBootstrapSession {
-  return session?.status === "bootstrapping" || session?.status === "dispatching";
-}
-
-function shouldResumeBootstrapNow(session: TelegramBootstrapSession): boolean {
-  if (!session.nextRetryAt) return true;
-  const retryAt = Date.parse(session.nextRetryAt);
-  return Number.isNaN(retryAt) || retryAt <= Date.now();
-}
 
 function freshBootstrapResetFields(request: BootstrapRequest): {
   projectRoute: null;
@@ -656,8 +645,13 @@ async function recordBootstrapRetry(
 
 async function leaseBootstrapRecovery(
   workspaceDir: string,
-  session: TelegramBootstrapSession,
-): Promise<TelegramBootstrapSession> {
+  conversationId: string,
+): Promise<TelegramBootstrapSession | null> {
+  const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
+  if (!isClaimableTelegramBootstrapSession(session)) {
+    return null;
+  }
+
   const owner = buildBootstrapAttemptOwner(session) ?? {
     ...createBootstrapAttemptOwner(session),
     conversationId: session.conversationId,
@@ -679,8 +673,8 @@ function startFreshBootstrapResume(
   ctx: PluginContext,
   workspaceDir: string,
   conversationId: string,
-  start: () => Promise<TelegramBootstrapSession>,
-): Promise<TelegramBootstrapSession> | null {
+  start: () => Promise<TelegramBootstrapSession | null>,
+): Promise<TelegramBootstrapSession | null> | null {
   if (activeBootstrapResumes.has(conversationId)) {
     return null;
   }
@@ -688,6 +682,9 @@ function startFreshBootstrapResume(
   activeBootstrapResumes.add(conversationId);
   const resumePromise = (async () => {
     const session = await start();
+    if (!session) {
+      return null;
+    }
     return await resumeBootstrappingSession(ctx, workspaceDir, session);
   })().finally(() => {
     activeBootstrapResumes.delete(conversationId);
@@ -969,7 +966,18 @@ async function resumeBootstrappingSession(
   try {
     return await runBootstrapHandoff(ctx, workspaceDir, session);
   } catch (error) {
+    const sessionSnapshot = {
+      conversationId: session.conversationId,
+      attemptId: session.attemptId ?? null,
+      attemptSeq: session.attemptSeq ?? null,
+      requestHash: session.requestHash,
+      status: session.status,
+      updatedAt: session.updatedAt,
+    } as const;
     const latestSession = await readTelegramBootstrapSession(workspaceDir, session.conversationId) ?? session;
+    if (isSupersededTelegramBootstrapAttempt(latestSession, sessionSnapshot)) {
+      return latestSession;
+    }
     if (latestSession.status === "failed" || latestSession.status === "completed") {
       return latestSession;
     }
@@ -983,9 +991,12 @@ async function resumeBootstrapping(
   conversationId: string,
 ): Promise<TelegramBootstrapSession | null> {
   const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
-  if (!isRecoverableBootstrapSession(session)) return session;
+  if (!isRecoverableTelegramBootstrapSession(session)) return session;
   if (activeBootstrapResumes.has(conversationId)) return session;
-  const leasedSession = await leaseBootstrapRecovery(workspaceDir, session);
+  const leasedSession = await leaseBootstrapRecovery(workspaceDir, conversationId);
+  if (!leasedSession) {
+    return await readTelegramBootstrapSession(workspaceDir, conversationId);
+  }
   return resumeBootstrappingSession(ctx, workspaceDir, leasedSession);
 }
 
@@ -1008,11 +1019,11 @@ export async function recoverDueTelegramBootstrapSessions(
     if (!file.endsWith(".json")) continue;
     const conversationId = file.replace(/\.json$/, "");
     const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
-    if (!isRecoverableBootstrapSession(session)) continue;
-    if (!shouldResumeBootstrapNow(session)) continue;
+    if (!isClaimableTelegramBootstrapSession(session)) continue;
     if (activeBootstrapResumes.has(session.conversationId)) continue;
 
-    const leasedSession = await leaseBootstrapRecovery(workspaceDir, session);
+    const leasedSession = await leaseBootstrapRecovery(workspaceDir, conversationId);
+    if (!leasedSession) continue;
     activeBootstrapResumes.add(leasedSession.conversationId);
     try {
       await resumeBootstrappingSession(ctx, workspaceDir, leasedSession);
@@ -1587,13 +1598,13 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
 
     // Layer 1: Active clarifying OR classifying session?
     const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
-    if (isRecoverableBootstrapSession(existingSession)) {
-      if (shouldResumeBootstrapNow(existingSession)) {
+    if (isRecoverableTelegramBootstrapSession(existingSession)) {
+      if (isClaimableTelegramBootstrapSession(existingSession)) {
         startFreshBootstrapResume(
           ctx,
           workspaceDir,
           existingSession.conversationId,
-          () => leaseBootstrapRecovery(workspaceDir, existingSession),
+          () => leaseBootstrapRecovery(workspaceDir, existingSession.conversationId),
         );
       } else {
         ctx.logger.info(`[telegram-bootstrap] recovery deferred until ${existingSession.nextRetryAt} for ${conversationId}`);
