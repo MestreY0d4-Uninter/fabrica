@@ -23,6 +23,7 @@ import { createProvider } from "../../providers/index.js";
 import { log as auditLog } from "../../audit.js";
 import { getAllRoleIds } from "../../roles/index.js";
 import { getRoleLabels, OPERATIONAL_LABELS } from "../../workflow/index.js";
+import type { WorkflowConfig } from "../../workflow/index.js";
 import { loadConfig } from "../../config/index.js";
 import { DATA_DIR } from "../../setup/constants.js";
 import { createProjectForumTopic } from "../../telegram/topic-service.js";
@@ -172,7 +173,7 @@ function cloneProjectData<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function applyAutonomousReviewPolicy<T extends { workflow: { reviewPolicy: string } }>(
+function applyAutonomousReviewPolicy<T extends { workflow: WorkflowConfig }>(
   config: T,
   reviewPolicy: string,
 ): T {
