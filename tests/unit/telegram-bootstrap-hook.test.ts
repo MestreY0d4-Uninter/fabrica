@@ -608,86 +608,6 @@ describe("telegram bootstrap hook", () => {
     expect(session?.nextRetryAt).toBeNull();
   });
 
-  it("falls back to CLI sending when the Telegram runtime channel is unavailable", async () => {
-    mockRunPipeline.mockResolvedValue({
-      success: true,
-      payload: {
-        metadata: {
-          channel_id: "-1003709213169",
-          message_thread_id: 778,
-          project_slug: "todo-summary-tool",
-        },
-      },
-    });
-
-    const runCommand = vi.fn(async () => ({ stdout: "{\"ok\":true}", stderr: "", code: 0 }));
-    const ctxWithoutTelegramRuntime = {
-      ...ctx,
-      runtime: {
-        ...ctx.runtime,
-        channel: {},
-      },
-      runCommand,
-    } as any;
-
-    await upsertTelegramBootstrapSession(workspaceDir, {
-      conversationId: "telegram:6951571380",
-      rawIdea: "Build a simple Python CLI for todo summary",
-      projectName: "todo-summary-tool",
-      stackHint: "python-cli",
-      sourceRoute: { channel: "telegram", channelId: "6951571380" },
-      status: "bootstrapping",
-      attemptCount: 1,
-      lastError: "telegram runtime unavailable",
-      nextRetryAt: new Date(Date.now() - 1_000).toISOString(),
-      language: "en",
-    });
-
-    await resumeBootstrapping(ctxWithoutTelegramRuntime, workspaceDir, "telegram:6951571380");
-
-    const session = await readTelegramBootstrapSession(workspaceDir, "telegram:6951571380");
-    expect(session?.status).toBe("completed");
-    expect(runCommand).toHaveBeenCalledTimes(3);
-    expect(runCommand.mock.calls[0]?.[0]).toEqual([
-      "openclaw",
-      "message",
-      "send",
-      "--channel",
-      "telegram",
-      "--target",
-      "6951571380",
-      "--message",
-      expect.stringContaining("Got it!"),
-      "--json",
-    ]);
-    expect(runCommand.mock.calls[1]?.[0]).toEqual([
-      "openclaw",
-      "message",
-      "send",
-      "--channel",
-      "telegram",
-      "--target",
-      "-1003709213169",
-      "--message",
-      expect.stringContaining("Project automatically registered"),
-      "--json",
-      "--thread-id",
-      "778",
-    ]);
-    expect(runCommand.mock.calls[2]?.[0]).toEqual([
-      "openclaw",
-      "message",
-      "send",
-      "--channel",
-      "telegram",
-      "--target",
-      "6951571380",
-      "--message",
-      expect.stringContaining("https://t.me/c/3709213169/778"),
-      "--json",
-    ]);
-  });
-
   it("recovers due bootstrapping sessions without requiring a new inbound Telegram message", async () => {
     mockRunPipeline.mockResolvedValue({
       success: true,
@@ -699,16 +619,6 @@ describe("telegram bootstrap hook", () => {
         },
       },
     });
-
-    const runCommand = vi.fn(async () => ({ stdout: "{\"ok\":true}", stderr: "", code: 0 }));
-    const ctxWithoutTelegramRuntime = {
-      ...ctx,
-      runtime: {
-        ...ctx.runtime,
-        channel: {},
-      },
-      runCommand,
-    } as any;
 
     await upsertTelegramBootstrapSession(workspaceDir, {
       conversationId: "telegram:6951571380",
@@ -723,55 +633,12 @@ describe("telegram bootstrap hook", () => {
       language: "en",
     });
 
-    const recoveredCount = await recoverDueBootstraps(ctxWithoutTelegramRuntime, workspaceDir);
+    const recoveredCount = await recoverDueBootstraps(ctx, workspaceDir);
 
     const session = await readTelegramBootstrapSession(workspaceDir, "telegram:6951571380");
     expect(recoveredCount).toBe(1);
     expect(session?.status).toBe("completed");
-    expect(runCommand).toHaveBeenCalledTimes(3);
-  });
-
-  it("falls back to CLI sending when the Telegram runtime sender exists but fails structurally", async () => {
-    mockRunPipeline.mockResolvedValue({
-      success: true,
-      payload: {
-        metadata: {
-          channel_id: "-1003709213169",
-          message_thread_id: 778,
-          project_slug: "todo-summary-tool",
-        },
-      },
-    });
-
-    sendMessageTelegram.mockRejectedValue(
-      new TypeError("Cannot read properties of undefined (reading 'sendMessageTelegram')"),
-    );
-
-    const runCommand = vi.fn(async () => ({ stdout: "{\"ok\":true}", stderr: "", code: 0 }));
-    const ctxWithBrokenTelegramRuntime = {
-      ...ctx,
-      runCommand,
-    } as any;
-
-    await upsertTelegramBootstrapSession(workspaceDir, {
-      conversationId: "telegram:6951571380",
-      rawIdea: "Build a simple Python CLI for todo summary",
-      projectName: "todo-summary-tool",
-      stackHint: "python-cli",
-      sourceRoute: { channel: "telegram", channelId: "6951571380" },
-      status: "bootstrapping",
-      attemptCount: 1,
-      lastError: "telegram runtime failed",
-      nextRetryAt: new Date(Date.now() - 1_000).toISOString(),
-      language: "en",
-    });
-
-    await resumeBootstrapping(ctxWithBrokenTelegramRuntime, workspaceDir, "telegram:6951571380");
-
-    const session = await readTelegramBootstrapSession(workspaceDir, "telegram:6951571380");
-    expect(session?.status).toBe("completed");
     expect(sendMessageTelegram).toHaveBeenCalledTimes(3);
-    expect(runCommand).toHaveBeenCalledTimes(3);
   });
 
   it("does not let an older recovery resume overwrite a newer bootstrap attempt", async () => {

@@ -354,65 +354,19 @@ function normalizeTelegramChatTarget(target: string): string {
   return target.startsWith("telegram:") ? target.slice("telegram:".length) : target;
 }
 
-function isRecoverableTelegramRuntimeSendError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /Cannot read properties of undefined|is not a function|runtime unavailable/i.test(message);
-}
-
 async function sendTelegramText(
   ctx: PluginContext,
   target: string,
   message: string,
   opts?: { accountId?: string; messageThreadId?: number },
 ): Promise<void> {
-  const normalizedTarget = normalizeTelegramChatTarget(target);
   const sendOpts: Record<string, unknown> = {
     silent: true,
     disableWebPagePreview: true,
   };
   if (opts?.accountId) sendOpts.accountId = opts.accountId;
   if (opts?.messageThreadId != null) sendOpts.messageThreadId = opts.messageThreadId;
-
-  const telegramChannel = (ctx.runtime as any)?.channel?.telegram as
-    | { sendMessageTelegram?: (to: string, text: string, options?: Record<string, unknown>) => Promise<unknown> }
-    | undefined;
-
-  if (telegramChannel?.sendMessageTelegram) {
-    try {
-      await telegramChannel.sendMessageTelegram(normalizedTarget, message, sendOpts);
-      return;
-    } catch (error) {
-      if (!isRecoverableTelegramRuntimeSendError(error)) {
-        throw error;
-      }
-      logBootstrapWarning(
-        ctx,
-        `[telegram-bootstrap] Telegram runtime send failed, falling back to CLI delivery: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-  }
-
-  const cliArgs = [
-    "openclaw",
-    "message",
-    "send",
-    "--channel",
-    "telegram",
-    "--target",
-    normalizedTarget,
-    "--message",
-    message,
-    "--json",
-  ];
-  if (opts?.accountId) {
-    cliArgs.push("--account", opts.accountId);
-  }
-  if (opts?.messageThreadId != null) {
-    cliArgs.push("--thread-id", String(opts.messageThreadId));
-  }
-  await ctx.runCommand(cliArgs, { timeoutMs: 30_000 });
+  await ctx.runtime.channel.telegram.sendMessageTelegram(normalizeTelegramChatTarget(target), message, sendOpts as any);
 }
 
 function logBootstrapWarning(ctx: PluginContext, message: string): void {
