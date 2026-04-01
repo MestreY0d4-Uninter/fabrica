@@ -5,7 +5,7 @@
  *   1. Filters to Fabrica worker session keys only (project-role-level-name pattern).
  *   2. Writes an audit log entry with sessionKey, project, role, and outcome.
  *   3. Acts as a repair path when the primary agent_end completion path did not apply.
- *   4. Reverts the issue label from active back to queue only when repair is still needed.
+ *   4. Reverts the issue label from active back to queue only when lifecycle repair is still needed.
  *   5. Wakes heartbeat for immediate dispatch of the next pipeline stage.
  *
  * All checks are best-effort: failures are logged silently and never
@@ -92,7 +92,8 @@ export function registerSubagentLifecycleHook(
         if (foundSlot) break;
       }
 
-      // If not found: work_finish already handled this session (cleared sessionKey). No-op.
+      // If not found: the primary completion path already handled this session
+      // and cleared the slot binding. Treat subagent_ended as a no-op repair observation.
       if (!foundSlot || foundLevel == null || foundSlotIndex == null) return;
 
       // Resolve issueId: active slots have it directly; deactivated slots store it in lastIssueId.
