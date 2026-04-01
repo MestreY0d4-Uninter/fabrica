@@ -1,7 +1,7 @@
 # Hot Path Operational Audit Report
 
 Date: 2026-04-01
-Status: In Progress
+Status: Completed
 
 ## Scope
 
@@ -15,6 +15,15 @@ This report audits only the Fabrica hot path required for autonomous operation:
 - contamination from stale operational state when it can affect the live flow
 
 OpenClaw is treated as a fixed platform constraint. This report separates plugin bugs from intentional plugin behavior and from host/runtime limitations.
+
+## Executive Summary
+
+- The current first hard break in the live hot path is post-classification Telegram bootstrap handoff, not Telegram intake itself.
+- The dominant architectural weakness in the hot path is weak bootstrap session ownership and durability.
+- Register/provision still leaks partial side effects before registered project truth exists.
+- Dispatch identity is no longer the primary risk area.
+- Review/test logic is operationally behind the current ingress/register break, but reviewer completion still has more than one observer.
+- The most dangerous contamination vector is stale non-terminal bootstrap session state, not old project directories by themselves.
 
 ## Environment Snapshot
 
@@ -158,15 +167,87 @@ Preliminary severity:
 
 ### Checkpoint 4: Project Activation / Dispatch
 
-Pending.
+Source of truth:
+
+- dispatch setup in [`dispatch/index.ts`](/home/mateus/Fabrica/.worktrees/release-integration/fabrica/lib/dispatch/index.ts)
+- queue scan and pickup in [`tick.ts`](/home/mateus/Fabrica/.worktrees/release-integration/fabrica/lib/services/tick.ts)
+- completion/identity enforcement in [`work-finish.ts`](/home/mateus/Fabrica/.worktrees/release-integration/fabrica/lib/tools/worker/work-finish.ts)
+
+Current assessment:
+
+- dispatch identity is substantially more hardened than the bootstrap/register path
+- `dispatchTask(...)` uses slot/session/run-cycle fields and guards against stale session reuse
+- review/test dispatch now requires a canonical reviewable PR before pickup
+- `work_finish` still fails closed when provider validation is uncertain
+- the real source of truth for dispatch is project state on disk, not [`runtime/lifecycle.json`](/home/mateus/.openclaw/workspace/fabrica/runtime/lifecycle.json)
+
+Operational reading:
+
+- activation and dispatch are not the primary cause of the current Telegram bootstrap outage
+- however, bootstrap/register failure can still poison dispatch indirectly by creating local project residue without a live registered project
+- once a project record exists, dispatch itself does not validate Telegram/topic routing; broken notification routing would not block pickup
+
+Preliminary severity:
+
+- no new `P0` found here yet
+- current risk is secondary and depends on upstream hot-path corruption
+- at most `P2` for observability confusion around lifecycle telemetry
 
 ### Checkpoint 5: Review / Test Gates
 
-Pending.
+Source of truth:
+
+- reviewer immediate handling in [`subagent-lifecycle-hook.ts`](/home/mateus/Fabrica/.worktrees/release-integration/fabrica/lib/dispatch/subagent-lifecycle-hook.ts)
+- reviewer heartbeat fallback in [`passes.ts`](/home/mateus/Fabrica/.worktrees/release-integration/fabrica/lib/services/heartbeat/passes.ts)
+- provider-side review polling in [`review.ts`](/home/mateus/Fabrica/.worktrees/release-integration/fabrica/lib/services/heartbeat/review.ts)
+- tester completion in [`work-finish.ts`](/home/mateus/Fabrica/.worktrees/release-integration/fabrica/lib/tools/worker/work-finish.ts)
+
+Current assessment:
+
+- reviewer authority is still split across more than one mechanism:
+  - agent-end/session parsing
+  - reviewer poll pass
+  - provider PR review state polling
+- tester authority is more coherent because it centers on `work_finish` plus provider validation
+- reviewer `work_finish` is no longer part of the hot path and is explicitly blocked
+- the intended rejection loops remain clear:
+  - reviewer reject -> feedback/improve path
+  - tester fail -> improve path
+  - tester fail_infra -> retry/retest path
+
+Operational reading:
+
+- review/test gates are no longer the first blocker in the current hot path
+- they remain an area of architectural fragility because more than one path can observe or advance reviewer state
+
+Preliminary severity:
+
+- `P1`: reviewer completion still has competing authority paths, even though the most acute earlier stall has already been reduced
 
 ### Checkpoint 6: Recovery / Retry / Dedup
 
-Pending.
+Source of truth:
+
+- heartbeat recovery in [`heartbeat/index.ts`](/home/mateus/Fabrica/.worktrees/release-integration/fabrica/lib/services/heartbeat/index.ts)
+- gateway-start recovery in [`gateway-lifecycle-hook.ts`](/home/mateus/Fabrica/.worktrees/release-integration/fabrica/lib/setup/gateway-lifecycle-hook.ts)
+- bootstrap recovery in [`telegram-bootstrap-hook.ts`](/home/mateus/Fabrica/.worktrees/release-integration/fabrica/lib/dispatch/telegram-bootstrap-hook.ts)
+
+Current assessment:
+
+- heartbeat and gateway-start recovery are safe right now only because [`bootstrap-sessions/`](/home/mateus/.openclaw/workspace/fabrica/bootstrap-sessions) is empty
+- the most dangerous active contamination source is not old project directories but stale non-terminal bootstrap session files
+- a stale `bootstrapping` or `dispatching` session can both:
+  - suppress new Telegram replies
+  - trigger automatic recovery/replay
+
+Operational reading:
+
+- the recovery model is workable only if bootstrap session persistence is trustworthy
+- until then, recovery is fragile because it depends on a session model that can disappear, be overwritten, or regress
+
+Preliminary severity:
+
+- `P1`: recovery entrypoints are structurally fragile because they depend on weak session ownership
 
 ## State Contamination
 
@@ -175,6 +256,20 @@ Preliminary observation:
 - Fabrica’s live registration truth is empty, but the workspace still contains many project directories and at least one partial `todo-summary` project override.
 - This means stale on-disk state is already proven to diverge from live project truth.
 - The contamination lane must determine which of these residues are only diagnostic noise and which can still influence heartbeat, discovery, registration, or recovery.
+
+Refined classification:
+
+- active contamination:
+  - any non-terminal file in [`bootstrap-sessions/`](/home/mateus/.openclaw/workspace/fabrica/bootstrap-sessions), because that can suppress Telegram replies and trigger recovery
+- passive residue:
+  - old project directories under [`projects/`](/home/mateus/.openclaw/workspace/fabrica/projects)
+  - sideband scaffold files under [`sideband/`](/home/mateus/.openclaw/workspace/fabrica/sideband)
+  - rotated audit logs and backup files
+
+Current nuance:
+
+- passive residue still harms diagnosis and trust
+- but the most operationally dangerous contamination vector is session state, not old directories by themselves
 
 ## Findings
 
@@ -237,14 +332,93 @@ Preliminary observation:
 - Cause hypothesis:
   - bootstrap state model is conversation-scoped, but the operational flow really needs attempt-scoped durability or stronger write ownership
 
+### P1-4: Reviewer completion still has competing authority paths
+- Unit: Review/Test Gate Unit
+- Evidence:
+  - reviewer decision text is parsed from session output as the canonical agent-review signal
+  - reviewer poll pass can also transition based on the same session later
+  - provider-side review polling in [`review.ts`](/home/mateus/Fabrica/.worktrees/release-integration/fabrica/lib/services/heartbeat/review.ts) can still advance review from PR state, including merged PRs satisfying approval checks
+- Impact:
+  - reviewer-text authority is not exclusive, which keeps recovery and gate reasoning more complex than the tester path
+- Cause hypothesis:
+  - the plugin still supports a mixed model of agent-review completion and provider-side review state recovery
+
 ### P2
 
-Pending.
+### P2-1: Workspace residue substantially obscures the real live state
+- Unit: State Contamination Unit
+- Evidence:
+  - [`projects.json`](/home/mateus/.openclaw/workspace/fabrica/projects.json) is empty while many old project directories remain on disk
+  - old audit and sideband artifacts remain alongside current state
+- Impact:
+  - slows diagnosis and makes operators misread what is actually live
+- Cause hypothesis:
+  - cleanup of test/e2e residue is not enforced as part of operational reset
+
+### P2-2: Lifecycle telemetry can be mistaken for dispatch truth
+- Unit: Project Activation / Dispatch Unit
+- Evidence:
+  - [`runtime/lifecycle.json`](/home/mateus/.openclaw/workspace/fabrica/runtime/lifecycle.json) only carries coarse service state
+  - dispatch/pickup logic actually reads project state and slot/runtime fields from the project store
+- Impact:
+  - operators can chase the wrong artifact during diagnosis
+- Cause hypothesis:
+  - lifecycle telemetry is useful for service health but not clearly distinguished from project/dispatch truth
 
 ## Intentional Behavior
 
-Pending.
+- `NO_REPLY` in active Telegram bootstrap handling is intentional. The plugin explicitly suppresses the normal agent reply while bootstrap is in progress.
+- `polling-only mode` for GitHub remains valid baseline behavior when webhook secret is absent.
+- dedicated-topic refusal is intentional: autonomous DM bootstrap should not fall back to Telegram `General`.
+- heartbeat and `gateway_start` recovery are intentional mechanisms, but their correctness depends on durable bootstrap session truth.
+- reviewer text parsing is intentional as the canonical agent-review contract, but provider-side review polling still exists as a separate recovery path.
 
 ## Correction Program
 
-Pending.
+1. Stabilize bootstrap session persistence and handoff.
+- Why first:
+  this is the first `P0` break in the current live flow
+- What it should fix:
+  valid classified DMs must always leave a durable, recoverable `bootstrapping` checkpoint before the first ack boundary
+- Green signal:
+  classified bootstrap attempt always creates a visible session record and emits the ack
+
+2. Make bootstrap attempt ownership stronger than bare `conversationId`.
+- Why second:
+  current recovery and retry correctness depends on preventing silent overwrite/regression of session state
+- What it should fix:
+  later DMs, retries, or stale resumptions must not erase or regress the current bootstrap attempt
+- Green signal:
+  repeated DMs and restart/retry paths preserve or explicitly supersede the right bootstrap attempt
+
+3. Make register/provision side effects atomic or explicitly recoverable.
+- Why third:
+  current split-brain begins before `projects.json` becomes true
+- What it should fix:
+  no more `workflow.yaml`/repo/topic residue without corresponding project truth or explicit orphan checkpoint
+- Green signal:
+  either the project is registered completely or the orphan state is explicit and recoverable
+
+4. Reconcile recovery entrypoints with session truth.
+- Why fourth:
+  heartbeat and gateway-start recovery are only as safe as the session model they consume
+- What it should fix:
+  stale resumers must not regress terminal state or replay the wrong attempt
+- Green signal:
+  restart and heartbeat resume only valid, current checkpoints
+
+5. Re-verify review/test deterministic loops after the ingress/register path is stable.
+- Why fifth:
+  these gates are not the first blocker right now, but reviewer authority still has multiple observers
+- What it should fix:
+  ensure no downstream loop reintroduces nondeterminism once project creation is working again
+- Green signal:
+  reviewer/tester approval and rejection paths advance exactly once and to the expected states
+
+6. Quarantine or clean passive residue after hot-path correctness is restored.
+- Why last:
+  residue is distorting diagnosis, but it is not the first blocking failure
+- What it should fix:
+  reduce operator confusion and prevent false positives during later audits
+- Green signal:
+  workspace on-disk state matches live registration truth closely enough for reliable operations
