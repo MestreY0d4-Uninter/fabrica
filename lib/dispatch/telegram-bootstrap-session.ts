@@ -50,6 +50,9 @@ export type TelegramBootstrapSession = {
   nextRetryAt?: string | null;
   ackSentAt?: string | null;
   projectRegisteredAt?: string | null;
+  topicKickoffSentAt?: string | null;
+  projectTickedAt?: string | null;
+  completionAckSentAt?: string | null;
   pendingClarification?: "stack" | "stack_and_name" | "name" | null;
   orphanedArtifacts?: PipelineArtifact[] | null;
   createdAt: string;
@@ -188,6 +191,9 @@ export async function upsertTelegramBootstrapSession(
     nextRetryAt?: string | null;
     ackSentAt?: string | null;
     projectRegisteredAt?: string | null;
+    topicKickoffSentAt?: string | null;
+    projectTickedAt?: string | null;
+    completionAckSentAt?: string | null;
   },
 ): Promise<TelegramBootstrapSession> {
   const existing = await readTelegramBootstrapSession(workspaceDir, input.conversationId);
@@ -205,6 +211,9 @@ export async function upsertTelegramBootstrapSession(
   const resolvedNextRetryAt = resolveNullableField(input.nextRetryAt, existing?.nextRetryAt);
   const resolvedAckSentAt = resolveNullableField(input.ackSentAt, existing?.ackSentAt);
   const resolvedProjectRegisteredAt = resolveNullableField(input.projectRegisteredAt, existing?.projectRegisteredAt);
+  const resolvedTopicKickoffSentAt = resolveNullableField(input.topicKickoffSentAt, existing?.topicKickoffSentAt);
+  const resolvedProjectTickedAt = resolveNullableField(input.projectTickedAt, existing?.projectTickedAt);
+  const resolvedCompletionAckSentAt = resolveNullableField(input.completionAckSentAt, existing?.completionAckSentAt);
   const resolvedError =
     input.error !== undefined
       ? input.error
@@ -247,6 +256,9 @@ export async function upsertTelegramBootstrapSession(
     nextRetryAt: resolvedNextRetryAt,
     ackSentAt: resolvedAckSentAt,
     projectRegisteredAt: resolvedProjectRegisteredAt,
+    topicKickoffSentAt: resolvedTopicKickoffSentAt,
+    projectTickedAt: resolvedProjectTickedAt,
+    completionAckSentAt: resolvedCompletionAckSentAt,
     pendingClarification: input.pendingClarification !== undefined
       ? input.pendingClarification
       : existing?.pendingClarification ?? null,

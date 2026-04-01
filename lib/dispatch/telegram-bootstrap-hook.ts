@@ -413,6 +413,36 @@ function shouldResumeBootstrapNow(session: TelegramBootstrapSession): boolean {
   return Number.isNaN(retryAt) || retryAt <= Date.now();
 }
 
+function freshBootstrapResetFields(request: BootstrapRequest): {
+  projectRoute: null;
+  projectSlug: string | null;
+  issueId: null;
+  messageThreadId: null;
+  projectChannelId: null;
+  lastError: null;
+  nextRetryAt: null;
+  ackSentAt: null;
+  projectRegisteredAt: null;
+  topicKickoffSentAt: null;
+  projectTickedAt: null;
+  completionAckSentAt: null;
+} {
+  return {
+    projectRoute: null,
+    projectSlug: request.projectName ?? null,
+    issueId: null,
+    messageThreadId: null,
+    projectChannelId: null,
+    lastError: null,
+    nextRetryAt: null,
+    ackSentAt: null,
+    projectRegisteredAt: null,
+    topicKickoffSentAt: null,
+    projectTickedAt: null,
+    completionAckSentAt: null,
+  };
+}
+
 async function enterBootstrapping(
   workspaceDir: string,
   conversationId: string,
@@ -431,8 +461,7 @@ async function enterBootstrapping(
     sourceChannel: "telegram",
     status: "bootstrapping",
     language,
-    lastError: null,
-    nextRetryAt: null,
+    ...freshBootstrapResetFields(request),
   });
 }
 
@@ -445,10 +474,59 @@ async function recordBootstrapRetry(
   return upsertTelegramBootstrapSession(workspaceDir, {
     conversationId: session.conversationId,
     rawIdea: session.rawIdea,
-    status: "bootstrapping",
+    status: session.status === "dispatching" || session.projectRegisteredAt ? "dispatching" : "bootstrapping",
     attemptCount: (session.attemptCount ?? 0) + 1,
     lastError: message,
     nextRetryAt: new Date(Date.now() + BOOTSTRAP_RETRY_DELAY_MS).toISOString(),
+    language: session.language,
+  });
+}
+
+async function leaseBootstrapRecovery(
+  workspaceDir: string,
+  session: TelegramBootstrapSession,
+): Promise<TelegramBootstrapSession> {
+  return upsertTelegramBootstrapSession(workspaceDir, {
+    conversationId: session.conversationId,
+    rawIdea: session.rawIdea,
+    status: session.status,
+    nextRetryAt: new Date(Date.now() + BOOTSTRAP_RETRY_DELAY_MS).toISOString(),
+    lastError: session.lastError ?? null,
+    language: session.language,
+  });
+}
+
+async function persistDispatchProgress(
+  workspaceDir: string,
+  session: TelegramBootstrapSession,
+  input: {
+    projectRoute?: TelegramBootstrapRoute | null;
+    projectChannelId?: string | null;
+    messageThreadId?: number | null;
+    topicKickoffSentAt?: string | null;
+    projectTickedAt?: string | null;
+    completionAckSentAt?: string | null;
+  },
+): Promise<TelegramBootstrapSession> {
+  return upsertTelegramBootstrapSession(workspaceDir, {
+    conversationId: session.conversationId,
+    rawIdea: session.rawIdea,
+    projectName: session.projectName ?? undefined,
+    stackHint: session.stackHint ?? undefined,
+    repoUrl: session.repoUrl ?? undefined,
+    repoPath: session.repoPath ?? undefined,
+    sourceRoute: buildSessionSourceRoute(session),
+    status: "dispatching",
+    projectSlug: session.projectSlug ?? undefined,
+    projectRoute: input.projectRoute,
+    projectChannelId: input.projectChannelId,
+    messageThreadId: input.messageThreadId,
+    projectRegisteredAt: session.projectRegisteredAt,
+    topicKickoffSentAt: input.topicKickoffSentAt,
+    projectTickedAt: input.projectTickedAt,
+    completionAckSentAt: input.completionAckSentAt,
+    lastError: null,
+    nextRetryAt: null,
     language: session.language,
   });
 }
@@ -526,14 +604,24 @@ async function completeRegisteredBootstrap(
   const resolvedProjectName = session.projectName ?? session.projectSlug ?? "projeto";
   const sessionLang: BootstrapLanguage = session.language ?? "pt";
 
-  await sendTelegramText(ctx, projectChannelId, buildTopicKickoff(resolvedProjectName, session.rawIdea, sessionLang), {
-    accountId: projectRoute.accountId ?? undefined,
-    messageThreadId,
-  });
+  if (!session.topicKickoffSentAt) {
+    await sendTelegramText(ctx, projectChannelId, buildTopicKickoff(resolvedProjectName, session.rawIdea, sessionLang), {
+      accountId: projectRoute.accountId ?? undefined,
+      messageThreadId,
+    });
+    session = await persistDispatchProgress(workspaceDir, session, {
+      projectRoute,
+      projectChannelId,
+      messageThreadId,
+      topicKickoffSentAt: new Date().toISOString(),
+      projectTickedAt: session.projectTickedAt ?? null,
+      completionAckSentAt: session.completionAckSentAt ?? null,
+    });
+  }
 
   const agents = discoverAgents(ctx.config);
   const primaryAgent = agents[0];
-  if (session.projectSlug && primaryAgent) {
+  if (!session.projectTickedAt && session.projectSlug && primaryAgent) {
     await projectTick({
       workspaceDir: primaryAgent.workspace,
       projectSlug: session.projectSlug,
@@ -545,13 +633,31 @@ async function completeRegisteredBootstrap(
     }).catch((error) => {
       logBootstrapWarning(ctx, `[telegram-bootstrap] immediate projectTick failed: ${error instanceof Error ? error.message : String(error)}`);
     });
+    session = await persistDispatchProgress(workspaceDir, session, {
+      projectRoute,
+      projectChannelId,
+      messageThreadId,
+      topicKickoffSentAt: session.topicKickoffSentAt ?? null,
+      projectTickedAt: new Date().toISOString(),
+      completionAckSentAt: session.completionAckSentAt ?? null,
+    });
   }
 
-  await sendTelegramText(
-    ctx,
-    session.conversationId,
-    buildDmAck(resolvedProjectName, buildTopicDeepLink(String(projectChannelId), messageThreadId), sessionLang),
-  );
+  if (!session.completionAckSentAt) {
+    await sendTelegramText(
+      ctx,
+      session.conversationId,
+      buildDmAck(resolvedProjectName, buildTopicDeepLink(String(projectChannelId), messageThreadId), sessionLang),
+    );
+    session = await persistDispatchProgress(workspaceDir, session, {
+      projectRoute,
+      projectChannelId,
+      messageThreadId,
+      topicKickoffSentAt: session.topicKickoffSentAt ?? null,
+      projectTickedAt: session.projectTickedAt ?? null,
+      completionAckSentAt: new Date().toISOString(),
+    });
+  }
 
   const completedSession = await upsertTelegramBootstrapSession(workspaceDir, {
     conversationId: session.conversationId,
@@ -569,6 +675,9 @@ async function completeRegisteredBootstrap(
     lastError: null,
     nextRetryAt: null,
     projectRegisteredAt: session.projectRegisteredAt,
+    topicKickoffSentAt: session.topicKickoffSentAt,
+    projectTickedAt: session.projectTickedAt,
+    completionAckSentAt: session.completionAckSentAt,
     language: session.language,
   });
 
@@ -1099,7 +1208,8 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
     const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
     if (isRecoverableBootstrapSession(existingSession)) {
       if (shouldResumeBootstrapNow(existingSession)) {
-        void resumeBootstrappingSession(ctx, workspaceDir, existingSession);
+        const leasedSession = await leaseBootstrapRecovery(workspaceDir, existingSession);
+        void resumeBootstrappingSession(ctx, workspaceDir, leasedSession);
       } else {
         ctx.logger.info(`[telegram-bootstrap] recovery deferred until ${existingSession.nextRetryAt} for ${conversationId}`);
       }
@@ -1166,6 +1276,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
           rawIdea: content,
           sourceRoute: { channel: "telegram", channelId: conversationId },
           status: "pending_classify",
+          ...freshBootstrapResetFields({ rawIdea: content }),
         });
 
         // Fire-and-forget: LLM classify + bootstrap runs detached from event handler
@@ -1225,6 +1336,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
         rawIdea: parsed.rawIdea,
         sourceRoute: { channel: "telegram", channelId: conversationId },
         status: "pending_classify",
+        ...freshBootstrapResetFields({ rawIdea: parsed.rawIdea }),
       });
       const classification = await classifyDmIntent(ctx, content, workspaceDir);
       if (classification?.projectSlug) {
@@ -1256,6 +1368,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
         sourceChannel: "telegram",
         status: "received",
         language,
+        ...freshBootstrapResetFields(incomingRequest),
       });
       const pendingClarification = !parsed.projectName ? "stack_and_name" as const : "stack" as const;
       await upsertTelegramBootstrapSession(workspaceDir, {
@@ -1296,6 +1409,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       sourceChannel: "telegram",
       status: "received",
       language,
+      ...freshBootstrapResetFields(incomingRequest),
     });
 
     // Fire-and-forget: session suppression is already in place (suppressUntil set above).

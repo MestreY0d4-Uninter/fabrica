@@ -655,6 +655,68 @@ describe("telegram bootstrap clarification flow", () => {
     expect(persisted.nextRetryAt).toBeNull();
   });
 
+  it("does not replay kickoff or projectTick after a later dispatch failure", async () => {
+    await fs.mkdir(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+      JSON.stringify({
+        id: "tgdm-dispatch-retry",
+        conversationId: CONVERSATION_ID,
+        sourceChannel: "telegram",
+        sourceRoute: { channel: "telegram", channelId: CONVERSATION_ID },
+        projectRoute: {
+          channel: "telegram",
+          channelId: "-1003709213169",
+          messageThreadId: 944,
+        },
+        requestHash: "req-hash",
+        requestFingerprint: "req-hash",
+        rawIdea: "Build a simple Python CLI for todo summary",
+        projectName: "todo-summary-tool",
+        stackHint: "python-cli",
+        projectSlug: "todo-summary-tool",
+        messageThreadId: 944,
+        projectChannelId: "-1003709213169",
+        status: "dispatching",
+        ackSentAt: "2026-04-01T00:00:01.000Z",
+        projectRegisteredAt: "2026-04-01T00:00:02.000Z",
+        topicKickoffSentAt: "2026-04-01T00:00:03.000Z",
+        projectTickedAt: "2026-04-01T00:00:04.000Z",
+        lastError: "dm ack failed",
+        nextRetryAt: "2026-04-01T00:00:05.000Z",
+        language: "en",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:05.000Z",
+        suppressUntil: new Date(Date.now() + 60_000).toISOString(),
+      }, null, 2) + "\n",
+      "utf-8",
+    );
+
+    sendMessageTelegram
+      .mockRejectedValueOnce(new Error("dm ack failed"))
+      .mockResolvedValue(undefined);
+
+    await resumeBootstrapping(ctx, workspaceDir, CONVERSATION_ID);
+    await resumeBootstrapping(ctx, workspaceDir, CONVERSATION_ID);
+
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    expect(mockProjectTick).not.toHaveBeenCalled();
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
+    expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe(CONVERSATION_ID);
+    expect(sendMessageTelegram.mock.calls[1]?.[0]).toBe(CONVERSATION_ID);
+    expect(sendMessageTelegram.mock.calls.some(([target]) => target === "-1003709213169")).toBe(false);
+
+    const persisted = JSON.parse(
+      await fs.readFile(
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        "utf-8",
+      ),
+    );
+    expect(persisted.status).toBe("completed");
+    expect(persisted.lastError).toBeNull();
+    expect(persisted.nextRetryAt).toBeNull();
+  });
+
   it("treats metadata.project_registered as the single registration truth on pipeline failure", async () => {
     mockRunPipeline.mockResolvedValue({
       success: false,
