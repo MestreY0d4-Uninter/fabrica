@@ -5,6 +5,7 @@ import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { registerTelegramBootstrapHook, _testIsAmbiguousCandidate as isAmbiguousCandidate, _testClassifyDmIntent as classifyDmIntent, _testBuildTopicDeepLink as buildTopicDeepLink, _testInferProjectSlug as inferProjectSlug, _testNormalizeUserResponse as normalizeUserResponse } from "../../lib/dispatch/telegram-bootstrap-hook.js";
 import {
+  buildBootstrapRequestHash,
   upsertTelegramBootstrapSession,
   readTelegramBootstrapSession,
   deleteTelegramBootstrapSession,
@@ -1071,6 +1072,106 @@ describe("telegram bootstrap session — classifying status", () => {
     const result = await readTelegramBootstrapSession(workspaceDir, "123456");
     expect(result).not.toBeNull();
     expect(result!.status).toBe("classifying");
+  });
+});
+
+describe("telegram bootstrap session merge semantics", () => {
+  let workspaceDir: string;
+
+  beforeEach(async () => {
+    workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-bootstrap-session-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(workspaceDir, { recursive: true, force: true });
+  });
+
+  it("clears nullable persisted fields when null is passed", async () => {
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: "123456",
+      rawIdea: "build me an app",
+      sourceRoute: { channel: "telegram", channelId: "123456" },
+      projectRoute: {
+        channel: "telegram",
+        channelId: "-1003709213169",
+        messageThreadId: 777,
+      },
+      projectSlug: "demo-cli",
+      messageThreadId: 777,
+      projectChannelId: "-1003709213169",
+      status: "received",
+      attemptCount: 2,
+      error: "telegram down",
+      nextRetryAt: "2026-04-01T00:00:00.000Z",
+      ackSentAt: "2026-04-01T00:00:01.000Z",
+      projectRegisteredAt: "2026-04-01T00:00:02.000Z",
+    });
+
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: "123456",
+      rawIdea: "build me an app",
+      sourceRoute: { channel: "telegram", channelId: "123456" },
+      projectRoute: null,
+      projectSlug: null,
+      messageThreadId: null,
+      projectChannelId: null,
+      status: "failed",
+      attemptCount: null,
+      error: null,
+      nextRetryAt: null,
+      ackSentAt: null,
+      projectRegisteredAt: null,
+    });
+
+    const session = await readTelegramBootstrapSession(workspaceDir, "123456");
+    expect(session).not.toBeNull();
+    expect(session?.projectRoute).toBeNull();
+    expect(session?.projectSlug).toBeNull();
+    expect(session?.messageThreadId).toBeNull();
+    expect(session?.projectChannelId).toBeNull();
+    expect(session?.attemptCount).toBeNull();
+    expect(session?.error).toBeNull();
+    expect(session?.lastError).toBeNull();
+    expect(session?.nextRetryAt).toBeNull();
+    expect(session?.ackSentAt).toBeNull();
+    expect(session?.projectRegisteredAt).toBeNull();
+  });
+
+  it("keeps request hash stable after a partial upsert reuses merged request fields", async () => {
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: "123456",
+      rawIdea: "Build a todo summary tool",
+      projectName: "todo-summary",
+      stackHint: "python-cli",
+      repoUrl: "https://example.com/todo-summary",
+      repoPath: "/tmp/todo-summary",
+      sourceRoute: { channel: "telegram", channelId: "123456" },
+      status: "received",
+    });
+
+    const firstSession = await readTelegramBootstrapSession(workspaceDir, "123456");
+    const expectedHash = buildBootstrapRequestHash({
+      rawIdea: "Build a todo summary tool",
+      projectName: "todo-summary",
+      stackHint: "python-cli",
+      repoUrl: "https://example.com/todo-summary",
+      repoPath: "/tmp/todo-summary",
+    });
+
+    expect(firstSession?.requestHash).toBe(expectedHash);
+    expect(firstSession?.requestFingerprint).toBe(expectedHash);
+
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: "123456",
+      rawIdea: "Build a todo summary tool",
+      sourceRoute: { channel: "telegram", channelId: "123456" },
+      status: "failed",
+      error: "telegram down",
+    });
+
+    const mergedSession = await readTelegramBootstrapSession(workspaceDir, "123456");
+    expect(mergedSession?.requestHash).toBe(expectedHash);
+    expect(mergedSession?.requestFingerprint).toBe(expectedHash);
   });
 });
 

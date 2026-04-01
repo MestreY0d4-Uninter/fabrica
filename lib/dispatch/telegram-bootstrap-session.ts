@@ -114,6 +114,14 @@ function nextSuppressUntil(status?: TelegramBootstrapStatus): string {
   return new Date(Date.now() + ttl).toISOString();
 }
 
+function resolveNullableField<T>(
+  inputValue: T | null | undefined,
+  existingValue: T | null | undefined,
+  fallback: T | null = null,
+): T | null {
+  return inputValue !== undefined ? inputValue : existingValue ?? fallback;
+}
+
 export async function readTelegramBootstrapSession(
   workspaceDir: string,
   conversationId: string,
@@ -183,14 +191,20 @@ export async function upsertTelegramBootstrapSession(
   },
 ): Promise<TelegramBootstrapSession> {
   const existing = await readTelegramBootstrapSession(workspaceDir, input.conversationId);
-  const resolvedProjectName =
-    input.projectName !== undefined ? input.projectName : existing?.projectName ?? null;
-  const resolvedStackHint =
-    input.stackHint !== undefined ? input.stackHint : existing?.stackHint ?? null;
-  const resolvedRepoUrl =
-    input.repoUrl !== undefined ? input.repoUrl : existing?.repoUrl ?? null;
-  const resolvedRepoPath =
-    input.repoPath !== undefined ? input.repoPath : existing?.repoPath ?? null;
+  const resolvedSourceRoute = resolveNullableField(input.sourceRoute, existing?.sourceRoute);
+  const resolvedProjectRoute = resolveNullableField(input.projectRoute, existing?.projectRoute);
+  const resolvedProjectName = resolveNullableField(input.projectName, existing?.projectName);
+  const resolvedStackHint = resolveNullableField(input.stackHint, existing?.stackHint);
+  const resolvedRepoUrl = resolveNullableField(input.repoUrl, existing?.repoUrl);
+  const resolvedRepoPath = resolveNullableField(input.repoPath, existing?.repoPath);
+  const resolvedProjectSlug = resolveNullableField(input.projectSlug, existing?.projectSlug);
+  const resolvedIssueId = resolveNullableField(input.issueId, existing?.issueId);
+  const resolvedMessageThreadId = resolveNullableField(input.messageThreadId, existing?.messageThreadId);
+  const resolvedProjectChannelId = resolveNullableField(input.projectChannelId, existing?.projectChannelId);
+  const resolvedAttemptCount = resolveNullableField(input.attemptCount, existing?.attemptCount, 0);
+  const resolvedNextRetryAt = resolveNullableField(input.nextRetryAt, existing?.nextRetryAt);
+  const resolvedAckSentAt = resolveNullableField(input.ackSentAt, existing?.ackSentAt);
+  const resolvedProjectRegisteredAt = resolveNullableField(input.projectRegisteredAt, existing?.projectRegisteredAt);
   const resolvedError =
     input.error !== undefined
       ? input.error
@@ -209,8 +223,8 @@ export async function upsertTelegramBootstrapSession(
     id: existing?.id ?? buildBootstrapSessionId(input.conversationId, input.rawIdea),
     conversationId: input.conversationId,
     sourceChannel: input.sourceChannel ?? input.sourceRoute?.channel ?? existing?.sourceChannel ?? "telegram",
-    sourceRoute: input.sourceRoute ?? existing?.sourceRoute ?? null,
-    projectRoute: input.projectRoute ?? existing?.projectRoute ?? null,
+    sourceRoute: resolvedSourceRoute,
+    projectRoute: resolvedProjectRoute,
     requestHash,
     requestFingerprint: requestHash,
     lastCompletedRequestHash:
@@ -222,17 +236,17 @@ export async function upsertTelegramBootstrapSession(
     stackHint: resolvedStackHint,
     repoUrl: resolvedRepoUrl,
     repoPath: resolvedRepoPath,
-    projectSlug: input.projectSlug ?? existing?.projectSlug ?? null,
-    issueId: input.issueId ?? existing?.issueId ?? null,
-    messageThreadId: input.messageThreadId ?? existing?.messageThreadId ?? null,
-    projectChannelId: input.projectChannelId ?? existing?.projectChannelId ?? null,
+    projectSlug: resolvedProjectSlug,
+    issueId: resolvedIssueId,
+    messageThreadId: resolvedMessageThreadId,
+    projectChannelId: resolvedProjectChannelId,
     language: input.language ?? existing?.language,
     status: input.status,
-    attemptCount: input.attemptCount ?? existing?.attemptCount ?? 0,
+    attemptCount: resolvedAttemptCount,
     lastError: resolvedError,
-    nextRetryAt: input.nextRetryAt ?? existing?.nextRetryAt ?? null,
-    ackSentAt: input.ackSentAt ?? existing?.ackSentAt ?? null,
-    projectRegisteredAt: input.projectRegisteredAt ?? existing?.projectRegisteredAt ?? null,
+    nextRetryAt: resolvedNextRetryAt,
+    ackSentAt: resolvedAckSentAt,
+    projectRegisteredAt: resolvedProjectRegisteredAt,
     pendingClarification: input.pendingClarification !== undefined
       ? input.pendingClarification
       : existing?.pendingClarification ?? null,
