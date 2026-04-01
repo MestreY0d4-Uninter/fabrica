@@ -856,6 +856,46 @@ describe("telegram bootstrap hook", () => {
     expect(mockRunPipeline).not.toHaveBeenCalled();
   });
 
+  it("uses the guarded single-flight launch for the direct no-stack path", async () => {
+    const api = {
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    registerTelegramBootstrapHook(api, ctx);
+
+    let releaseAck: (() => void) | undefined;
+    sendMessageTelegram
+      .mockImplementationOnce(() => new Promise<void>((resolve) => {
+        releaseAck = resolve;
+      }))
+      .mockResolvedValue(undefined);
+
+    const first = handler?.(
+      {
+        content: "Crie um projeto novo para uma CLI",
+        metadata: {},
+      },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+    const second = handler?.(
+      {
+        content: "Crie um projeto novo para uma CLI",
+        metadata: {},
+      },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(1), { timeout: 2000 });
+
+    releaseAck?.();
+
+    await Promise.all([first, second]);
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    expect(String(sendMessageTelegram.mock.calls[1]?.[1])).toContain("stack");
+  });
+
   it("keeps terminal clarification-resolved preflight failures failed when the failure DM send breaks", async () => {
     const api = {
       on: vi.fn((name, fn) => {

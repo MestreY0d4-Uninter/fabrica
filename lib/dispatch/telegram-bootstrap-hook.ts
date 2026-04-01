@@ -506,17 +506,17 @@ function launchBootstrapResume(
   ctx: PluginContext,
   workspaceDir: string,
   session: TelegramBootstrapSession,
-): boolean {
+): Promise<TelegramBootstrapSession> | null {
   if (activeBootstrapResumes.has(session.conversationId)) {
-    return false;
+    return null;
   }
 
   activeBootstrapResumes.add(session.conversationId);
-  void resumeBootstrappingSession(ctx, workspaceDir, session)
+  const resumePromise = resumeBootstrappingSession(ctx, workspaceDir, session)
     .finally(() => {
       activeBootstrapResumes.delete(session.conversationId);
     });
-  return true;
+  return resumePromise;
 }
 
 async function persistDispatchProgress(
@@ -1360,7 +1360,7 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
         },
         language,
       );
-      await resumeBootstrappingSession(ctx, workspaceDir, session);
+      await launchBootstrapResume(ctx, workspaceDir, session);
       return;
     }
 
