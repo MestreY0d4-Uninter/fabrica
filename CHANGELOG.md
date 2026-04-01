@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.13 - 2026-03-31
+
+- Disabled automatic pretty logging on TTY so the plugin no longer depends on `pino-pretty` during load.
+- Added a safe one-shot fallback to structured logs when pretty transport resolution or initialization fails.
+- Added logger transport regression coverage and promoted it into the hot-path test lane.
+
 ## 0.2.12 - 2026-03-31
 
 - Made the published plugin self-contained by replacing remaining runtime helper imports from `openclaw/plugin-sdk`.

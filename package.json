@@ -1,6 +1,6 @@
 {
   "name": "@mestreyoda/fabrica",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "description": "Autonomous software engineering pipeline for OpenClaw. Turns ideas into deployed code via intake, dispatch, review, test, and merge.",
   "type": "module",
   "main": "./dist/index.js",
@@ -43,7 +43,7 @@
     "test": "npm run test:hot-path",
     "test:unit": "vitest run",
     "test:e2e": "VITEST_E2E=1 vitest run lib/services/bootstrap.e2e.test.ts lib/services/pipeline.e2e.test.ts tests/e2e/qa-bootstrap.e2e.test.ts tests/e2e/orchestration-smoke.e2e.test.ts",
-    "test:hot-path": "VITEST_E2E=1 vitest run --maxWorkers=1 tests/unit/message-builder.test.ts tests/unit/worker-context-hook.test.ts tests/unit/reviewer-session.test.ts tests/unit/reviewer-completion.test.ts tests/unit/reviewer-completion-side-effects.test.ts tests/unit/reactive-dispatch-hook.test.ts tests/unit/subagent-lifecycle-hook.test.ts tests/unit/subagent-lifecycle-slot-cleanup.test.ts tests/unit/dispatch-identity.test.ts tests/unit/work-finish-slot.test.ts tests/unit/heartbeat-health-session.test.ts tests/unit/reviewer-poll-pass.test.ts tests/unit/heartbeat-canonical-pr.test.ts tests/e2e/orchestration-smoke.e2e.test.ts",
+    "test:hot-path": "VITEST_E2E=1 vitest run --maxWorkers=1 tests/unit/message-builder.test.ts tests/unit/worker-context-hook.test.ts tests/unit/reviewer-session.test.ts tests/unit/reviewer-completion.test.ts tests/unit/reviewer-completion-side-effects.test.ts tests/unit/reactive-dispatch-hook.test.ts tests/unit/subagent-lifecycle-hook.test.ts tests/unit/subagent-lifecycle-slot-cleanup.test.ts tests/unit/dispatch-identity.test.ts tests/unit/work-finish-slot.test.ts tests/unit/heartbeat-health-session.test.ts tests/unit/reviewer-poll-pass.test.ts tests/unit/heartbeat-canonical-pr.test.ts tests/unit/logger-transport.test.ts tests/e2e/orchestration-smoke.e2e.test.ts",
     "test:all": "npm run test:unit && npm run test:e2e",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build && npm run verify:runtime-boundary && npm run test:all && npm run verify:installability"
