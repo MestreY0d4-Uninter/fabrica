@@ -46,7 +46,6 @@ describe("plugin registration logging calibration", () => {
   afterEach(() => {
     process.argv = originalArgv.slice();
     vi.unstubAllEnvs();
-    vi.resetModules();
     vi.restoreAllMocks();
   });
 
@@ -55,21 +54,28 @@ describe("plugin registration logging calibration", () => {
 
     const logger = makeLogger();
 
+    vi.resetModules();
     vi.doMock("../../lib/observability/bootstrap.js", () => ({}));
     vi.doMock("../../lib/observability/logger.js", () => ({
       getLogger: vi.fn(() => logger),
       getRootLogger: vi.fn(() => logger),
     }));
 
-    const plugin = (await import("../../index.js")).default;
-    plugin.register(makeApi({ logger }));
+    try {
+      const plugin = (await import("../../index.js")).default;
+      plugin.register(makeApi({ logger }));
 
-    expect(logger.info).not.toHaveBeenCalledWith(
-      expect.stringContaining("Fabrica plugin registered"),
-    );
-    expect(logger.debug).toHaveBeenCalledWith(
-      expect.stringContaining("Fabrica plugin registered"),
-    );
+      expect(logger.info).not.toHaveBeenCalledWith(
+        expect.stringContaining("Fabrica plugin registered"),
+      );
+      expect(logger.debug).toHaveBeenCalledWith(
+        expect.stringContaining("Fabrica plugin registered"),
+      );
+    } finally {
+      vi.doUnmock("../../lib/observability/bootstrap.js");
+      vi.doUnmock("../../lib/observability/logger.js");
+      vi.resetModules();
+    }
   });
 
   it("keeps polling-only webhook notices off info and warn level in CLI mode", async () => {
