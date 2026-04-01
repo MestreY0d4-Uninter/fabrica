@@ -9,6 +9,7 @@ import {
   upsertTelegramBootstrapSession,
   readTelegramBootstrapSession,
   deleteTelegramBootstrapSession,
+  shouldPersistBootstrapCheckpoint,
   shouldSuppressTelegramBootstrapReply,
 } from "../../lib/dispatch/telegram-bootstrap-session.js";
 import * as telegramBootstrapSessionModule from "../../lib/dispatch/telegram-bootstrap-session.js";
@@ -2578,6 +2579,7 @@ describe("Layer 2 language heuristic", () => {
   } as any;
 
   beforeEach(async () => {
+    resetActiveBootstrapResumes();
     handler = undefined;
     sendMessageTelegram.mockClear();
     mockRunPipeline.mockReset();
@@ -2588,6 +2590,10 @@ describe("Layer 2 language heuristic", () => {
     mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: "/tmp/workspace" }]);
     mockProjectTick.mockResolvedValue({ pickups: [], skipped: [] });
     await fs.rm("/tmp/workspace/fabrica/bootstrap-sessions", { recursive: true, force: true });
+  });
+
+  afterEach(() => {
+    resetActiveBootstrapResumes();
   });
 
   it("sends Portuguese ack for PT createCue (crie)", async () => {
@@ -3312,5 +3318,93 @@ describe("telegram bootstrap regression coverage", () => {
     expect(session?.attemptCount).toBe(4);
     expect(session?.lastError).toBeNull();
     expect(session?.nextRetryAt).toBeNull();
+  });
+
+  it("rejects same-attempt checkpoint writes that regress projectTickedAt", async () => {
+    const current = {
+      id: "tgdm-1",
+      conversationId: "telegram:6951571380",
+      sourceChannel: "telegram",
+      requestHash: "hash-1",
+      rawIdea: "Build a Python CLI",
+      status: "dispatching",
+      attemptId: "attempt-1",
+      attemptSeq: 1,
+      bootstrapStep: "project_ticked",
+      projectTickedAt: "2026-04-01T21:00:00.000Z",
+      createdAt: "2026-04-01T20:59:00.000Z",
+      updatedAt: "2026-04-01T21:00:01.000Z",
+      suppressUntil: "2026-04-01T21:10:00.000Z",
+    } as const;
+
+    const stale = {
+      ...current,
+      updatedAt: "2026-04-01T21:00:02.000Z",
+      projectTickedAt: null,
+    };
+
+    expect(shouldPersistBootstrapCheckpoint(current as any, stale as any)).toEqual({
+      ok: false,
+      reason: "stale_regression",
+    });
+  });
+
+  it("does not rerun projectTick when the same attempt already recorded projectTickedAt", async () => {
+    const conversationId = "telegram:6951571380";
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId,
+      rawIdea: "Build a todo summary CLI",
+      projectName: "todo-summary",
+      stackHint: "python-cli",
+      projectSlug: "todo-summary",
+      sourceRoute: { channel: "telegram", channelId: "6951571380" },
+      projectRoute: {
+        channel: "telegram",
+        channelId: "-1003709213169",
+        messageThreadId: 777,
+      },
+      projectChannelId: "-1003709213169",
+      messageThreadId: 777,
+      status: "dispatching",
+      attemptId: "attempt-1",
+      attemptSeq: 1,
+      ackSentAt: "2026-04-01T12:00:01.000Z",
+      projectRegisteredAt: "2026-04-01T12:00:02.000Z",
+      topicKickoffSentAt: "2026-04-01T12:00:03.000Z",
+      projectTickedAt: "2026-04-01T12:00:04.000Z",
+      nextRetryAt: null,
+      language: "en",
+    });
+
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId,
+      rawIdea: "Build a todo summary CLI",
+      projectName: "todo-summary",
+      stackHint: "python-cli",
+      projectSlug: "todo-summary",
+      sourceRoute: { channel: "telegram", channelId: "6951571380" },
+      projectRoute: {
+        channel: "telegram",
+        channelId: "-1003709213169",
+        messageThreadId: 777,
+      },
+      projectChannelId: "-1003709213169",
+      messageThreadId: 777,
+      status: "dispatching",
+      attemptId: "attempt-1",
+      attemptSeq: 1,
+      ackSentAt: "2026-04-01T12:00:01.000Z",
+      projectRegisteredAt: "2026-04-01T12:00:02.000Z",
+      topicKickoffSentAt: "2026-04-01T12:00:03.000Z",
+      projectTickedAt: null,
+      nextRetryAt: null,
+      language: "en",
+    });
+
+    await resumeBootstrapping(ctx, workspaceDir, conversationId);
+
+    expect(mockProjectTick).not.toHaveBeenCalled();
+    const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
+    expect(session?.projectTickedAt).toBe("2026-04-01T12:00:04.000Z");
   });
 });

@@ -79,6 +79,8 @@ export type TelegramBootstrapAttemptSnapshot = Pick<
   "conversationId" | "attemptId" | "attemptSeq" | "requestHash" | "status" | "updatedAt"
 >;
 
+type BootstrapCheckpointWriteDecision = { ok: true } | { ok: false; reason: "stale_regression" };
+
 const SESSION_TTL_MS = 10 * 60_000;
 const CLASSIFYING_TTL_MS = 15_000; // 15s — matches LLM timeout
 
@@ -150,6 +152,46 @@ function defaultNextRetryAtForStatus(
     return existingValue ?? null;
   }
   return null;
+}
+
+const MONOTONIC_BOOTSTRAP_FIELDS: Array<
+  keyof Pick<
+    TelegramBootstrapSession,
+    "ackSentAt" | "projectRegisteredAt" | "topicKickoffSentAt" | "projectTickedAt" | "completionAckSentAt"
+  >
+> = [
+  "ackSentAt",
+  "projectRegisteredAt",
+  "topicKickoffSentAt",
+  "projectTickedAt",
+  "completionAckSentAt",
+];
+
+export function shouldPersistBootstrapCheckpoint(
+  current: TelegramBootstrapSession | null | undefined,
+  next: TelegramBootstrapSession,
+): BootstrapCheckpointWriteDecision {
+  if (!current) return { ok: true };
+  if (current.conversationId !== next.conversationId) return { ok: true };
+
+  const sameAttempt = Boolean(
+    current.attemptId &&
+    next.attemptId &&
+    current.attemptSeq != null &&
+    next.attemptSeq != null &&
+    current.attemptId === next.attemptId &&
+    current.attemptSeq === next.attemptSeq,
+  );
+
+  if (!sameAttempt) return { ok: true };
+
+  for (const field of MONOTONIC_BOOTSTRAP_FIELDS) {
+    if (current[field] && !next[field]) {
+      return { ok: false, reason: "stale_regression" };
+    }
+  }
+
+  return { ok: true };
 }
 
 export async function readTelegramBootstrapSession(
@@ -309,6 +351,10 @@ export async function upsertTelegramBootstrapSession(
     suppressUntil: nextSuppressUntil(input.status),
     error: resolvedError,
   };
+  const writeDecision = shouldPersistBootstrapCheckpoint(existing, session);
+  if (!writeDecision.ok && existing) {
+    return existing;
+  }
   await writeTelegramBootstrapSession(workspaceDir, session);
   return session;
 }
