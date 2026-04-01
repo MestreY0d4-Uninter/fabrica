@@ -22,6 +22,25 @@ import { guardedCloseIssue, persistMergedArtifact } from "../pipeline.js";
 import { readProjects, getProject, getIssueRuntime, updateIssueRuntime, getCanonicalPrSelector } from "../../projects/index.js";
 import { resilientLabelTransition } from "../../workflow/labels.js";
 
+function hasActiveReviewerSessionAuthority(
+  project: Awaited<ReturnType<typeof getProject>> | null,
+  issueId: number,
+): boolean {
+  const reviewerWorker = project?.workers?.reviewer;
+  if (!reviewerWorker) return false;
+
+  for (const slots of Object.values(reviewerWorker.levels)) {
+    for (const slot of slots) {
+      if (!slot.active || !slot.sessionKey) continue;
+      if (Number(slot.issueId ?? slot.lastIssueId ?? 0) === issueId) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 /**
  * Scan review-type states and transition issues whose PR check condition is met.
  * Returns the number of transitions made.
@@ -73,6 +92,9 @@ export async function reviewPass(opts: {
       const project = projectData ? getProject(projectData, projectName) : null;
       const issueRuntime = project ? getIssueRuntime(project, issue.iid) : undefined;
       const prSelector = project ? getCanonicalPrSelector(project, issue.iid) : undefined;
+      if (routing === "agent" && hasActiveReviewerSessionAuthority(project, issue.iid)) {
+        continue;
+      }
       const status = await provider.getPrStatus(issue.iid, prSelector);
       if (status.currentIssueMatch === false) continue;
 

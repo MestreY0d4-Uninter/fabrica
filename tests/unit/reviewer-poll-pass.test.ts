@@ -4,11 +4,13 @@ import { DEFAULT_WORKFLOW } from "../../lib/workflow/index.js";
 const {
   mockHandleReviewerAgentEnd,
   mockDeactivateWorker,
+  mockReadProjects,
   mockResilientLabelTransition,
   mockAuditLog,
 } = vi.hoisted(() => ({
   mockHandleReviewerAgentEnd: vi.fn(),
   mockDeactivateWorker: vi.fn(),
+  mockReadProjects: vi.fn(),
   mockResilientLabelTransition: vi.fn(),
   mockAuditLog: vi.fn(),
 }));
@@ -26,6 +28,7 @@ vi.mock("../../lib/projects/index.js", async () => {
   return {
     ...actual,
     deactivateWorker: mockDeactivateWorker,
+    readProjects: mockReadProjects,
   };
 });
 
@@ -46,6 +49,7 @@ describe("performReviewerPollPass", () => {
     vi.clearAllMocks();
     mockAuditLog.mockResolvedValue(undefined);
     mockDeactivateWorker.mockResolvedValue(undefined);
+    mockReadProjects.mockRejectedValue(new Error("not configured"));
     mockResilientLabelTransition.mockResolvedValue(undefined);
   });
 
@@ -158,5 +162,75 @@ describe("performReviewerPollPass", () => {
         from: "Reviewing",
       }),
     );
+  });
+
+  it("does not let provider review polling override an active reviewer session", async () => {
+    const { performReviewPass } = await import("../../lib/services/heartbeat/passes.js");
+
+    mockReadProjects.mockResolvedValue({
+      projects: {
+        demo: {
+          slug: "demo",
+          name: "demo",
+          repo: "/tmp/repo",
+          groupName: "demo",
+          deployUrl: "https://example.test",
+          baseBranch: "main",
+          deployBranch: "main",
+          channels: [],
+          workers: {
+            reviewer: {
+              levels: {
+                junior: [
+                  {
+                    active: true,
+                    issueId: "42",
+                    sessionKey: "agent:main:subagent:demo-reviewer-junior-ada",
+                    startTime: new Date(Date.now() - 5 * 60_000).toISOString(),
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const provider = {
+      listIssuesByLabel: vi.fn().mockResolvedValue([
+        {
+          iid: 42,
+          labels: ["To Review", "review:agent"],
+          title: "Review authority",
+          web_url: "https://example.test/issues/42",
+        },
+      ]),
+      issueHasReaction: vi.fn().mockResolvedValue(true),
+      getPrStatus: vi.fn().mockResolvedValue({
+        url: "https://example.test/pull/42",
+        state: "APPROVED",
+        currentIssueMatch: true,
+      }),
+    };
+
+    const transitions = await performReviewPass(
+      "/tmp/workspace",
+      "demo",
+      {
+        name: "demo",
+        repo: "/tmp/repo",
+        baseBranch: "main",
+        channels: [],
+      } as any,
+      provider as any,
+      { workflow: DEFAULT_WORKFLOW, timeouts: { gitPullMs: 30_000 } } as any,
+      {},
+      undefined,
+      vi.fn(),
+    );
+
+    expect(transitions).toBe(0);
+    expect(provider.getPrStatus).not.toHaveBeenCalled();
+    expect(mockResilientLabelTransition).not.toHaveBeenCalled();
   });
 });
