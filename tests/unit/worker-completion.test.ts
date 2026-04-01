@@ -8,6 +8,10 @@ const {
   mockCreateProvider,
   mockExecuteCompletion,
   mockResilientLabelTransition,
+  mockNotify,
+  mockGetNotificationConfig,
+  mockDeactivateWorker,
+  mockUpdateIssueRuntime,
 } = vi.hoisted(() => ({
   mockAuditLog: vi.fn(),
   mockReadProjects: vi.fn(),
@@ -15,6 +19,10 @@ const {
   mockCreateProvider: vi.fn(),
   mockExecuteCompletion: vi.fn(),
   mockResilientLabelTransition: vi.fn(),
+  mockNotify: vi.fn(),
+  mockGetNotificationConfig: vi.fn(),
+  mockDeactivateWorker: vi.fn(),
+  mockUpdateIssueRuntime: vi.fn(),
 }));
 
 vi.mock("../../lib/audit.js", () => ({
@@ -27,7 +35,8 @@ vi.mock("../../lib/projects/index.js", () => ({
   getIssueRuntime: (project: any, issueId: number) => project.issueRuntime?.[String(issueId)],
   recordIssueLifecycle: vi.fn().mockResolvedValue(true),
   resolveRepoPath: vi.fn((repo: string) => `/tmp/${repo.replace("/", "-")}`),
-  updateIssueRuntime: vi.fn().mockResolvedValue(undefined),
+  updateIssueRuntime: mockUpdateIssueRuntime,
+  deactivateWorker: mockDeactivateWorker,
 }));
 
 vi.mock("../../lib/config/index.js", () => ({
@@ -44,6 +53,12 @@ vi.mock("../../lib/services/pipeline.js", () => ({
 
 vi.mock("../../lib/workflow/labels.js", () => ({
   resilientLabelTransition: mockResilientLabelTransition,
+  resolveNotifyChannel: vi.fn().mockReturnValue({ channel: "telegram", channelId: "ops-room" }),
+}));
+
+vi.mock("../../lib/dispatch/notify.js", () => ({
+  notify: mockNotify,
+  getNotificationConfig: mockGetNotificationConfig,
 }));
 
 describe("worker-completion", () => {
@@ -132,6 +147,10 @@ describe("worker-completion", () => {
       nextState: "To Review",
     });
     mockResilientLabelTransition.mockResolvedValue(undefined);
+    mockNotify.mockResolvedValue(undefined);
+    mockGetNotificationConfig.mockReturnValue({});
+    mockDeactivateWorker.mockResolvedValue(undefined);
+    mockUpdateIssueRuntime.mockResolvedValue(undefined);
     mockAuditLog.mockResolvedValue(undefined);
   });
 
@@ -227,5 +246,191 @@ describe("worker-completion", () => {
       "Testing",
       "To Test",
     );
+    expect(mockNotify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "infraFailure",
+        project: "todo-summary",
+        issueId: 11,
+        summary: "Infrastructure failure during testing",
+        infraFailCount: 1,
+      }),
+      expect.any(Object),
+    );
+    expect(mockDeactivateWorker).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "demo",
+      "tester",
+      { level: "junior", slotIndex: 0, issueId: "11" },
+    );
+  });
+
+  it("skips agent_end completion after work_finish already marked the session completed", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    mockReadProjects.mockResolvedValueOnce({
+      projects: {
+        demo: {
+          name: "todo-summary",
+          slug: "demo",
+          repo: "org/repo",
+          provider: "github",
+          channels: [],
+          workers: {
+            developer: {
+              levels: {
+                medior: [
+                  {
+                    active: false,
+                    issueId: null,
+                    lastIssueId: "7",
+                    sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+                    startTime: null,
+                    previousLabel: null,
+                    name: "brittne",
+                    dispatchCycleId: "cycle-1",
+                    dispatchRunId: "run-1",
+                  },
+                ],
+              },
+            },
+          },
+          issueRuntime: {
+            "7": {
+              lastDispatchCycleId: "cycle-1",
+              dispatchRunId: "run-1",
+              sessionCompletedAt: "2026-03-31T12:30:00.000Z",
+              lastSessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+            },
+          },
+        },
+      },
+    });
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{ role: "assistant", content: [{ type: "text", text: "Work result: DONE" }] }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+      validateDeveloperDone: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "already_completed" });
+    expect(mockExecuteCompletion).not.toHaveBeenCalled();
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_skipped",
+      expect.objectContaining({
+        issueId: 7,
+        reason: "already_completed",
+      }),
+    );
+  });
+
+  it("does not treat a new active dispatch cycle as already completed just because the issue has an older completion timestamp", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    mockReadProjects.mockResolvedValueOnce({
+      projects: {
+        demo: {
+          name: "todo-summary",
+          slug: "demo",
+          repo: "org/repo",
+          provider: "github",
+          channels: [],
+          workers: {
+            developer: {
+              levels: {
+                medior: [
+                  {
+                    active: true,
+                    issueId: 7,
+                    lastIssueId: null,
+                    sessionKey: "agent:main:subagent:todo-summary-developer-medior-grace",
+                    startTime: "2026-04-01T12:00:00.000Z",
+                    previousLabel: "To Do",
+                    name: "grace",
+                    dispatchCycleId: "cycle-2",
+                    dispatchRunId: "run-2",
+                  },
+                ],
+              },
+            },
+          },
+          issueRuntime: {
+            "7": {
+              lastDispatchCycleId: "cycle-2",
+              dispatchRunId: "run-2",
+              sessionCompletedAt: "2026-03-31T12:30:00.000Z",
+              lastSessionKey: "agent:main:subagent:todo-summary-developer-medior-grace",
+            },
+          },
+        },
+      },
+    });
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-grace",
+      messages: [{ role: "assistant", content: [{ type: "text", text: "Work result: DONE" }] }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+      validateDeveloperDone: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    expect(result).toMatchObject({ applied: true });
+    expect(mockExecuteCompletion).toHaveBeenCalledOnce();
+  });
+
+  it("skips stale agent_end when runId does not match the current dispatch for a reused sessionKey", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    mockReadProjects.mockResolvedValueOnce({
+      projects: {
+        demo: {
+          name: "todo-summary",
+          slug: "demo",
+          repo: "org/repo",
+          provider: "github",
+          channels: [],
+          workers: {
+            developer: {
+              levels: {
+                medior: [
+                  {
+                    active: true,
+                    issueId: 7,
+                    lastIssueId: null,
+                    sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+                    startTime: "2026-04-01T12:00:00.000Z",
+                    previousLabel: "To Do",
+                    name: "brittne",
+                    dispatchCycleId: "cycle-2",
+                    dispatchRunId: "run-current",
+                  },
+                ],
+              },
+            },
+          },
+          issueRuntime: {
+            "7": {
+              lastDispatchCycleId: "cycle-2",
+              dispatchRunId: "run-current",
+              lastSessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+            },
+          },
+        },
+      },
+    });
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      runId: "run-stale",
+      messages: [{ role: "assistant", content: [{ type: "text", text: "Work result: DONE" }] }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+      validateDeveloperDone: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "stale_dispatch_cycle" });
+    expect(mockExecuteCompletion).not.toHaveBeenCalled();
   });
 });

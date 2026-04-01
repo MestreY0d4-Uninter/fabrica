@@ -19,8 +19,7 @@ import { DATA_DIR } from "../../setup/constants.js";
 import { requireWorkspaceDir, resolveProjectFromContext, resolveProvider } from "../helpers.js";
 import { getAllRoleIds, isValidResult, getCompletionResults } from "../../roles/index.js";
 import { getQueueLabels, isFeedbackState } from "../../workflow/index.js";
-import { resilientLabelTransition, resolveNotifyChannel } from "../../workflow/labels.js";
-import { notify, getNotificationConfig } from "../../dispatch/notify.js";
+import { resilientLabelTransition } from "../../workflow/labels.js";
 import { loadConfig } from "../../config/index.js";
 import { PrState, type PrSelector } from "../../providers/provider.js";
 import {
@@ -29,6 +28,11 @@ import {
   type QaEvidenceValidation,
 } from "../tasks/qa-evidence.js";
 import { getRootLogger } from "../../observability/logger.js";
+import {
+  applyTesterInfraFailureCompletion,
+  INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD,
+  resolveWorkerSlot,
+} from "../../services/worker-completion-shared.js";
 
 /**
  * Get the current git branch name.
@@ -259,8 +263,6 @@ export async function getCanonicalQaEvidenceValidationForPr(
   return validateCanonicalQaEvidence(prStatus.body);
 }
 
-export const INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD = 2;
-
 export function createWorkFinishTool(ctx: PluginContext) {
   return (toolCtx: ToolContext) => ({
     name: "work_finish",
@@ -403,72 +405,29 @@ export function createWorkFinishTool(ctx: PluginContext) {
 
       // --- fail_infra special case: no workflow rule, handled directly ---
       if (role === "tester" && result === "fail_infra") {
-        const currentInfraFails = (issueRuntime?.infraFailCount ?? 0) + 1;
-        await updateIssueRuntime(workspaceDir, project.slug, issueId, {
-          infraFailCount: currentInfraFails,
-        });
-
-        await auditLog(workspaceDir, "infra_failure", {
-          project: project.name, issue: issueId, role, result,
-          summary: summary ?? null, infraFailCount: currentInfraFails,
-        });
-
-        // Notify operator
-        const notifyConfig = getNotificationConfig(ctx.pluginConfig);
-        const target = resolveNotifyChannel([], project.channels);
-        const issueUrl = `https://github.com/${project.repo}/issues/${issueId}`;
-        await notify(
-          {
-            type: "infraFailure",
-            project: project.name,
-            issueId,
-            issueUrl,
-            summary: summary ?? "Infrastructure failure during testing",
-            infraFailCount: currentInfraFails,
-          },
-          {
-            workspaceDir,
-            config: notifyConfig,
-            channelId: target?.channelId,
-            channel: target?.channel ?? "telegram",
-            runtime: ctx.runtime,
-            accountId: target?.accountId,
-            messageThreadId: target?.messageThreadId,
-            runCommand: ctx.runCommand,
-          },
-        ).catch((err) => { getRootLogger().warn(`infra_failure notification failed: ${err}`); });
-
-        // Circuit breaker: after INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD infra failures, move to Refining (hold state)
-        if (currentInfraFails >= INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD) {
-          await auditLog(workspaceDir, "infra_failure_circuit_breaker", {
-            project: project.name, issue: issueId, infraFailCount: currentInfraFails,
-          });
-          await resilientLabelTransition(provider, issueId, "Testing", "Refining");
-        } else {
-          // Stay in test queue — will be re-dispatched after toolchain is fixed
-          await resilientLabelTransition(provider, issueId, "Testing", "To Test");
-        }
-
-        // Release worker slot
-        await deactivateWorker(workspaceDir, project.slug, "tester", {
-          level: slotLevel,
-          slotIndex,
-          issueId: String(issueId),
-        });
-
-        await recordIssueLifecycle({
+        const { infraFailCount, circuitBroken } = await applyTesterInfraFailureCompletion({
           workspaceDir,
-          slug: project.slug,
+          projectSlug: project.slug,
+          projectName: project.name,
+          repo: project.repo,
+          channels: project.channels,
           issueId,
-          stage: "session_completed",
+          slotLevel,
+          slotIndex,
+          provider,
+          runtime: ctx.runtime,
+          pluginConfig: ctx.pluginConfig,
+          runCommand: ctx.runCommand,
+          summary,
+          source: "work_finish",
           sessionKey: toolCtx.sessionKey ?? null,
-          details: { role, result, infraFailCount: currentInfraFails },
-        }).catch(() => {});
+          currentInfraFails: (issueRuntime?.infraFailCount ?? 0) + 1,
+        });
 
         return jsonResult({
           success: true, project: project.name, projectSlug: project.slug,
-          issueId, role, result, infraFailCount: currentInfraFails,
-          circuitBroken: currentInfraFails >= INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD,
+          issueId, role, result, infraFailCount,
+          circuitBroken,
         });
       }
 
@@ -598,50 +557,4 @@ export function createWorkFinishTool(ctx: PluginContext) {
   });
 }
 
-export function resolveWorkerSlot(
-  roleWorker: ReturnType<typeof getRoleWorker>,
-  sessionKey?: string,
-): {
-  slotIndex: number;
-  slotLevel: string;
-  issueId: number;
-  recovered: boolean;
-  dispatchCycleId?: string | null;
-  dispatchRunId?: string | null;
-} | null {
-  for (const [level, slots] of Object.entries(roleWorker.levels)) {
-    for (let i = 0; i < slots.length; i++) {
-      const slot = slots[i]!;
-      if (!slot.active || !slot.issueId) continue;
-      if (!sessionKey || !slot.sessionKey || slot.sessionKey === sessionKey) {
-        return {
-          slotIndex: i,
-          slotLevel: level,
-          issueId: Number(slot.issueId),
-          recovered: false,
-          dispatchCycleId: slot.dispatchCycleId ?? null,
-          dispatchRunId: slot.dispatchRunId ?? null,
-        };
-      }
-    }
-  }
-
-  if (!sessionKey) return null;
-
-  for (const [level, slots] of Object.entries(roleWorker.levels)) {
-    for (let i = 0; i < slots.length; i++) {
-      const slot = slots[i]!;
-      if (slot.active || !slot.lastIssueId || slot.sessionKey !== sessionKey) continue;
-      return {
-        slotIndex: i,
-        slotLevel: level,
-        issueId: Number(slot.lastIssueId),
-        recovered: true,
-        dispatchCycleId: slot.dispatchCycleId ?? null,
-        dispatchRunId: slot.dispatchRunId ?? null,
-      };
-    }
-  }
-
-  return null;
-}
+export { INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD, resolveWorkerSlot } from "../../services/worker-completion-shared.js";

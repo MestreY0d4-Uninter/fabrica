@@ -64,7 +64,9 @@ export function extractWorkerResultFromMessages(
   const text = extractTextContent(latestAssistantMessage.content);
   if (!text) return null;
 
-  for (const line of text.split("\n").map((value) => value.trim()).toReversed()) {
+  const lines = text.split("\n").map((value) => value.trim());
+  for (let index = lines.length - 1; index >= 0; index--) {
+    const line = lines[index]!;
     if (!line.startsWith(prefix)) continue;
 
     const value = line.slice(prefix.length).trim().toUpperCase();

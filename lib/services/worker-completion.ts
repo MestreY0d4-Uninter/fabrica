@@ -1,6 +1,7 @@
 import type { IssueProvider, PrStatus } from "../providers/provider.js";
 import type { RunCommand } from "../context.js";
 import { log as auditLog } from "../audit.js";
+import type { FabricaPluginConfig } from "../config/types.js";
 import { loadConfig } from "../config/index.js";
 import { createProvider } from "../providers/index.js";
 import {
@@ -14,8 +15,8 @@ import {
 import { parseFabricaSessionKey } from "../dispatch/bootstrap-hook.js";
 import { executeCompletion } from "./pipeline.js";
 import { extractWorkerResultFromMessages, type WorkerResult, type WorkerRole } from "./worker-result.js";
-import { resolveWorkerSlot, validatePrExistsForDeveloper, INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD } from "../tools/worker/work-finish.js";
-import { resilientLabelTransition } from "../workflow/labels.js";
+import { validatePrExistsForDeveloper } from "../tools/worker/work-finish.js";
+import { applyTesterInfraFailureCompletion, resolveWorkerSlot } from "./worker-completion-shared.js";
 
 type WorkerCompletionOutcome = { applied: boolean; reason?: string };
 
@@ -30,12 +31,16 @@ type DeveloperDoneValidationResult = {
 };
 
 type WorkerSessionContext = {
+  sessionKey: string;
   parsed: { projectName: string; role: WorkerRole };
   projectSlug: string;
   project: Awaited<ReturnType<typeof readProjects>>["projects"][string];
   issueId: number;
   slotLevel: string;
   slotIndex: number;
+  recovered: boolean;
+  dispatchCycleId?: string | null;
+  dispatchRunId?: string | null;
   issueRuntime: ReturnType<typeof getIssueRuntime>;
 };
 
@@ -80,6 +85,7 @@ export async function resolveWorkerSessionContext(
   if (!slot) return null;
 
   return {
+    sessionKey,
     parsed: {
       projectName: parsed.projectName,
       role,
@@ -89,6 +95,9 @@ export async function resolveWorkerSessionContext(
     issueId: slot.issueId,
     slotLevel: slot.slotLevel,
     slotIndex: slot.slotIndex,
+    recovered: slot.recovered,
+    dispatchCycleId: slot.dispatchCycleId ?? null,
+    dispatchRunId: slot.dispatchRunId ?? null,
     issueRuntime: getIssueRuntime(project, slot.issueId),
   };
 }
@@ -152,7 +161,9 @@ export async function applyWorkerResult(opts: {
   result: WorkerResult;
   workspaceDir: string;
   runCommand: RunCommand;
+  runId?: string;
   runtime?: RuntimeLike;
+  pluginConfig?: FabricaPluginConfig;
   providerOverride?: IssueProvider;
   validateDeveloperDone?: (opts: {
     issueId: number;
@@ -182,6 +193,52 @@ export async function applyWorkerResult(opts: {
 
   if (!completionResult) {
     return { applied: false, reason: "unsupported_result" };
+  }
+
+  const currentDispatchRunId = context.dispatchRunId ?? context.issueRuntime?.dispatchRunId ?? null;
+  if (opts.runId && currentDispatchRunId && opts.runId !== currentDispatchRunId) {
+    await auditLog(opts.workspaceDir, "worker_completion_skipped", {
+      sessionKey: context.sessionKey,
+      projectSlug: context.projectSlug,
+      issueId: context.issueId,
+      role: context.parsed.role,
+      result: opts.result.value,
+      reason: "stale_dispatch_cycle",
+      eventRunId: opts.runId,
+      currentDispatchRunId,
+    }).catch(() => {});
+    return { applied: false, reason: "stale_dispatch_cycle" };
+  }
+
+  if (
+    context.dispatchCycleId &&
+    context.issueRuntime?.lastDispatchCycleId &&
+    context.dispatchCycleId !== context.issueRuntime.lastDispatchCycleId
+  ) {
+    await auditLog(opts.workspaceDir, "worker_completion_skipped", {
+      sessionKey: context.sessionKey,
+      projectSlug: context.projectSlug,
+      issueId: context.issueId,
+      role: context.parsed.role,
+      result: opts.result.value,
+      reason: "stale_dispatch_cycle",
+    }).catch(() => {});
+    return { applied: false, reason: "stale_dispatch_cycle" };
+  }
+
+  if (
+    context.recovered &&
+    context.issueRuntime?.sessionCompletedAt
+  ) {
+    await auditLog(opts.workspaceDir, "worker_completion_skipped", {
+      sessionKey: context.sessionKey,
+      projectSlug: context.projectSlug,
+      issueId: context.issueId,
+      role: context.parsed.role,
+      result: opts.result.value,
+      reason: "already_completed",
+    }).catch(() => {});
+    return { applied: false, reason: "already_completed" };
   }
 
   let validatedPrStatus: PrStatus | undefined;
@@ -217,34 +274,25 @@ export async function applyWorkerResult(opts: {
   }
 
   if (context.parsed.role === "tester" && opts.result.value === "FAIL_INFRA") {
-    const infraFailCount = (context.issueRuntime?.infraFailCount ?? 0) + 1;
-    await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
-      infraFailCount,
-    });
-    await auditLog(opts.workspaceDir, "infra_failure", {
-      project: context.project.name,
-      issue: context.issueId,
-      role: context.parsed.role,
-      result: "fail_infra",
-      infraFailCount,
-      source: "agent_end",
-    }).catch(() => {});
-    await resilientLabelTransition(
-      provider,
-      context.issueId,
-      "Testing",
-      infraFailCount >= INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD ? "Refining" : "To Test",
-    );
-    await recordIssueLifecycle({
+    await applyTesterInfraFailureCompletion({
       workspaceDir: opts.workspaceDir,
-      slug: context.projectSlug,
+      projectSlug: context.projectSlug,
+      projectName: context.project.name,
+      repo: context.project.repo,
+      channels: context.project.channels,
       issueId: context.issueId,
-      stage: "session_completed",
-      sessionKey: context.project.workers[context.parsed.role]?.levels?.[context.slotLevel]?.[context.slotIndex]?.sessionKey ?? null,
-      details: { role: context.parsed.role, result: "fail_infra", source: "agent_end", infraFailCount },
-    }).catch(() => {});
+      slotLevel: context.slotLevel,
+      slotIndex: context.slotIndex,
+      provider,
+      runtime: opts.runtime as never,
+      pluginConfig: opts.pluginConfig,
+      runCommand: opts.runCommand,
+      source: "agent_end",
+      sessionKey: context.sessionKey,
+      currentInfraFails: (context.issueRuntime?.infraFailCount ?? 0) + 1,
+    });
     await auditLog(opts.workspaceDir, "worker_completion_applied", {
-      sessionKey: context.project.workers[context.parsed.role]?.levels?.[context.slotLevel]?.[context.slotIndex]?.sessionKey ?? null,
+      sessionKey: context.sessionKey,
       projectSlug: context.projectSlug,
       issueId: context.issueId,
       role: context.parsed.role,
@@ -277,12 +325,12 @@ export async function applyWorkerResult(opts: {
     slug: context.projectSlug,
     issueId: context.issueId,
     stage: "session_completed",
-    sessionKey: context.project.workers[context.parsed.role]?.levels?.[context.slotLevel]?.[context.slotIndex]?.sessionKey ?? null,
+    sessionKey: context.sessionKey,
     details: { role: context.parsed.role, result: completionResult, source: "agent_end" },
   }).catch(() => {});
 
   await auditLog(opts.workspaceDir, "worker_completion_applied", {
-    sessionKey: context.project.workers[context.parsed.role]?.levels?.[context.slotLevel]?.[context.slotIndex]?.sessionKey ?? null,
+    sessionKey: context.sessionKey,
     projectSlug: context.projectSlug,
     issueId: context.issueId,
     role: context.parsed.role,
@@ -301,10 +349,12 @@ export async function applyWorkerResult(opts: {
 
 export async function handleWorkerAgentEnd(opts: {
   sessionKey: string;
+  runId?: string;
   messages?: unknown[];
   workspaceDir: string;
   runCommand: RunCommand;
   runtime?: RuntimeLike;
+  pluginConfig?: FabricaPluginConfig;
   providerOverride?: IssueProvider;
   validateDeveloperDone?: (opts: {
     issueId: number;
@@ -338,7 +388,9 @@ export async function handleWorkerAgentEnd(opts: {
     result,
     workspaceDir: opts.workspaceDir,
     runCommand: opts.runCommand,
+    runId: opts.runId,
     runtime: opts.runtime,
+    pluginConfig: opts.pluginConfig,
     providerOverride: opts.providerOverride,
     validateDeveloperDone: opts.validateDeveloperDone,
   });

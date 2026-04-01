@@ -68,12 +68,13 @@ export function registerReactiveDispatchHooks(
     const parsed = parseFabricaSessionKey(sessionKey);
     if (!parsed) return;
     if (workspaceDir) {
-      await handleWorkerAgentEnd({
+      handleWorkerAgentEnd({
         sessionKey,
         messages: event.messages,
         workspaceDir,
         runCommand: ctx.runCommand,
         runtime: ctx.runtime as never,
+        pluginConfig: ctx.pluginConfig,
       }).catch(() => {});
     }
     ctx.runtime?.system.requestHeartbeatNow({ reason: "agent_end", coalesceMs: 2000 });

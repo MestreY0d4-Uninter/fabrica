@@ -124,17 +124,41 @@ describe("reactive-dispatch-hook", () => {
       );
 
       expect(mockHandleWorkerAgentEnd).toHaveBeenCalledOnce();
-      expect(mockHandleWorkerAgentEnd).toHaveBeenCalledWith(
-        expect.objectContaining({
-          sessionKey: "agent:main:subagent:my-project-developer-junior-ada",
-          workspaceDir: "/tmp/fabrica-workspace",
-          messages: [{ role: "assistant", content: [{ type: "text", text: "Work result: DONE" }] }],
-        }),
-      );
+      const call = mockHandleWorkerAgentEnd.mock.calls[0]?.[0];
+      expect(call?.sessionKey).toBe("agent:main:subagent:my-project-developer-junior-ada");
+      expect(call?.workspaceDir).toBe("/tmp/fabrica-workspace");
+      expect(call?.messages).toEqual([
+        { role: "assistant", content: [{ type: "text", text: "Work result: DONE" }] },
+      ]);
       expect(mockRequestHeartbeatNow).toHaveBeenCalledOnce();
       expect(mockRequestHeartbeatNow).toHaveBeenCalledWith(
         expect.objectContaining({ reason: "agent_end" }),
       );
+    });
+
+    it("does not await worker completion before waking heartbeat", async () => {
+      const { registerReactiveDispatchHooks } = await import("../../lib/dispatch/reactive-dispatch-hook.js");
+      const h = captureHandlers(registerReactiveDispatchHooks);
+
+      let resolveCompletion!: () => void;
+      mockHandleWorkerAgentEnd.mockImplementationOnce(
+        () => new Promise<void>((resolve) => { resolveCompletion = resolve; }),
+      );
+
+      const handlerPromise = h["agent_end"](
+        { success: true, messages: [{ role: "assistant", content: [{ type: "text", text: "Work result: DONE" }] }] },
+        { sessionKey: "agent:main:subagent:my-project-developer-junior-ada" },
+      );
+
+      await Promise.resolve();
+
+      expect(mockRequestHeartbeatNow).toHaveBeenCalledOnce();
+      await expect(Promise.race([
+        handlerPromise.then(() => "resolved"),
+        new Promise<string>((resolve) => setTimeout(() => resolve("timeout"), 25)),
+      ])).resolves.toBe("resolved");
+
+      resolveCompletion();
     });
 
     it("does NOT call requestHeartbeatNow for a non-Fabrica session", async () => {

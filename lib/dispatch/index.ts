@@ -288,6 +288,7 @@ export async function dispatchTask(
     dispatchRunId: null,
     agentAcceptedAt: null,
     firstWorkerActivityAt: null,
+    sessionCompletedAt: null,
     lastSessionKey: sessionKey,
   }).catch((err) => {
     auditLog(workspaceDir, "dispatch_warning", { step: "record_dispatch_requested", issue: issueId, err: String(err) }).catch(() => {});
