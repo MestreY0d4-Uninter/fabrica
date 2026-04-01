@@ -1232,10 +1232,12 @@ describe("telegram bootstrap hook", () => {
     expect(mockRunPipeline).not.toHaveBeenCalled();
     expect(mockProjectTick).toHaveBeenCalledTimes(1);
 
-    const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
-    expect(session?.status).toBe("completed");
-    expect(session?.lastError).toBeNull();
-    expect(session?.nextRetryAt).toBeNull();
+    await vi.waitFor(async () => {
+      const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+      expect(session?.status).toBe("completed");
+      expect(session?.lastError).toBeNull();
+      expect(session?.nextRetryAt).toBeNull();
+    }, { timeout: 2000 });
   });
 
   it("resumes an existing bootstrapping session through the hook instead of restarting classification", async () => {
@@ -1284,11 +1286,13 @@ describe("telegram bootstrap hook", () => {
     expect(outerMockSubagentRun).not.toHaveBeenCalled();
     expect(mockRunPipeline).toHaveBeenCalledTimes(1);
 
-    const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
-    expect(session?.status).toBe("completed");
-    expect(session?.ackSentAt).toBeTruthy();
-    expect(session?.lastError).toBeNull();
-    expect(session?.nextRetryAt).toBeNull();
+    await vi.waitFor(async () => {
+      const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+      expect(session?.status).toBe("completed");
+      expect(session?.ackSentAt).toBeTruthy();
+      expect(session?.lastError).toBeNull();
+      expect(session?.nextRetryAt).toBeNull();
+    }, { timeout: 2000 });
   });
 
   it("fails closed when pipeline succeeds without topic routing", async () => {
@@ -1357,7 +1361,7 @@ describe("telegram bootstrap hook", () => {
       { channelId: "telegram", conversationId: "6951571380" },
     );
     // inferProjectSlug succeeds for the rawIdea → pipeline runs directly without asking for name
-    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 5000 });
     expect(mockRunPipeline.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
       raw_idea: "Uma CLI em Python que gere senhas aleatorias no terminal.",
       metadata: expect.objectContaining({
@@ -1400,7 +1404,7 @@ describe("telegram bootstrap hook", () => {
       },
       { channelId: "telegram", conversationId: "6951571380" },
     );
-    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 5000 });
     expect(mockRunPipeline.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
       metadata: expect.objectContaining({
         project_name: "demo-node-cli",

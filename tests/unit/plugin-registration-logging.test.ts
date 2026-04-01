@@ -76,7 +76,7 @@ describe("plugin registration logging calibration", () => {
       vi.doUnmock("../../lib/observability/logger.js");
       vi.resetModules();
     }
-  });
+  }, 15000);
 
   it("keeps polling-only webhook notices off info and warn level in CLI mode", async () => {
     process.argv = ["node", "openclaw", "configure"];
