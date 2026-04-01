@@ -14,7 +14,8 @@ import {
 import { parseFabricaSessionKey } from "../dispatch/bootstrap-hook.js";
 import { executeCompletion } from "./pipeline.js";
 import { extractWorkerResultFromMessages, type WorkerResult, type WorkerRole } from "./worker-result.js";
-import { resolveWorkerSlot, validatePrExistsForDeveloper } from "../tools/worker/work-finish.js";
+import { resolveWorkerSlot, validatePrExistsForDeveloper, INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD } from "../tools/worker/work-finish.js";
+import { resilientLabelTransition } from "../workflow/labels.js";
 
 type WorkerCompletionOutcome = { applied: boolean; reason?: string };
 
@@ -215,6 +216,44 @@ export async function applyWorkerResult(opts: {
     }).catch(() => {});
   }
 
+  if (context.parsed.role === "tester" && opts.result.value === "FAIL_INFRA") {
+    const infraFailCount = (context.issueRuntime?.infraFailCount ?? 0) + 1;
+    await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
+      infraFailCount,
+    });
+    await auditLog(opts.workspaceDir, "infra_failure", {
+      project: context.project.name,
+      issue: context.issueId,
+      role: context.parsed.role,
+      result: "fail_infra",
+      infraFailCount,
+      source: "agent_end",
+    }).catch(() => {});
+    await resilientLabelTransition(
+      provider,
+      context.issueId,
+      "Testing",
+      infraFailCount >= INFRA_FAIL_CIRCUIT_BREAKER_THRESHOLD ? "Refining" : "To Test",
+    );
+    await recordIssueLifecycle({
+      workspaceDir: opts.workspaceDir,
+      slug: context.projectSlug,
+      issueId: context.issueId,
+      stage: "session_completed",
+      sessionKey: context.project.workers[context.parsed.role]?.levels?.[context.slotLevel]?.[context.slotIndex]?.sessionKey ?? null,
+      details: { role: context.parsed.role, result: "fail_infra", source: "agent_end", infraFailCount },
+    }).catch(() => {});
+    await auditLog(opts.workspaceDir, "worker_completion_applied", {
+      sessionKey: context.project.workers[context.parsed.role]?.levels?.[context.slotLevel]?.[context.slotIndex]?.sessionKey ?? null,
+      projectSlug: context.projectSlug,
+      issueId: context.issueId,
+      role: context.parsed.role,
+      result: opts.result.value,
+      source: opts.result.source,
+    }).catch(() => {});
+    return { applied: true };
+  }
+
   await executeCompletion({
     workspaceDir: opts.workspaceDir,
     projectSlug: context.projectSlug,
@@ -250,6 +289,12 @@ export async function applyWorkerResult(opts: {
     result: opts.result.value,
     source: opts.result.source,
   }).catch(() => {});
+
+  if (context.parsed.role === "tester" && context.issueRuntime?.infraFailCount) {
+    await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
+      infraFailCount: 0,
+    }).catch(() => {});
+  }
 
   return { applied: true };
 }

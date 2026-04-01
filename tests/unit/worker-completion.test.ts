@@ -7,12 +7,14 @@ const {
   mockLoadConfig,
   mockCreateProvider,
   mockExecuteCompletion,
+  mockResilientLabelTransition,
 } = vi.hoisted(() => ({
   mockAuditLog: vi.fn(),
   mockReadProjects: vi.fn(),
   mockLoadConfig: vi.fn(),
   mockCreateProvider: vi.fn(),
   mockExecuteCompletion: vi.fn(),
+  mockResilientLabelTransition: vi.fn(),
 }));
 
 vi.mock("../../lib/audit.js", () => ({
@@ -38,6 +40,10 @@ vi.mock("../../lib/providers/index.js", () => ({
 
 vi.mock("../../lib/services/pipeline.js", () => ({
   executeCompletion: mockExecuteCompletion,
+}));
+
+vi.mock("../../lib/workflow/labels.js", () => ({
+  resilientLabelTransition: mockResilientLabelTransition,
 }));
 
 describe("worker-completion", () => {
@@ -70,11 +76,33 @@ describe("worker-completion", () => {
                 ],
               },
             },
+            tester: {
+              levels: {
+                junior: [
+                  {
+                    active: true,
+                    issueId: 11,
+                    lastIssueId: null,
+                    sessionKey: "agent:main:subagent:todo-summary-tester-junior-riley",
+                    startTime: "2026-03-31T12:00:00.000Z",
+                    previousLabel: "To Test",
+                    name: "riley",
+                    dispatchCycleId: "cycle-2",
+                    dispatchRunId: "run-2",
+                  },
+                ],
+              },
+            },
           },
           issueRuntime: {
             "7": {
               lastDispatchCycleId: "cycle-1",
               dispatchRunId: "run-1",
+            },
+            "11": {
+              lastDispatchCycleId: "cycle-2",
+              dispatchRunId: "run-2",
+              infraFailCount: 0,
             },
           },
         },
@@ -103,6 +131,7 @@ describe("worker-completion", () => {
       announcement: "done",
       nextState: "To Review",
     });
+    mockResilientLabelTransition.mockResolvedValue(undefined);
     mockAuditLog.mockResolvedValue(undefined);
   });
 
@@ -171,6 +200,32 @@ describe("worker-completion", () => {
         role: "developer",
         reason: "missing_result_line",
       }),
+    );
+  });
+
+  it("applies tester FAIL_INFRA without routing through generic pipeline completion", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const provider = {
+      getIssue: vi.fn().mockResolvedValue({ labels: ["Testing"] }),
+      transitionLabel: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-tester-junior-riley",
+      messages: [{ role: "assistant", content: [{ type: "text", text: "Test result: FAIL_INFRA" }] }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+      providerOverride: provider as never,
+    });
+
+    expect(result).toMatchObject({ applied: true });
+    expect(mockExecuteCompletion).not.toHaveBeenCalled();
+    expect(mockResilientLabelTransition).toHaveBeenCalledWith(
+      provider,
+      11,
+      "Testing",
+      "To Test",
     );
   });
 });
