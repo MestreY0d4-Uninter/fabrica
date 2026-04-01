@@ -89,9 +89,9 @@ describe("observability", () => {
     expect(spans[0]?.attributes.headSha).toBe("deadbeef");
   });
 
-  it("keeps GitHub webhook route registration out of normal CLI info output", () => {
+  it("emits GitHub webhook route registration banner at info level in gateway mode", () => {
     const originalArgv = process.argv.slice();
-    process.argv = ["node", "openclaw", "plugins", "doctor"];
+    process.argv = ["node", "openclaw", "gateway", "--port", "18789"];
     vi.stubEnv("FABRICA_GITHUB_WEBHOOK_SECRET", "supersecret");
 
     const registerHttpRoute = vi.fn();
@@ -139,10 +139,7 @@ describe("observability", () => {
       );
 
       expect(registerHttpRoute).toHaveBeenCalledTimes(1);
-      expect(childLogger.info).not.toHaveBeenCalledWith(
-        expect.stringContaining("GitHub webhook route registered"),
-      );
-      expect(childLogger.debug).toHaveBeenCalledWith(
+      expect(childLogger.info).toHaveBeenCalledWith(
         expect.stringContaining("GitHub webhook route registered"),
       );
     } finally {
@@ -151,7 +148,128 @@ describe("observability", () => {
     }
   });
 
-  it("keeps the plugin registration banner out of normal CLI info output", async () => {
+  it("does not emit polling-only webhook banners at info level outside gateway mode", () => {
+    const originalArgv = process.argv.slice();
+    process.argv = ["node", "openclaw", "plugins", "doctor"];
+    vi.stubEnv("FABRICA_GITHUB_WEBHOOK_SECRET", "");
+
+    const registerHttpRoute = vi.fn();
+    const childLogger = {
+      child: vi.fn(() => childLogger),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const logger = {
+      child: vi.fn(() => childLogger),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    try {
+      registerGitHubWebhookRoute(
+        {
+          registerHttpRoute,
+          logger,
+        } as any,
+        {
+          pluginConfig: {
+            providers: {
+              github: {
+                webhookSecretEnv: "FABRICA_GITHUB_WEBHOOK_SECRET",
+              },
+            },
+          },
+          runtime: {
+            config: {
+              loadConfig: () => ({
+                agents: {
+                  defaults: {
+                    workspace: "/tmp/fabrica-workspace",
+                  },
+                },
+              }),
+            },
+          },
+        } as any,
+      );
+
+      expect(registerHttpRoute).not.toHaveBeenCalled();
+      expect(childLogger.info).not.toHaveBeenCalledWith(
+        expect.stringContaining("GitHub webhook route not registered"),
+      );
+      expect(childLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining("GitHub webhook route not registered"),
+      );
+    } finally {
+      process.argv = originalArgv;
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("emits polling-only webhook banners at warn level in gateway mode", () => {
+    const originalArgv = process.argv.slice();
+    process.argv = ["node", "openclaw", "gateway", "--port", "18789"];
+    vi.stubEnv("FABRICA_GITHUB_WEBHOOK_SECRET", "");
+
+    const registerHttpRoute = vi.fn();
+    const childLogger = {
+      child: vi.fn(() => childLogger),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const logger = {
+      child: vi.fn(() => childLogger),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    try {
+      registerGitHubWebhookRoute(
+        {
+          registerHttpRoute,
+          logger,
+        } as any,
+        {
+          pluginConfig: {
+            providers: {
+              github: {
+                webhookSecretEnv: "FABRICA_GITHUB_WEBHOOK_SECRET",
+              },
+            },
+          },
+          runtime: {
+            config: {
+              loadConfig: () => ({
+                agents: {
+                  defaults: {
+                    workspace: "/tmp/fabrica-workspace",
+                  },
+                },
+              }),
+            },
+          },
+        } as any,
+      );
+
+      expect(registerHttpRoute).not.toHaveBeenCalled();
+      expect(childLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("GitHub webhook route not registered"),
+      );
+    } finally {
+      process.argv = originalArgv;
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("does not emit the plugin registration banner at info level outside gateway mode", async () => {
     const originalArgv = process.argv.slice();
     process.argv = ["node", "openclaw", "plugins", "doctor"];
 
@@ -211,6 +329,12 @@ describe("observability", () => {
       plugin.register(api);
 
       expect(pluginInfo).not.toHaveBeenCalledWith(
+        expect.stringContaining("Fabrica plugin registered"),
+      );
+
+      process.argv = ["node", "openclaw", "gateway", "--port", "18789"];
+      plugin.register(api);
+      expect(pluginInfo).toHaveBeenCalledWith(
         expect.stringContaining("Fabrica plugin registered"),
       );
     } finally {

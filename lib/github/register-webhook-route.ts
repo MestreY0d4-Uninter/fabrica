@@ -68,7 +68,7 @@ export function registerGitHubWebhookRoute(api: OpenClawPluginApi, ctx: PluginCo
     if (isGatewayServerProcess()) {
       routeLogger.warn?.(message);
     } else {
-      routeLogger.debug?.(message) ?? routeLogger.info?.(message);
+      routeLogger.debug?.(message);
     }
     return;
   }
