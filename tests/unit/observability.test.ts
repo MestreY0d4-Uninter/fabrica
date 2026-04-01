@@ -269,6 +269,127 @@ describe("observability", () => {
     }
   });
 
+  it("does not emit disabled webhook banners at info level outside gateway mode", () => {
+    const originalArgv = process.argv.slice();
+    process.argv = ["node", "openclaw", "plugins", "doctor"];
+
+    const registerHttpRoute = vi.fn();
+    const childLogger = {
+      child: vi.fn(() => childLogger),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const logger = {
+      child: vi.fn(() => childLogger),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    try {
+      registerGitHubWebhookRoute(
+        {
+          registerHttpRoute,
+          logger,
+        } as any,
+        {
+          pluginConfig: {
+            providers: {
+              github: {
+                webhookMode: "disabled",
+              },
+            },
+          },
+          runtime: {
+            config: {
+              loadConfig: () => ({
+                agents: {
+                  defaults: {
+                    workspace: "/tmp/fabrica-workspace",
+                  },
+                },
+              }),
+            },
+          },
+        } as any,
+      );
+
+      expect(registerHttpRoute).not.toHaveBeenCalled();
+      expect(childLogger.info).not.toHaveBeenCalledWith(
+        expect.stringContaining("GitHub webhook route disabled by configuration"),
+      );
+      expect(childLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining("GitHub webhook route disabled by configuration"),
+      );
+    } finally {
+      process.argv = originalArgv;
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("does not emit missing-workspace webhook banners at info level outside gateway mode", () => {
+    const originalArgv = process.argv.slice();
+    process.argv = ["node", "openclaw", "plugins", "doctor"];
+    vi.stubEnv("FABRICA_GITHUB_WEBHOOK_SECRET", "supersecret");
+
+    const registerHttpRoute = vi.fn();
+    const childLogger = {
+      child: vi.fn(() => childLogger),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const logger = {
+      child: vi.fn(() => childLogger),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    try {
+      registerGitHubWebhookRoute(
+        {
+          registerHttpRoute,
+          logger,
+        } as any,
+        {
+          pluginConfig: {
+            providers: {
+              github: {
+                webhookSecretEnv: "FABRICA_GITHUB_WEBHOOK_SECRET",
+              },
+            },
+          },
+          runtime: {
+            config: {
+              loadConfig: () => ({
+                agents: {
+                  defaults: {},
+                },
+              }),
+            },
+          },
+        } as any,
+      );
+
+      expect(registerHttpRoute).not.toHaveBeenCalled();
+      expect(childLogger.info).not.toHaveBeenCalledWith(
+        expect.stringContaining("no default workspace configured"),
+      );
+      expect(childLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining("no default workspace configured"),
+      );
+    } finally {
+      process.argv = originalArgv;
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("does not emit the plugin registration banner at info level outside gateway mode", async () => {
     const originalArgv = process.argv.slice();
     process.argv = ["node", "openclaw", "plugins", "doctor"];
@@ -338,8 +459,12 @@ describe("observability", () => {
         expect.stringContaining("Fabrica plugin registered"),
       );
     } finally {
+      vi.doUnmock("../../lib/observability/bootstrap.js");
+      vi.doUnmock("../../lib/observability/logger.js");
+      vi.doUnmock("../../lib/github/register-webhook-route.js");
       process.argv = originalArgv;
       vi.resetModules();
+      vi.restoreAllMocks();
     }
   });
 });

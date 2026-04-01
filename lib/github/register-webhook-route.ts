@@ -45,7 +45,11 @@ export function registerGitHubWebhookRoute(api: OpenClawPluginApi, ctx: PluginCo
   // Check webhookMode first — "disabled" exits immediately
   const mode = getWebhookMode(ctx.pluginConfig);
   if (mode === "disabled") {
-    routeLogger.info?.("GitHub webhook route disabled by configuration (webhookMode: disabled)");
+    if (isGatewayServerProcess()) {
+      routeLogger.info?.("GitHub webhook route disabled by configuration (webhookMode: disabled)");
+    } else {
+      routeLogger.debug?.("GitHub webhook route disabled by configuration (webhookMode: disabled)");
+    }
     return;
   }
 
@@ -75,7 +79,11 @@ export function registerGitHubWebhookRoute(api: OpenClawPluginApi, ctx: PluginCo
 
   const workspaceDir = getDefaultWorkspaceDir(ctx);
   if (!workspaceDir) {
-    routeLogger.warn?.("GitHub webhook route not registered: no default workspace configured");
+    if (isGatewayServerProcess()) {
+      routeLogger.warn?.("GitHub webhook route not registered: no default workspace configured");
+    } else {
+      routeLogger.debug?.("GitHub webhook route not registered: no default workspace configured");
+    }
     return;
   }
 
