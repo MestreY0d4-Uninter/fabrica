@@ -467,6 +467,7 @@ describe("observability", () => {
       vi.doUnmock("../../lib/observability/logger.js");
       vi.doUnmock("../../lib/github/register-webhook-route.js");
       process.argv = originalArgv;
+      vi.unstubAllEnvs();
       vi.resetModules();
       vi.restoreAllMocks();
     }
