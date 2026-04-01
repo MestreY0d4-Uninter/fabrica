@@ -43,11 +43,7 @@ export function buildTaskMessage(opts: {
   } = opts;
   const repoDisplay = sanitizeRepoContext(repo);
 
-  const results = opts.resolvedRole?.completionResults ?? [];
-  const availableResults = results.map((r: string) => `"${r}"`).join(", ");
-
   const isFeedbackCycle = !!opts.prFeedback;
-  const requiresWorkFinish = role !== "reviewer";
 
   const parts = [
     `${role.toUpperCase()} task for project "${projectName}" — Issue #${issueId}`,
@@ -125,32 +121,14 @@ export function buildTaskMessage(opts: {
     `Project: ${projectName} | Channel: ${channelId}`,
   );
 
-  if (requiresWorkFinish) {
-    parts.push(
-      ``, `---`, ``,
-      `## MANDATORY: Task Completion`,
-      ``,
-      `When you finish this task, you MUST invoke the \`work_finish\` **tool** (API tool_use call — NOT a shell command):`,
-      `- \`role\`: "${role}"`,
-      `- \`channelId\`: "${channelId}" (project slug from the \`Channel:\` line above)`,
-      `- \`result\`: ${availableResults}`,
-      `- \`summary\`: brief description of what you did`,
-      ``,
-      `⚠️ \`work_finish\` is a Fabrica tool, not a CLI command. Call it as a tool (the same way you use task_create or other tools), not via bash.`,
-      `⚠️ You MUST call work_finish even if you encounter errors or cannot finish.`,
-      `Use "blocked" with a summary explaining why you're stuck.`,
-      `Never end your session without calling work_finish.`,
-    );
-  }
-
-
+  parts.push(...buildCompletionContract(role));
 
   return parts.join("\n");
 }
 
 /**
  * Build a minimal conflict-fix message — no issue description, no comments.
- * Just the PR feedback (rebase instructions) and work_finish instructions.
+ * Just the PR feedback (rebase instructions) and canonical completion instructions.
  */
 export function buildConflictFixMessage(opts: {
   projectName: string;
@@ -173,10 +151,6 @@ export function buildConflictFixMessage(opts: {
   } = opts;
   const repoDisplay = sanitizeRepoContext(repo);
 
-  const results = opts.resolvedRole?.completionResults ?? [];
-  const availableResults = results.map((r: string) => `"${r}"`).join(", ");
-  const requiresWorkFinish = role !== "reviewer";
-
   const parts = [
     `${role.toUpperCase()} task for project "${projectName}" — Issue #${issueId}`,
     ``,
@@ -193,25 +167,52 @@ export function buildConflictFixMessage(opts: {
     `Project: ${projectName} | Channel: ${channelId}`,
   );
 
-  if (requiresWorkFinish) {
-    parts.push(
-      ``, `---`, ``,
-      `## MANDATORY: Task Completion`,
-      ``,
-      `When you finish this task, you MUST invoke the \`work_finish\` **tool** (API tool_use call — NOT a shell command):`,
-      `- \`role\`: "${role}"`,
-      `- \`channelId\`: "${channelId}" (project slug from the \`Channel:\` line above)`,
-      `- \`result\`: ${availableResults}`,
-      `- \`summary\`: brief description of what you did`,
-      ``,
-      `⚠️ \`work_finish\` is a Fabrica tool, not a CLI command. Call it as a tool (the same way you use task_create or other tools), not via bash.`,
-      `⚠️ You MUST call work_finish even if you encounter errors or cannot finish.`,
-      `Use "blocked" with a summary explaining why you're stuck.`,
-      `Never end your session without calling work_finish.`,
-    );
-  }
+  parts.push(...buildCompletionContract(role));
 
   return parts.join("\n");
+}
+
+function buildCompletionContract(role: string): string[] {
+  const shared = [
+    ``,
+    `---`,
+    ``,
+    `## Task Completion`,
+    ``,
+    `When you finish, end your response with exactly one final result line in plain text.`,
+  ];
+
+  switch (role) {
+    case "developer":
+      return [
+        ...shared,
+        `- \`Work result: DONE\``,
+        `- \`Work result: BLOCKED\``,
+      ];
+    case "tester":
+      return [
+        ...shared,
+        `- \`Test result: PASS\``,
+        `- \`Test result: FAIL\``,
+        `- \`Test result: FAIL_INFRA\``,
+        `- \`Test result: REFINE\``,
+        `- \`Test result: BLOCKED\``,
+      ];
+    case "architect":
+      return [
+        ...shared,
+        `- \`Architecture result: DONE\``,
+        `- \`Architecture result: BLOCKED\``,
+      ];
+    case "reviewer":
+      return [
+        ...shared,
+        `- \`Review result: APPROVE\``,
+        `- \`Review result: REJECT\``,
+      ];
+    default:
+      return shared;
+  }
 }
 
 export function buildAnnouncement(

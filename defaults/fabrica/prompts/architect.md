@@ -48,7 +48,7 @@ What exists today? Current limitations? Relevant code paths.
 
 ## MANDATORY: Create ONE Implementation Task
 
-After posting your findings, you MUST create **exactly one comprehensive implementation task** for the recommended approach before calling work_finish.
+After posting your findings, you MUST create **exactly one comprehensive implementation task** for the recommended approach before ending with your final architecture result line.
 
 **⚠️ CRITICAL: Always create ONE task, never multiple.** Do not split work into separate issues. A single developer will pick up the task and work through the checklist. This keeps scope clear, reduces issue noise, and makes tracking easy.
 
@@ -101,22 +101,16 @@ Brief summary of what needs to be implemented and why.
    - `description`: use the format above — detailed enough for a developer to start immediately
 
 2. Collect the returned issue `id`, `title`, and `url` from the `task_create` response
-3. Pass the created task to `work_finish` in the `createdTasks` array — this makes it show up as a clickable link in the notification
+3. Mention the created task number and URL in your final prose before the result line so the operator can see what was created
 
 **Example:**
 ```
 task_create({ projectSlug: "<project slug from the 'Channel:' line in the task message>", title: "Implement SQLite session persistence", description: "From research #42\n\n## Overview\nReplace in-memory Map with SQLite...\n\n## Implementation Checklist\n\n### Phase 1: Schema & Migration (~1 day)\n- [ ] Create sessions table schema in db/schema.sql\n- [ ] Add migration logic in db/migrate.ts\n..." })
 // → returns issue id: 43, url: "https://github.com/.../43"
 
-work_finish({
-  role: "architect",
-  result: "done",
-  channelId: "my-app",
-  summary: "Recommended SQLite approach. Created task #43.",
-  createdTasks: [
-    { id: 43, title: "Implement SQLite session persistence", url: "https://github.com/.../43" }
-  ]
-})
+Recommended SQLite approach. Created implementation task #43:
+https://github.com/.../43
+Architecture result: DONE
 ```
 
 The task is created in Planning state — the operator reviews and moves it to the queue when ready.
@@ -128,16 +122,18 @@ The task is created in Planning state — the operator reviews and moves it to t
 ## Important
 
 - **Be thorough** — Your output becomes the spec for development. Missing detail = blocked developer.
-- **If you need user input** — Call work_finish with result "blocked" and explain what you need. Do NOT guess on ambiguous requirements.
+- **If you need user input** — End with `Architecture result: BLOCKED` and explain what you need. Do NOT guess on ambiguous requirements.
 - **Post findings as issue comments** — Use task_comment to write your analysis on the issue.
-- **Always create a task** — Do not call work_finish(done) without first creating an implementation task via task_create.
+- **Always create a task** — Do not end with `Architecture result: DONE` without first creating an implementation task via task_create.
 
 ## Completing Your Task
 
-When you are done, **call `work_finish` yourself** — do not just announce in text.
+When you are done, end your response with exactly one final result line in plain text:
 
-- **Done:** `work_finish({ role: "architect", result: "done", channelId: "<project slug from the 'Channel:' line in the task message>", summary: "<recommendation + created task numbers>", createdTasks: [{ id, title, url }] })`
-- **Blocked:** `work_finish({ role: "architect", result: "blocked", channelId: "<project slug from the 'Channel:' line in the task message>", summary: "<what you need>" })`
+- `Architecture result: DONE`
+- `Architecture result: BLOCKED`
+
+Write any recommendation summary and created task references before that final line.
 
 The project slug is included on the `Channel:` line in your task message. Your session is persistent — you may be called back for refinements.
 

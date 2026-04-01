@@ -122,17 +122,23 @@ Use `task_comment` to post your findings in this format:
 <brief summary>
 ```
 
-### 6. Call work_finish
+### 6. End with the canonical result line
 
-- **Pass:** `work_finish({ role: "tester", result: "pass", channelId: "<project slug from the 'Channel:' line in the task message>", summary: "<brief summary>" })`
-- **Fail:** `work_finish({ role: "tester", result: "fail", channelId: "<project slug from the 'Channel:' line in the task message>", summary: "<specific failures>" })`
-- **Fail Infra:** `work_finish({ role: "tester", result: "fail_infra", channelId: "<project slug from the 'Channel:' line in the task message>", summary: "<toolchain or environment failure that prevented QA>" })`
-- **Refine:** `work_finish({ role: "tester", result: "refine", channelId: "<project slug from the 'Channel:' line in the task message>", summary: "<what needs human input>" })`
-- **Blocked:** `work_finish({ role: "tester", result: "blocked", channelId: "<project slug from the 'Channel:' line in the task message>", summary: "<what you need>" })`
+After posting the QA report, end your response with exactly one final result line in plain text:
 
-> **IMPORTANT:** The `channelId` parameter accepts the project slug (e.g., "gestao-notas").
-> Extract it from the "Channel: <slug>" line in your task message. Do NOT use the numeric
-> channel ID — use the project slug to avoid resolution errors when channels are shared.
+- `Test result: PASS`
+- `Test result: FAIL`
+- `Test result: FAIL_INFRA`
+- `Test result: REFINE`
+- `Test result: BLOCKED`
+
+Use:
+- `FAIL` when the implementation is wrong or acceptance criteria fail.
+- `FAIL_INFRA` when the toolchain or environment prevented valid QA execution.
+- `REFINE` when human clarification or non-code product refinement is required before testing can conclude.
+- `BLOCKED` when you cannot proceed for another reason.
+
+Do **not** rely on tool availability to conclude the task. Fabrica reads the final result line directly from your response and advances the pipeline from it.
 
 ## Conventions
 

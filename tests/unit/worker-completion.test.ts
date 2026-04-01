@@ -264,6 +264,32 @@ describe("worker-completion", () => {
     );
   });
 
+  it("routes tester REFINE through the generic completion pipeline", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const provider = {
+      getIssue: vi.fn().mockResolvedValue({ labels: ["Testing"] }),
+      transitionLabel: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-tester-junior-riley",
+      messages: [{ role: "assistant", content: [{ type: "text", text: "Test result: REFINE" }] }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+      providerOverride: provider as never,
+    });
+
+    expect(result).toMatchObject({ applied: true });
+    expect(mockExecuteCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "tester",
+        result: "refine",
+        issueId: 11,
+      }),
+    );
+  });
+
   it("skips agent_end completion after work_finish already marked the session completed", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 

@@ -20,7 +20,7 @@ describe("worker-context-hook — before_agent_start", () => {
     return captured;
   }
 
-  it("returns prependSystemContext with 'work_finish' for a Fabrica worker session", async () => {
+  it("returns developer completion context with canonical result lines", async () => {
     const { registerWorkerContextHook } = await import("../../lib/dispatch/worker-context-hook.js");
     const handler = captureHandler(registerWorkerContextHook);
 
@@ -30,8 +30,25 @@ describe("worker-context-hook — before_agent_start", () => {
     );
 
     expect(result).toBeDefined();
-    expect(result.prependSystemContext).toContain("work_finish");
-    expect(result.prependSystemContext).toContain("MUST");
+    expect(result.prependSystemContext).toContain("Work result: DONE");
+    expect(result.prependSystemContext).toContain("Work result: BLOCKED");
+    expect(result.prependSystemContext).not.toContain("work_finish");
+  });
+
+  it("returns tester completion context with fail_infra guidance", async () => {
+    const { registerWorkerContextHook } = await import("../../lib/dispatch/worker-context-hook.js");
+    const handler = captureHandler(registerWorkerContextHook);
+
+    const result = await handler(
+      { prompt: "run the qa flow" },
+      { sessionKey: "agent:main:subagent:my-project-tester-junior-riley" },
+    );
+
+    expect(result?.prependSystemContext).toContain("Test result: PASS");
+    expect(result?.prependSystemContext).toContain("Test result: FAIL");
+    expect(result?.prependSystemContext).toContain("Test result: FAIL_INFRA");
+    expect(result?.prependSystemContext).toContain("Test result: BLOCKED");
+    expect(result?.prependSystemContext).not.toContain("work_finish");
   });
 
   it("returns reviewer-specific completion context without work_finish", async () => {

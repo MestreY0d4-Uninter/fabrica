@@ -53,6 +53,7 @@ const RESULT_MAP: Record<Exclude<WorkerRole, "reviewer">, Record<string, string>
     PASS: "pass",
     FAIL: "fail",
     FAIL_INFRA: "fail_infra",
+    REFINE: "refine",
     BLOCKED: "blocked",
   },
   architect: {

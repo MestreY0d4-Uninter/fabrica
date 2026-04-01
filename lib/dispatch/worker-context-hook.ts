@@ -11,11 +11,34 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginContext } from "../context.js";
 import { parseFabricaSessionKey } from "./bootstrap-hook.js";
 
-const WORK_FINISH_CONTEXT = `## Task Completion
+const DEVELOPER_COMPLETION_CONTEXT = `## Task Completion
 
-When you have finished your task, you MUST call the \`work_finish\` tool to signal completion.
-Do NOT rely on your session ending automatically — you must explicitly call \`work_finish\`.
-This is required for the pipeline to advance to the next stage.
+When you finish, end your response with exactly one final result line in plain text:
+- \`Work result: DONE\`
+- \`Work result: BLOCKED\`
+
+Do not rely on tool availability to conclude the task. The orchestrator reads this final line directly from your response.
+`;
+
+const TESTER_COMPLETION_CONTEXT = `## Task Completion
+
+When you finish, end your response with exactly one final result line in plain text:
+- \`Test result: PASS\`
+- \`Test result: FAIL\`
+- \`Test result: FAIL_INFRA\`
+- \`Test result: REFINE\`
+- \`Test result: BLOCKED\`
+
+Do not rely on tool availability to conclude the task. The orchestrator reads this final line directly from your response.
+`;
+
+const ARCHITECT_COMPLETION_CONTEXT = `## Task Completion
+
+When you finish, end your response with exactly one final result line in plain text:
+- \`Architecture result: DONE\`
+- \`Architecture result: BLOCKED\`
+
+Do not rely on tool availability to conclude the task. The orchestrator reads this final line directly from your response.
 `;
 
 const REVIEWER_COMPLETION_CONTEXT = `## Task Completion
@@ -41,9 +64,21 @@ export function registerWorkerContextHook(
     if (!parsed) return;
 
     return {
-      prependSystemContext: parsed.role === "reviewer"
-        ? REVIEWER_COMPLETION_CONTEXT
-        : WORK_FINISH_CONTEXT,
+      prependSystemContext: getCompletionContext(parsed.role),
     };
   });
+}
+
+function getCompletionContext(role: string): string {
+  switch (role) {
+    case "reviewer":
+      return REVIEWER_COMPLETION_CONTEXT;
+    case "tester":
+      return TESTER_COMPLETION_CONTEXT;
+    case "architect":
+      return ARCHITECT_COMPLETION_CONTEXT;
+    case "developer":
+    default:
+      return DEVELOPER_COMPLETION_CONTEXT;
+  }
 }

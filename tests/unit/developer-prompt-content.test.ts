@@ -15,8 +15,10 @@ describe("developer prompt anti-pattern checklist", () => {
     expect(content).toContain("Anti-Pattern Checklist");
   });
 
-  it("contains mandatory work_finish instruction", () => {
-    expect(content).toContain("work_finish");
+  it("contains canonical final result lines instead of mandatory work_finish instructions", () => {
+    expect(content).toContain("Work result: DONE");
+    expect(content).toContain("Work result: BLOCKED");
+    expect(content).not.toContain("Always call work_finish");
   });
 
   it("contains QA Contract section requiring all 5 gates", () => {

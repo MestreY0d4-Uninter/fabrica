@@ -41,6 +41,18 @@ describe("worker-result", () => {
     });
   });
 
+  it("extracts tester refine as an allowed result", () => {
+    const result = extractWorkerResultFromMessages("tester", [
+      { role: "assistant", content: [{ type: "text", text: "Test result: REFINE" }] },
+    ]);
+
+    expect(result).toEqual({
+      role: "tester",
+      value: "REFINE",
+      source: "final_message",
+    });
+  });
+
   it("returns null for architect approve or reject results", () => {
     const approveResult = extractWorkerResultFromMessages("architect", [
       { role: "assistant", content: [{ type: "text", text: "Architecture result: APPROVE" }] },

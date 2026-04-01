@@ -67,7 +67,26 @@ describe("buildTaskMessage", () => {
       baseBranch: "main",
     });
 
-    expect(message).not.toContain("When you finish this task, you MUST invoke the `work_finish`");
-    expect(message).not.toContain("Never end your session without calling work_finish.");
+    expect(message).toContain("Review result: APPROVE");
+    expect(message).toContain("Review result: REJECT");
+    expect(message).not.toContain("work_finish");
+  });
+
+  it("adds canonical developer result lines instead of mandatory work_finish instructions", () => {
+    const message = buildTaskMessage({
+      projectName: "demo",
+      channelId: "demo",
+      role: "developer",
+      issueId: 7,
+      issueTitle: "Implement the feature",
+      issueDescription: "Ship the CLI command",
+      issueUrl: "https://example.com/issues/7",
+      repo: "https://github.com/org/repo",
+      baseBranch: "main",
+    });
+
+    expect(message).toContain("Work result: DONE");
+    expect(message).toContain("Work result: BLOCKED");
+    expect(message).not.toContain("MUST invoke the `work_finish`");
   });
 });

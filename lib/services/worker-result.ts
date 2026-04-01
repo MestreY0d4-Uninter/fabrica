@@ -6,6 +6,7 @@ export type WorkerResultValue =
   | "PASS"
   | "FAIL"
   | "FAIL_INFRA"
+  | "REFINE"
   | "APPROVE"
   | "REJECT";
 
@@ -29,7 +30,7 @@ const ROLE_PREFIX: Record<WorkerRole, string> = {
 
 const ALLOWED_RESULTS: Record<WorkerRole, readonly WorkerResultValue[]> = {
   developer: ["DONE", "BLOCKED"],
-  tester: ["PASS", "FAIL", "FAIL_INFRA", "BLOCKED"],
+  tester: ["PASS", "FAIL", "FAIL_INFRA", "REFINE", "BLOCKED"],
   architect: ["DONE", "BLOCKED"],
   reviewer: ["APPROVE", "REJECT"],
 };

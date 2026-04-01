@@ -4,8 +4,8 @@
  * On every worker subagent end:
  *   1. Filters to Fabrica worker session keys only (project-role-level-name pattern).
  *   2. Writes an audit log entry with sessionKey, project, role, and outcome.
- *   3. Deactivates the worker slot so it can be reused immediately (no 2h stale_worker wait).
- *   4. Reverts the issue label from active back to queue if work_finish hasn't already done so.
+ *   3. Acts as a repair path when the primary agent_end completion path did not apply.
+ *   4. Reverts the issue label from active back to queue only when repair is still needed.
  *   5. Wakes heartbeat for immediate dispatch of the next pipeline stage.
  *
  * All checks are best-effort: failures are logged silently and never
@@ -140,6 +140,24 @@ export function registerSubagentLifecycleHook(
           runtimeDispatchCycleId: issueRuntime.lastDispatchCycleId,
         }).catch(() => {});
         return;
+      }
+
+      if (role !== "reviewer") {
+        await auditLog(workspaceDir, "worker_lifecycle_repair_observed", {
+          sessionKey,
+          project: projectName,
+          projectSlug,
+          role,
+          level: foundLevel,
+          slotIndex: foundSlotIndex,
+          issueId,
+          outcome: event.outcome ?? "unknown",
+        }).catch(() => {});
+
+        if (issueRuntime?.sessionCompletedAt) {
+          wakeHeartbeat("subagent_ended").catch(() => {});
+          return;
+        }
       }
 
       // Deactivate the slot (only if still active — stale_worker may have already done it)

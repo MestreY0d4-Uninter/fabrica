@@ -5,13 +5,46 @@ import { DEFAULT_WORKFLOW } from "../../lib/workflow/index.js";
 import { resolveReviewerDecisionTransition } from "../../lib/services/reviewer-completion.js";
 
 // Hoist mocks before any imports are resolved
-const { mockAuditLog } = vi.hoisted(() => ({
+const {
+  mockAuditLog,
+  mockReadProjects,
+  mockDeactivateWorker,
+  mockLoadConfig,
+  mockCreateProvider,
+  mockHandleReviewerAgentEnd,
+} = vi.hoisted(() => ({
   mockAuditLog: vi.fn(),
+  mockReadProjects: vi.fn(),
+  mockDeactivateWorker: vi.fn(),
+  mockLoadConfig: vi.fn(),
+  mockCreateProvider: vi.fn(),
+  mockHandleReviewerAgentEnd: vi.fn(),
 }));
 
 vi.mock("../../lib/audit.js", () => ({
   log: mockAuditLog,
 }));
+
+vi.mock("../../lib/projects/index.js", () => ({
+  readProjects: mockReadProjects,
+  deactivateWorker: mockDeactivateWorker,
+}));
+
+vi.mock("../../lib/config/index.js", () => ({
+  loadConfig: mockLoadConfig,
+}));
+
+vi.mock("../../lib/providers/index.js", () => ({
+  createProvider: mockCreateProvider,
+}));
+
+vi.mock("../../lib/services/reviewer-completion.js", async () => {
+  const actual = await vi.importActual<typeof import("../../lib/services/reviewer-completion.js")>("../../lib/services/reviewer-completion.js");
+  return {
+    ...actual,
+    handleReviewerAgentEnd: mockHandleReviewerAgentEnd,
+  };
+});
 
 const workspaceDir = "/tmp/test-workspace";
 
@@ -43,6 +76,64 @@ function makeCtx(ws?: string) {
 describe("subagent_ended hook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockReadProjects.mockResolvedValue({
+      projects: {
+        demo: {
+          name: "my-project",
+          slug: "demo",
+          repo: "org/repo",
+          provider: "github",
+          workers: {
+            developer: {
+              levels: {
+                medior: [
+                  {
+                    active: true,
+                    issueId: "42",
+                    lastIssueId: null,
+                    sessionKey: "agent:fabrica:subagent:my-project-developer-medior-ada",
+                    dispatchCycleId: "cycle-1",
+                    dispatchRunId: "run-1",
+                  },
+                ],
+              },
+            },
+            reviewer: {
+              levels: {
+                senior: [
+                  {
+                    active: true,
+                    issueId: "43",
+                    lastIssueId: null,
+                    sessionKey: "agent:main:subagent:acme-reviewer-senior-bob",
+                    dispatchCycleId: "cycle-2",
+                    dispatchRunId: "run-2",
+                  },
+                ],
+              },
+            },
+          },
+          issueRuntime: {
+            "42": {
+              lastDispatchCycleId: "cycle-1",
+              dispatchRunId: "run-1",
+            },
+            "43": {
+              lastDispatchCycleId: "cycle-2",
+              dispatchRunId: "run-2",
+            },
+          },
+        },
+      },
+    });
+    mockLoadConfig.mockResolvedValue({ workflow: DEFAULT_WORKFLOW });
+    mockCreateProvider.mockResolvedValue({
+      provider: {
+        getIssue: vi.fn().mockResolvedValue({ labels: ["Doing"] }),
+        transitionLabel: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+    mockHandleReviewerAgentEnd.mockResolvedValue(null);
   });
 
   it("registers a subagent_ended hook via api.on when workspace is configured", () => {
@@ -212,5 +303,68 @@ describe("subagent_ended hook", () => {
     expect(approve?.targetLabel).toBe("To Test");
     expect(reject?.eventKey).toBe("REJECT");
     expect(reject?.targetLabel).toBe("To Improve");
+  });
+
+  it("treats non-reviewer subagent_ended as repair-only when completion was already applied", async () => {
+    const { api, getHandler } = makeApi();
+    registerSubagentLifecycleHook(api, makeCtx(workspaceDir));
+    const handler = getHandler()!;
+
+    mockReadProjects.mockResolvedValueOnce({
+      projects: {
+        demo: {
+          name: "my-project",
+          slug: "demo",
+          repo: "org/repo",
+          provider: "github",
+          workers: {
+            developer: {
+              levels: {
+                medior: [
+                  {
+                    active: false,
+                    issueId: null,
+                    lastIssueId: "42",
+                    sessionKey: "agent:fabrica:subagent:my-project-developer-medior-ada",
+                    dispatchCycleId: "cycle-1",
+                    dispatchRunId: "run-1",
+                  },
+                ],
+              },
+            },
+          },
+          issueRuntime: {
+            "42": {
+              lastDispatchCycleId: "cycle-1",
+              dispatchRunId: "run-1",
+              sessionCompletedAt: "2026-04-01T12:00:00.000Z",
+            },
+          },
+        },
+      },
+    });
+
+    await handler(
+      {
+        targetSessionKey: "agent:fabrica:subagent:my-project-developer-medior-ada",
+        targetKind: "worker",
+        reason: "completed",
+        outcome: "ok",
+        runId: "run-1",
+      },
+      {},
+    );
+
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      workspaceDir,
+      "worker_lifecycle_repair_observed",
+      expect.objectContaining({
+        sessionKey: "agent:fabrica:subagent:my-project-developer-medior-ada",
+        role: "developer",
+        issueId: "42",
+      }),
+    );
+    expect(mockDeactivateWorker).not.toHaveBeenCalled();
+    expect(mockCreateProvider).not.toHaveBeenCalled();
   });
 });

@@ -110,7 +110,7 @@ When your task message includes a **PR Feedback** section, it means a reviewer r
    ```
 4. Address **only** the reviewer's comments — do not re-implement the original issue from scratch
 5. Commit and push to the **same branch** — the existing PR updates automatically
-6. Call `work_finish` as usual
+6. End your response with the canonical developer result line described below
 
 ### QA Evidence (MANDATORY)
 
@@ -132,19 +132,16 @@ gh pr edit "$PR_NUM" --body "$(printf '%s\n\n## QA Evidence\n\n```\n%s\n```\n\nE
 
 **Do NOT post QA evidence only as a comment.** PR comments are not canonical QA evidence; the reviewer and the workflow both validate the PR description body.
 
-### 5. Call work_finish (API tool — NOT a shell command)
+### 5. End with the canonical result line
 
-`work_finish` is a **Fabrica API tool**. You must invoke it as a **tool call** (tool_use), the same way you call any other tool like `task_create` or `gh`. Do **NOT** run it as a bash command — it is not on your PATH, and attempting to execute it in a shell will fail with "command not found".
+After you finish the implementation work, end your response with exactly one final result line in plain text:
 
-Use the `work_finish` tool with these arguments:
-- `role`: `"developer"`
-- `result`: `"done"` (or `"blocked"` if stuck)
-- `channelId`: the project slug from the `"Project: <name>"` line in your task message (e.g., `"gestao-notas"`)
-- `summary`: brief description of what you did
+- `Work result: DONE`
+- `Work result: BLOCKED`
 
-**If blocked:** call `work_finish` with `result: "blocked"` and explain why in `summary`.
+Use `Work result: BLOCKED` if you hit an external blocker, ambiguity, or missing dependency that prevents completion.
 
-**Always call work_finish** — even if you hit errors or can't complete the task.
+Do **not** rely on tool availability to conclude the task. Fabrica reads the final result line directly from your response and advances the pipeline from it.
 
 ## Security Checklist (MANDATORY before commit)
 
@@ -182,9 +179,9 @@ Choose the pattern appropriate to your stack:
 These are orchestrator-only tools. Do not call them:
 - `task_start`, `tasks_status`, `health`, `project_register`
 
-## Anti-Pattern Checklist (MANDATORY before work_finish)
+## Anti-Pattern Checklist (MANDATORY before declaring done)
 
-Before calling `work_finish(done)`, verify ALL of these:
+Before ending with `Work result: DONE`, verify ALL of these:
 
 ### Code Quality
 - [ ] Every function has a descriptive name (no `data`, `temp`, `result`, `handle`)
@@ -196,7 +193,7 @@ Before calling `work_finish(done)`, verify ALL of these:
 
 ### QA Contract
 - [ ] Run `scripts/qa.sh` and verify ALL 5 gates pass (lint, types, security, tests, coverage)
-- [ ] If qa.sh fails, FIX the issue — do NOT call work_finish with failing gates
+- [ ] If qa.sh fails, FIX the issue — do NOT declare done with failing gates
 - [ ] Coverage meets or exceeds the threshold in qa.sh (default: 80%)
 
 ### Git Hygiene
