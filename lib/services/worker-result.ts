@@ -29,8 +29,8 @@ const ROLE_PREFIX: Record<WorkerRole, string> = {
 
 const ALLOWED_RESULTS: Record<WorkerRole, readonly WorkerResultValue[]> = {
   developer: ["DONE", "BLOCKED"],
-  tester: ["PASS", "FAIL", "FAIL_INFRA"],
-  architect: ["DONE", "BLOCKED", "APPROVE", "REJECT"],
+  tester: ["PASS", "FAIL", "FAIL_INFRA", "BLOCKED"],
+  architect: ["DONE", "BLOCKED"],
   reviewer: ["APPROVE", "REJECT"],
 };
 
@@ -60,16 +60,16 @@ export function extractWorkerResultFromMessages(
     .map((message) => extractTextContent(message.content))
     .filter(Boolean);
 
-  for (let index = assistantTexts.length - 1; index >= 0; index -= 1) {
-    const text = assistantTexts[index] ?? "";
-    for (const line of text.split("\n").map((value) => value.trim())) {
-      if (!line.startsWith(prefix)) continue;
+  const text = assistantTexts.at(-1);
+  if (!text) return null;
 
-      const value = line.slice(prefix.length).trim().toUpperCase();
-      if (!isAllowedResult(role, value)) return null;
+  for (const line of text.split("\n").map((value) => value.trim()).toReversed()) {
+    if (!line.startsWith(prefix)) continue;
 
-      return { role, value, source: "final_message" };
-    }
+    const value = line.slice(prefix.length).trim().toUpperCase();
+    if (!isAllowedResult(role, value)) return null;
+
+    return { role, value, source: "final_message" };
   }
 
   return null;

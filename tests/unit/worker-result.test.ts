@@ -7,7 +7,10 @@ import {
 describe("worker-result", () => {
   it("extracts developer done from the final canonical line", () => {
     const result = extractWorkerResultFromMessages("developer", [
-      { role: "assistant", content: [{ type: "text", text: "Work result: DONE" }] },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Work result: BLOCKED\nWork result: DONE" }],
+      },
     ]);
 
     expect(result).toEqual<WorkerResult>({
@@ -26,11 +29,39 @@ describe("worker-result", () => {
     expect(result?.value).toBe("FAIL_INFRA");
   });
 
-  it("returns null when the line is missing or malformed", () => {
-    const result = extractWorkerResultFromMessages("architect", [
-      { role: "assistant", content: [{ type: "text", text: "I finished the architecture work." }] },
+  it("extracts tester blocked as an allowed result", () => {
+    const result = extractWorkerResultFromMessages("tester", [
+      { role: "assistant", content: [{ type: "text", text: "Test result: BLOCKED" }] },
     ]);
 
-    expect(result).toBeNull();
+    expect(result).toEqual({
+      role: "tester",
+      value: "BLOCKED",
+      source: "final_message",
+    });
+  });
+
+  it("returns null for architect approve or reject results", () => {
+    const approveResult = extractWorkerResultFromMessages("architect", [
+      { role: "assistant", content: [{ type: "text", text: "Architecture result: APPROVE" }] },
+    ]);
+    const rejectResult = extractWorkerResultFromMessages("architect", [
+      { role: "assistant", content: [{ type: "text", text: "Architecture result: REJECT" }] },
+    ]);
+
+    expect(approveResult).toBeNull();
+    expect(rejectResult).toBeNull();
+  });
+
+  it("returns null when the line is missing or malformed", () => {
+    const missingResult = extractWorkerResultFromMessages("architect", [
+      { role: "assistant", content: [{ type: "text", text: "I finished the architecture work." }] },
+    ]);
+    const malformedResult = extractWorkerResultFromMessages("architect", [
+      { role: "assistant", content: [{ type: "text", text: "Architecture result: MAYBE" }] },
+    ]);
+
+    expect(missingResult).toBeNull();
+    expect(malformedResult).toBeNull();
   });
 });
