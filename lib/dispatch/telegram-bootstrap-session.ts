@@ -191,6 +191,12 @@ export async function upsertTelegramBootstrapSession(
     repoPath: input.repoPath,
   });
   const now = new Date().toISOString();
+  const resolvedError =
+    input.error ??
+    input.lastError ??
+    existing?.error ??
+    existing?.lastError ??
+    null;
   const session: TelegramBootstrapSession = {
     id: existing?.id ?? buildBootstrapSessionId(input.conversationId, input.rawIdea),
     conversationId: input.conversationId,
@@ -215,7 +221,7 @@ export async function upsertTelegramBootstrapSession(
     language: input.language ?? existing?.language,
     status: input.status,
     attemptCount: input.attemptCount ?? existing?.attemptCount ?? 0,
-    lastError: input.lastError ?? existing?.lastError ?? null,
+    lastError: resolvedError,
     nextRetryAt: input.nextRetryAt ?? existing?.nextRetryAt ?? null,
     ackSentAt: input.ackSentAt ?? existing?.ackSentAt ?? null,
     projectRegisteredAt: input.projectRegisteredAt ?? existing?.projectRegisteredAt ?? null,
@@ -228,7 +234,7 @@ export async function upsertTelegramBootstrapSession(
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     suppressUntil: nextSuppressUntil(input.status),
-    error: input.error ?? null,
+    error: resolvedError,
   };
   await writeTelegramBootstrapSession(workspaceDir, session);
   return session;
