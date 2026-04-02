@@ -327,7 +327,7 @@ describe("worker execution surface", () => {
     );
   }, TEST_TIMEOUT_MS);
 
-  it("treats canonical result lines as invalid when explicit forbidden execution evidence is present", async () => {
+  it("keeps canonical result precedence over strong-evidence transcript matches", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 
     const provider = {
@@ -350,22 +350,41 @@ describe("worker execution surface", () => {
       validateDeveloperDone: vi.fn().mockResolvedValue({ ok: true }),
     });
 
-    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
-    expect(mockExecuteCompletion).not.toHaveBeenCalled();
-    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
+    expect(result).toMatchObject({ applied: true });
+    expect(mockExecuteCompletion).toHaveBeenCalledOnce();
+    expect(mockAuditLog).not.toHaveBeenCalledWith(
       "/tmp/ws",
-      "demo",
-      7,
+      "worker_completion_inconclusive",
       expect.objectContaining({
-        inconclusiveCompletionReason: "invalid_execution_path",
+        reason: "invalid_execution_path",
       }),
     );
+  }, TEST_TIMEOUT_MS);
+
+  it("classifies tool-only codex exec full-auto transcript evidence as invalid execution paths", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "toolResult",
+        content: [{
+          type: "text",
+          text: "bash pty:true workdir:~/project background:true command:\"codex exec --full-auto 'Fix issue #7'\"",
+        }],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
     expect(mockAuditLog).toHaveBeenCalledWith(
       "/tmp/ws",
       "worker_completion_inconclusive",
       expect.objectContaining({
         reason: "invalid_execution_path",
         violationReason: "nested_coding_agent",
+        evidence: expect.stringContaining("codex exec --full-auto"),
       }),
     );
   }, TEST_TIMEOUT_MS);

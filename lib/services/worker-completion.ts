@@ -229,8 +229,16 @@ function detectExecutionContractViolation(messages: unknown[]): {
   const assistantEntries = evidenceEntries.filter((entry) => entry.role === "assistant");
   const commandEntries = evidenceEntries.filter((entry) => entry.kind === "command");
   const nestedCommand = commandEntries
-    .map((entry) => matchNestedCommand(entry.text))
+    .filter((entry) => entry.role === "toolCall")
+    .map((entry) => matchNestedToolCallCommand(entry.text))
     .find((match): match is string => Boolean(match));
+
+  if (nestedCommand) {
+    return {
+      reason: "nested_coding_agent",
+      evidence: nestedCommand,
+    };
+  }
 
   for (const entry of assistantEntries) {
     const metaSkillUsage = matchStrongMetaSkillUsage(entry.text);
@@ -242,13 +250,6 @@ function detectExecutionContractViolation(messages: unknown[]): {
     }
 
     const codingAgentUsage = matchStrongCodingAgentUsage(entry.text);
-    if (codingAgentUsage && nestedCommand) {
-      return {
-        reason: "nested_coding_agent",
-        evidence: `${codingAgentUsage} | ${nestedCommand}`.slice(0, 160),
-      };
-    }
-
     if (codingAgentUsage) {
       return {
         reason: "nested_coding_agent",
@@ -402,7 +403,7 @@ function matchStrongMetaSkillUsage(text: string): string | null {
   ]);
 }
 
-function matchNestedCommand(text: string): string | null {
+function matchNestedToolCallCommand(text: string): string | null {
   const normalized = text.toLowerCase();
   const match = normalized.match(/\bcodex exec --full-auto\b/);
   return match ? match[0] : null;
@@ -759,34 +760,34 @@ export async function handleWorkerAgentEnd(opts: {
     }).catch(() => {});
   }
 
-  if (observation.executionContractViolation) {
-    if (context) {
-      await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
-        inconclusiveCompletionAt: new Date().toISOString(),
-        inconclusiveCompletionReason: "invalid_execution_path",
-      }).catch(() => {});
-      await auditLog(opts.workspaceDir, "worker_completion_inconclusive", {
-        sessionKey: opts.sessionKey,
-        projectSlug: context.projectSlug,
-        issueId: context.issueId,
-        role,
-        reason: "invalid_execution_path",
-        violationReason: observation.executionContractViolation.reason,
-        evidence: observation.executionContractViolation.evidence,
-      }).catch(() => {});
-    } else {
-      await auditLog(opts.workspaceDir, "worker_result_skipped", {
-        sessionKey: opts.sessionKey,
-        role,
-        reason: "invalid_execution_path",
-        violationReason: observation.executionContractViolation.reason,
-        evidence: observation.executionContractViolation.evidence,
-      }).catch(() => {});
-    }
-    return { applied: false, reason: "invalid_execution_path" };
-  }
-
   if (!observation.result) {
+    if (observation.executionContractViolation) {
+      if (context) {
+        await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
+          inconclusiveCompletionAt: new Date().toISOString(),
+          inconclusiveCompletionReason: "invalid_execution_path",
+        }).catch(() => {});
+        await auditLog(opts.workspaceDir, "worker_completion_inconclusive", {
+          sessionKey: opts.sessionKey,
+          projectSlug: context.projectSlug,
+          issueId: context.issueId,
+          role,
+          reason: "invalid_execution_path",
+          violationReason: observation.executionContractViolation.reason,
+          evidence: observation.executionContractViolation.evidence,
+        }).catch(() => {});
+      } else {
+        await auditLog(opts.workspaceDir, "worker_result_skipped", {
+          sessionKey: opts.sessionKey,
+          role,
+          reason: "invalid_execution_path",
+          violationReason: observation.executionContractViolation.reason,
+          evidence: observation.executionContractViolation.evidence,
+        }).catch(() => {});
+      }
+      return { applied: false, reason: "invalid_execution_path" };
+    }
+
     if (context && observation.activityObserved) {
       await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
         inconclusiveCompletionAt: new Date().toISOString(),
