@@ -53,7 +53,7 @@ import {
   type WorkflowConfig,
   type Role,
 } from "../../workflow/index.js";
-import { canProveSessionAlive, isSessionAlive, type SessionLookup } from "../gateway-sessions.js";
+import { isSessionAlive, type SessionLookup } from "../gateway-sessions.js";
 import { withCorrelationContext } from "../../observability/context.js";
 import { withTelemetrySpan } from "../../observability/telemetry.js";
 import { resilientLabelTransition } from "../../workflow/labels.js";
@@ -307,7 +307,7 @@ export async function checkWorkerHealth(opts: {
       const workerStartTime = slot.startTime ? new Date(slot.startTime).getTime() : null;
       const withinGracePeriod = workerStartTime !== null && (Date.now() - workerStartTime) < healthGracePeriodMs;
       const sessionAlive = slot.active && sessionKey && sessions
-        ? await canProveSessionAlive(sessionKey, sessions)
+        ? isSessionAlive(sessionKey, sessions)
         : false;
 
       // Parse issueId
@@ -319,7 +319,12 @@ export async function checkWorkerHealth(opts: {
       const issueRuntime = issueIdNum ? getIssueRuntime(project, issueIdNum) : undefined;
       const deliveryState = issueRuntime?.firstWorkerActivityAt ? "activity_seen" : "unknown";
       const dispatchRequestedAt = issueRuntime?.dispatchRequestedAt ? Date.parse(issueRuntime.dispatchRequestedAt) : null;
-      const dispatchConfirmed = Boolean(issueRuntime?.agentAcceptedAt || issueRuntime?.firstWorkerActivityAt);
+      const agentAcceptedAt = issueRuntime?.agentAcceptedAt ? Date.parse(issueRuntime.agentAcceptedAt) : null;
+      const dispatchConfirmed = Boolean(issueRuntime?.firstWorkerActivityAt);
+      const acceptedWithoutActivityTooLong =
+        agentAcceptedAt !== null &&
+        !dispatchConfirmed &&
+        (Date.now() - agentAcceptedAt) > dispatchConfirmTimeoutMs;
       if (issueIdNum) {
         issue = await fetchIssue(provider, issueIdNum);
         currentLabel = issue ? getCurrentStateLabel(issue.labels, workflow) : null;
@@ -596,9 +601,12 @@ export async function checkWorkerHealth(opts: {
         slot.active &&
         issue &&
         currentLabel === expectedLabel &&
-        dispatchRequestedAt !== null &&
+        (dispatchRequestedAt !== null || agentAcceptedAt !== null) &&
         !dispatchConfirmed &&
-        (Date.now() - dispatchRequestedAt) > dispatchConfirmTimeoutMs
+        (
+          (dispatchRequestedAt !== null && (Date.now() - dispatchRequestedAt) > dispatchConfirmTimeoutMs) ||
+          acceptedWithoutActivityTooLong
+        )
       ) {
         const fix: HealthFix = {
           issue: {

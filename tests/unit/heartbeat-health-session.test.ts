@@ -173,29 +173,39 @@ describe("checkWorkerHealth", () => {
     );
   });
 
-  it("requeues an active developer slot when its registered session file is missing", async () => {
+  it("requeues an active issue when dispatch was accepted but never reached worker activity", async () => {
     h = await createTestHarness({
       workers: {
         developer: {
           active: true,
           issueId: "42",
-          sessionKey: "agent:main:subagent:test-project-developer-medior-brittne",
-          level: "medior",
+          sessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+          level: "senior",
           startTime: new Date(Date.now() - 20 * 60_000).toISOString(),
           previousLabel: "To Improve",
         },
       },
     });
-    h.provider.seedIssue({ iid: 42, title: "Recover missing session file", labels: ["Doing"] });
+    h.provider.seedIssue({ iid: 42, title: "Recover accepted but idle dispatch", labels: ["Doing"] });
+
+    const data = await h.readProjects();
+    data.projects[h.project.slug]!.issueRuntime = {
+      "42": {
+        dispatchRequestedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+        agentAcceptedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+        lastSessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+        firstWorkerActivityAt: null,
+      },
+    };
+    await writeProjects(h.workspaceDir, data);
 
     const sessions: SessionLookup = new Map([
       [
-        "agent:main:subagent:test-project-developer-medior-brittne",
+        "agent:main:subagent:test-project-developer-senior-ada",
         {
-          key: "agent:main:subagent:test-project-developer-medior-brittne",
+          key: "agent:main:subagent:test-project-developer-senior-ada",
           updatedAt: Date.now(),
           percentUsed: 0,
-          sessionFile: "/missing/session.jsonl",
         },
       ],
     ]);
@@ -203,7 +213,7 @@ describe("checkWorkerHealth", () => {
     const fixes = await checkWorkerHealth({
       workspaceDir: h.workspaceDir,
       projectSlug: h.project.slug,
-      project: h.project,
+      project: data.projects[h.project.slug]!,
       role: "developer",
       autoFix: true,
       provider: h.provider,
@@ -212,7 +222,7 @@ describe("checkWorkerHealth", () => {
     });
 
     expect(fixes).toHaveLength(1);
-    expect(fixes[0]?.issue.type).toBe("session_dead");
+    expect(fixes[0]?.issue.type).toBe("dispatch_unconfirmed");
     expect(fixes[0]?.fixed).toBe(true);
 
     const transitions = h.provider.callsTo("transitionLabel");
@@ -248,18 +258,6 @@ describe("checkWorkerHealth", () => {
           percentUsed: 15,
           status: "done",
           endedAt: Date.now() - 30_000,
-=======
-    h.provider.seedIssue({ iid: 42, title: "Recover missing session file", labels: ["Doing"] });
-
-    const sessions: SessionLookup = new Map([
-      [
-        "agent:main:subagent:test-project-developer-medior-brittne",
-        {
-          key: "agent:main:subagent:test-project-developer-medior-brittne",
-          updatedAt: Date.now(),
-          percentUsed: 0,
-          sessionFile: "/missing/session.jsonl",
->>>>>>> 6fe993c (fix(health): recover stale developer cycles)
         },
       ],
     ]);

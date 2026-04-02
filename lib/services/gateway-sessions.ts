@@ -235,24 +235,3 @@ function isTerminalSession(session: GatewaySession): boolean {
   if (session.endedAt) return true;
   return session.status === "done" || session.status === "failed" || session.status === "aborted";
 }
-
-/**
- * Stronger liveness proof for recovery paths:
- * the session must be alive and, when a sessionFile is registered, the file must exist.
- */
-export async function canProveSessionAlive(
-  sessionKey: string,
-  sessions: SessionLookup | null,
-): Promise<boolean> {
-  if (!isSessionAlive(sessionKey, sessions)) return false;
-
-  const sessionFile = normalizeSessionFile(sessions?.get(sessionKey)?.sessionFile);
-  if (!sessionFile) return true;
-
-  try {
-    await fs.access(sessionFile);
-    return true;
-  } catch {
-    return false;
-  }
-}
