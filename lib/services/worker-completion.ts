@@ -448,7 +448,7 @@ function findAcceptedMatch(
       const matchedText = match[0];
       if (!matchedText) continue;
       const end = (match.index ?? 0) + matchedText.length;
-      if (hasImmediateActRetraction(normalized, end)) continue;
+      if (hasImmediateActRetraction(normalized, matchedText, end)) continue;
       if (rejectOnConcession && hasImmediatePolicyRejection(normalized, end)) continue;
       return matchedText;
     }
@@ -457,9 +457,14 @@ function findAcceptedMatch(
   return null;
 }
 
-function hasImmediateActRetraction(normalized: string, matchEnd: number): boolean {
+function hasImmediateActRetraction(normalized: string, matchedText: string, matchEnd: number): boolean {
   const trailingClause = normalized.slice(matchEnd, matchEnd + 120);
-  return /\b(?:but|however|though|except)\b[\s\S]{0,80}\b(?:didn't actually|did not actually|never)\b[\s\S]{0,20}\b(?:do it|did|do so|use it|use that|delegate it|launch it|spawn it)\b/.test(trailingClause);
+  return /\b(?:but|however|though|except)\b[\s\S]{0,80}\b(?:didn't actually|did not actually|never)\b[\s\S]{0,20}\b(?:do it|did|do so|use it|use that|delegate it|launch it|spawn it)\b/.test(trailingClause)
+    || /\b(?:but|however|though|except)\b[\s\S]{0,80}\b(?:didn't actually|did not actually|never)\b[\s\S]{0,20}\b(?:use|load|invoke|follow|read)\s+(?:brainstorming|writing-plans)\b/.test(trailingClause)
+    || /\b(?:but|however|though|except)\b[\s\S]{0,80}\b(?:didn't actually|did not actually|never)\b[\s\S]{0,20}\bdelegate this issue to codex\b/.test(trailingClause)
+    || /\b(?:but|however|though|except)\b[\s\S]{0,80}\b(?:didn't actually|did not actually|never)\b[\s\S]{0,20}\b(?:delegate|hand off|handoff)\b[\s\S]{0,40}\b(?:task|work|issue)\b[\s\S]{0,40}\bto\b[\s\S]{0,20}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b/.test(trailingClause)
+    || /\b(?:didn't actually|did not actually|never)\b[\s\S]{0,80}\b(?:use|load|invoke|follow|read)\s+(?:brainstorming|writing-plans)\b/.test(matchedText)
+    || /\b(?:didn't actually|did not actually|never)\b[\s\S]{0,80}\bdelegate this issue\b/.test(matchedText);
 }
 
 function hasImmediatePolicyRejection(normalized: string, matchEnd: number): boolean {

@@ -242,6 +242,42 @@ describe("worker execution surface", () => {
     );
   });
 
+  it("does not flag repeated-object meta-skill retractions as invalid execution paths", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "I used brainstorming, but I didn't actually use brainstorming.",
+          },
+        ],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
+    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "demo",
+      7,
+      expect.objectContaining({
+        inconclusiveCompletionReason: "missing_result_line",
+      }),
+    );
+    expect(mockAuditLog).not.toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
+      }),
+    );
+  });
+
   it("classifies explicit nested delegation language as an invalid execution path", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 
@@ -360,6 +396,42 @@ describe("worker execution surface", () => {
           {
             type: "text",
             text: "I delegated this issue to Codex, but I never did.",
+          },
+        ],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
+    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "demo",
+      7,
+      expect.objectContaining({
+        inconclusiveCompletionReason: "missing_result_line",
+      }),
+    );
+    expect(mockAuditLog).not.toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
+      }),
+    );
+  });
+
+  it("does not flag repeated-object nested delegation retractions as invalid execution paths", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "I delegated this issue to Codex, but I didn't actually delegate this issue to Codex.",
           },
         ],
       }],
