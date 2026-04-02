@@ -10,7 +10,13 @@ import { writeIntent, getPendingIntents } from "../../lib/dispatch/notification-
 
 async function readAuditEvents(workspaceDir: string): Promise<Array<Record<string, unknown>>> {
   const filePath = path.join(workspaceDir, DATA_DIR, "log", "audit.log");
-  const content = await fs.readFile(filePath, "utf-8");
+  let content = "";
+  try {
+    content = await fs.readFile(filePath, "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
   return content
     .split("\n")
     .filter(Boolean)
@@ -364,7 +370,7 @@ describe("checkWorkerHealth", () => {
     expect(messageCommands.some((command) => command.argv.includes("message") && command.argv.includes("send"))).toBe(true);
   });
 
-  it("requeues invalid execution paths after a short recovery window and keeps the branch distinct from generic completion recovery", async () => {
+  it("keeps invalid execution paths alive while the session still shows new activity", async () => {
     h = await createTestHarness({
       workers: {
         developer: {
@@ -399,6 +405,65 @@ describe("checkWorkerHealth", () => {
         {
           key: "agent:main:subagent:test-project-developer-senior-ada",
           updatedAt: Date.now(),
+          percentUsed: 20,
+          totalTokens: 100,
+          contextTokens: 500,
+        },
+      ],
+    ]);
+
+    const fixes = await checkWorkerHealth({
+      workspaceDir: h.workspaceDir,
+      projectSlug: h.project.slug,
+      project: data.projects[h.project.slug]!,
+      role: "developer",
+      autoFix: true,
+      provider: h.provider,
+      sessions,
+      staleWorkerHours: 999,
+      runCommand: h.runCommand,
+      completionRecoveryWindowMs: 10 * 60_000,
+    });
+
+    expect(fixes).toHaveLength(0);
+    expect(h.provider.callsTo("transitionLabel")).toHaveLength(0);
+  });
+
+  it("requeues invalid execution paths after a short quiet recovery window", async () => {
+    h = await createTestHarness({
+      workers: {
+        developer: {
+          active: true,
+          issueId: "42",
+          sessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+          level: "senior",
+          startTime: new Date(Date.now() - 20 * 60_000).toISOString(),
+          previousLabel: "To Improve",
+        },
+      },
+    });
+    h.provider.seedIssue({ iid: 42, title: "Recover invalid execution path", labels: ["Doing"] });
+
+    const inconclusiveAt = Date.now() - 75_000;
+    const data = await h.readProjects();
+    data.projects[h.project.slug]!.issueRuntime = {
+      "42": {
+        dispatchRequestedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+        agentAcceptedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+        lastSessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+        firstWorkerActivityAt: new Date(Date.now() - 9 * 60_000).toISOString(),
+        inconclusiveCompletionAt: new Date(inconclusiveAt).toISOString(),
+        inconclusiveCompletionReason: "invalid_execution_path",
+      },
+    };
+    await writeProjects(h.workspaceDir, data);
+
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-senior-ada",
+        {
+          key: "agent:main:subagent:test-project-developer-senior-ada",
+          updatedAt: inconclusiveAt - 1_000,
           percentUsed: 20,
           totalTokens: 100,
           contextTokens: 500,
@@ -454,6 +519,94 @@ describe("checkWorkerHealth", () => {
           role: "developer",
           issueId: "42",
         }),
+      ]),
+    );
+  });
+
+  it("does not requeue invalid execution path when a canonical completion line appears in the session transcript", async () => {
+    h = await createTestHarness({
+      workers: {
+        developer: {
+          active: true,
+          issueId: "42",
+          sessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+          level: "senior",
+          startTime: new Date(Date.now() - 20 * 60_000).toISOString(),
+          previousLabel: "To Improve",
+        },
+      },
+    });
+    h.provider.seedIssue({ iid: 42, title: "Wait for canonical completion", labels: ["Doing"] });
+
+    const inconclusiveAt = Date.now() - 75_000;
+    const transcriptPath = path.join(h.workspaceDir, "session-42.jsonl");
+    await fs.writeFile(
+      transcriptPath,
+      `${JSON.stringify({
+        role: "assistant",
+        content: [{ type: "text", text: "Work result: DONE" }],
+      })}\n`,
+      "utf-8",
+    );
+
+    const data = await h.readProjects();
+    data.projects[h.project.slug]!.issueRuntime = {
+      "42": {
+        dispatchRequestedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+        agentAcceptedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+        lastSessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+        firstWorkerActivityAt: new Date(Date.now() - 9 * 60_000).toISOString(),
+        inconclusiveCompletionAt: new Date(inconclusiveAt).toISOString(),
+        inconclusiveCompletionReason: "invalid_execution_path",
+      },
+    };
+    await writeProjects(h.workspaceDir, data);
+
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-senior-ada",
+        {
+          key: "agent:main:subagent:test-project-developer-senior-ada",
+          updatedAt: Date.now(),
+          percentUsed: 20,
+          totalTokens: 100,
+          contextTokens: 500,
+          sessionFile: transcriptPath,
+          sessionFileMtime: Date.now(),
+        },
+      ],
+    ]);
+
+    const fixes = await checkWorkerHealth({
+      workspaceDir: h.workspaceDir,
+      projectSlug: h.project.slug,
+      project: data.projects[h.project.slug]!,
+      role: "developer",
+      autoFix: true,
+      provider: h.provider,
+      sessions,
+      staleWorkerHours: 999,
+      runCommand: h.runCommand,
+      completionRecoveryWindowMs: 10 * 60_000,
+    });
+
+    expect(fixes).toHaveLength(0);
+    expect(h.provider.callsTo("transitionLabel")).toHaveLength(0);
+
+    const updated = await h.readProjects();
+    const slot = updated.projects[h.project.slug]!.workers.developer.levels.senior?.[0];
+    expect(slot?.active).toBe(true);
+    expect(slot?.issueId).toBe("42");
+
+    const events = await readAuditEvents(h.workspaceDir);
+    expect(events).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event: "worker_execution_recovery_exhausted" }),
+      ]),
+    );
+    expect(events).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event: "worker_execution_requeued" }),
       ]),
     );
   });

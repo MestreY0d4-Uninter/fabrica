@@ -515,7 +515,7 @@ export async function checkWorkerHealth(opts: {
         const lastObservableAt = sessionKey
           ? getLastObservableSessionActivityAt(sessionKey, sessions)
           : null;
-        const stillProgressing = !executionContractRecovery && lastObservableAt !== null && lastObservableAt > inconclusiveAt;
+        const stillProgressing = lastObservableAt !== null && lastObservableAt > inconclusiveAt;
         const recoveryExpired = Number.isFinite(inconclusiveAt) && (Date.now() - inconclusiveAt) > recoveryWindowMs;
 
         if (stillProgressing || !recoveryExpired) {

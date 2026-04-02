@@ -226,7 +226,7 @@ function detectExecutionContractViolation(messages: unknown[]): {
   evidence: string;
 } | null {
   const evidenceEntries = collectWorkerTranscriptEvidence(messages);
-  const assistantEntries = evidenceEntries.filter((entry) => entry.role === "assistant");
+  const assistantEntries = evidenceEntries.filter((entry) => entry.role === "assistant" && entry.kind === "text");
   const commandEntries = evidenceEntries.filter((entry) => entry.kind === "command");
   const nestedCommand = commandEntries
     .filter((entry) => entry.role === "toolCall")
