@@ -51,6 +51,32 @@ describe("worker-context-hook — before_agent_start", () => {
     expect(result?.prependSystemContext).not.toContain("work_finish");
   });
 
+  it("injects the execution contract for all worker roles", async () => {
+    const { registerWorkerContextHook } = await import("../../lib/dispatch/worker-context-hook.js");
+    const handler = captureHandler(registerWorkerContextHook);
+
+    const roles = [
+      ["developer", "agent:main:subagent:my-project-developer-junior-ada"],
+      ["tester", "agent:main:subagent:my-project-tester-junior-riley"],
+      ["reviewer", "agent:main:subagent:my-project-reviewer-junior-bob"],
+      ["architect", "agent:main:subagent:my-project-architect-junior-ivy"],
+    ] as const;
+
+    for (const [role, sessionKey] of roles) {
+      const result = await handler(
+        { prompt: `run the ${role} flow` },
+        { sessionKey },
+      );
+
+      expect(result?.prependSystemContext).toContain("Execution Contract");
+      expect(result?.prependSystemContext).toContain("execute the task directly");
+      expect(result?.prependSystemContext).toContain("nested coding agents");
+      expect(result?.prependSystemContext).toContain("planning or meta-skills");
+      expect(result?.prependSystemContext).toContain("another coding agent");
+      expect(result?.prependSystemContext).toContain("assigned worktree");
+    }
+  });
+
   it("returns reviewer-specific completion context without work_finish", async () => {
     const { registerWorkerContextHook } = await import("../../lib/dispatch/worker-context-hook.js");
     const handler = captureHandler(registerWorkerContextHook);

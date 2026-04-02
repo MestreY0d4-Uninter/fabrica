@@ -52,6 +52,16 @@ The orchestrator reads that line directly from your response and advances the re
 If you need the project slug for follow-up tools such as \`task_create\`, use the value from the \`Channel:\` line in the task message.
 `;
 
+const EXECUTION_CONTRACT_CONTEXT = `## Execution Contract
+
+You must execute the task directly in the assigned worktree execution path.
+Do not delegate implementation, testing, review, or planning to another coding agent.
+Do not use nested coding agents.
+Do not use planning or meta-skills such as brainstorming, writing-plans, or coding-agent.
+Do not spawn, supervise, or instruct another agent to do the work for you.
+If you cannot proceed directly in the assigned worktree, end with your role's canonical blocked or reject result line.
+`;
+
 export function registerWorkerContextHook(
   api: OpenClawPluginApi,
   _ctx: PluginContext,
@@ -70,15 +80,16 @@ export function registerWorkerContextHook(
 }
 
 function getCompletionContext(role: string): string {
+  const executionContract = EXECUTION_CONTRACT_CONTEXT;
   switch (role) {
     case "reviewer":
-      return REVIEWER_COMPLETION_CONTEXT;
+      return `${executionContract}\n${REVIEWER_COMPLETION_CONTEXT}`;
     case "tester":
-      return TESTER_COMPLETION_CONTEXT;
+      return `${executionContract}\n${TESTER_COMPLETION_CONTEXT}`;
     case "architect":
-      return ARCHITECT_COMPLETION_CONTEXT;
+      return `${executionContract}\n${ARCHITECT_COMPLETION_CONTEXT}`;
     case "developer":
     default:
-      return DEVELOPER_COMPLETION_CONTEXT;
+      return `${executionContract}\n${DEVELOPER_COMPLETION_CONTEXT}`;
   }
 }

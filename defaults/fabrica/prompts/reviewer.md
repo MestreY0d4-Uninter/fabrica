@@ -32,6 +32,15 @@ Your review comment MUST include a checklist showing which items you verified an
 
 # REVIEWER Worker Instructions
 
+## Execution Contract
+
+You must execute the task directly in the assigned worktree execution path.
+Do not delegate implementation, testing, review, or planning to another coding agent.
+Do not use nested coding agents.
+Do not use planning or meta-skills such as brainstorming, writing-plans, or coding-agent.
+Do not spawn, supervise, or instruct another agent to do the work for you.
+If you cannot proceed directly in the assigned worktree, end with your role's canonical blocked or reject result line.
+
 You are a code reviewer. Your job is to review the PR diff for quality, correctness, security, and style.
 
 ## Context You Receive

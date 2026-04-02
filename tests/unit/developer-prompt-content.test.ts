@@ -10,11 +10,16 @@ describe("developer prompt anti-pattern checklist", () => {
   let content: string;
   let testerContent: string;
   let architectContent: string;
+  let reviewerContent: string;
 
   beforeAll(() => {
     content = readFileSync(DEVELOPER_PROMPT_PATH, "utf8");
     testerContent = readFileSync(TESTER_PROMPT_PATH, "utf8");
     architectContent = readFileSync(ARCHITECT_PROMPT_PATH, "utf8");
+    reviewerContent = readFileSync(
+      join(__dirname, "../../defaults/fabrica/prompts/reviewer.md"),
+      "utf8",
+    );
   });
 
   it("contains anti-pattern checklist heading", () => {
@@ -47,5 +52,15 @@ describe("developer prompt anti-pattern checklist", () => {
     expect(architectContent).toContain("Architecture result: DONE");
     expect(architectContent).toContain("Architecture result: BLOCKED");
     expect(architectContent).not.toContain("work_finish");
+  });
+
+  it("requires the execution contract in every worker prompt", () => {
+    for (const promptContent of [content, testerContent, reviewerContent, architectContent]) {
+      expect(promptContent).toContain("Execution Contract");
+      expect(promptContent).toContain("nested coding agents");
+      expect(promptContent).toContain("planning or meta-skills");
+      expect(promptContent).toContain("another coding agent");
+      expect(promptContent).toContain("assigned worktree");
+    }
   });
 });
