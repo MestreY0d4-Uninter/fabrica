@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   extractReviewerDecisionFromMessages,
+  extractReviewerRationaleFromMessages,
   parseReviewerSessionResult,
 } from "../../lib/services/reviewer-session.js";
 
@@ -48,6 +49,33 @@ describe("reviewer-session", () => {
     ]);
 
     expect(result).toBe("reject");
+  });
+
+  it("extracts a short reject rationale from the final reviewer message", () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: [
+              "I can't approve this as-is.",
+              "",
+              "### Blocking findings",
+              "",
+              "1. Correctness bug: prefix detection is too permissive",
+              "2. tests do not fully cover the acceptance criteria",
+              "",
+              "Review result: REJECT",
+            ].join("\n"),
+          },
+        ],
+      },
+    ];
+
+    expect(extractReviewerRationaleFromMessages(messages)).toBe(
+      "Correctness bug: prefix detection is too permissive; tests do not fully cover the acceptance criteria",
+    );
   });
 
   it("reads reviewer decision from runtime session messages", async () => {

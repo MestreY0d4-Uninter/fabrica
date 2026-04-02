@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { notify } from "../../lib/dispatch/notify.js";
+import { buildMessage, notify } from "../../lib/dispatch/notify.js";
 import { DATA_DIR } from "../../lib/setup/constants.js";
 
 async function readAuditEvents(workspaceDir: string): Promise<Array<Record<string, unknown>>> {
@@ -299,5 +299,21 @@ describe("notify", () => {
     } finally {
       await fs.rm(workspaceDir, { recursive: true, force: true });
     }
+  });
+
+  it("formats a reviewRejected notification with a short rationale", () => {
+    const message = buildMessage({
+      type: "reviewRejected",
+      project: "todo-summary",
+      issueId: 1,
+      issueUrl: "https://github.com/MestreY0d4-Uninter/todo-summary/issues/1",
+      issueTitle: "todo-summary-cli",
+      prUrl: "https://github.com/MestreY0d4-Uninter/todo-summary/pull/2",
+      summary: "Correctness bug in prefix detection",
+    });
+
+    expect(message).toContain("Review rejected");
+    expect(message).toContain("Correctness bug in prefix detection");
+    expect(message).toContain("Pull Request #2");
   });
 });
