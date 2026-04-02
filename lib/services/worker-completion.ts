@@ -34,6 +34,10 @@ type DeveloperDoneValidationResult = {
 type WorkerObservation = {
   result: WorkerResult | null;
   activityObserved: boolean;
+  executionContractViolation?: {
+    reason: "meta_skill" | "nested_coding_agent";
+    evidence: string;
+  };
 };
 
 type WorkerSessionContext = {
@@ -77,6 +81,7 @@ async function resolveWorkerResultFromRuntime(
   const eventMessages = Array.isArray(messages) ? messages : [];
   const eventActivityObserved = hasObservableWorkerActivity(eventMessages);
   const eventResult = extractWorkerResultFromMessages(role, eventMessages);
+  const eventViolation = detectExecutionContractViolation(eventMessages);
   if (eventResult) {
     return { result: eventResult, activityObserved: eventActivityObserved };
   }
@@ -84,7 +89,11 @@ async function resolveWorkerResultFromRuntime(
   try {
     const messagesResult = await runtime?.subagent?.getSessionMessages?.({ sessionKey });
     if (!messagesResult) {
-      return { result: null, activityObserved: eventActivityObserved };
+      return {
+        result: null,
+        activityObserved: eventActivityObserved,
+        executionContractViolation: eventViolation ?? undefined,
+      };
     }
 
     const sessionMessages: unknown[] = Array.isArray(messagesResult)
@@ -95,9 +104,11 @@ async function resolveWorkerResultFromRuntime(
     const sessionActivityObserved = hasObservableWorkerActivity(sessionMessages);
     const historyResult = extractWorkerResultFromMessages(role, sessionMessages);
     if (!historyResult) {
+      const sessionViolation = detectExecutionContractViolation(sessionMessages);
       return {
         result: null,
         activityObserved: eventActivityObserved || sessionActivityObserved,
+        executionContractViolation: sessionViolation ?? eventViolation ?? undefined,
       };
     }
 
@@ -109,7 +120,11 @@ async function resolveWorkerResultFromRuntime(
       activityObserved: eventActivityObserved || sessionActivityObserved,
     };
   } catch {
-    return { result: null, activityObserved: eventActivityObserved };
+    return {
+      result: null,
+      activityObserved: eventActivityObserved,
+      executionContractViolation: eventViolation ?? undefined,
+    };
   }
 }
 
@@ -199,6 +214,110 @@ function hasObservableContent(content: unknown): boolean {
     }
     return false;
   });
+}
+
+function detectExecutionContractViolation(messages: unknown[]): {
+  reason: "meta_skill" | "nested_coding_agent";
+  evidence: string;
+} | null {
+  for (const evidence of collectWorkerTranscriptEvidence(messages)) {
+    const normalized = evidence.toLowerCase();
+
+    if (normalized.includes("codex exec --full-auto")) {
+      return { reason: "nested_coding_agent", evidence: "codex exec --full-auto" };
+    }
+
+    if (/\bcoding-agent\b/.test(normalized)) {
+      return { reason: "nested_coding_agent", evidence: "coding-agent" };
+    }
+
+    if (
+      /\b(spawn|delegate|delegating|launch|launching|hand off|handoff)\b/.test(normalized)
+      && /\b(coding agent|coding-agent|codex|subagent|another agent|child agent)\b/.test(normalized)
+      && /\b(task|work|issue|implement|handle|complete|finish)\b/.test(normalized)
+    ) {
+      return {
+        reason: "nested_coding_agent",
+        evidence: normalized.match(
+          /\b(spawn|delegate|delegating|launch|launching|hand off|handoff)\b[\s\S]{0,80}\b(coding agent|coding-agent|codex|subagent|another agent|child agent)\b[\s\S]{0,80}\b(task|work|issue|implement|handle|complete|finish)\b/,
+        )?.[0] ?? evidence.trim().slice(0, 120),
+      };
+    }
+
+    if (/\bbrainstorming\b/.test(normalized)) {
+      return { reason: "meta_skill", evidence: "brainstorming" };
+    }
+
+    if (/\bwriting-plans\b/.test(normalized)) {
+      return { reason: "meta_skill", evidence: "writing-plans" };
+    }
+  }
+
+  return null;
+}
+
+function collectWorkerTranscriptEvidence(messages: unknown[]): string[] {
+  const evidence: string[] = [];
+
+  for (const message of messages) {
+    if (typeof message !== "object" || message == null) continue;
+
+    const role = (message as { role?: unknown }).role;
+    if (role !== "assistant" && role !== "toolResult") continue;
+
+    collectContentEvidence((message as { content?: unknown }).content, evidence);
+  }
+
+  return evidence;
+}
+
+function collectContentEvidence(content: unknown, evidence: string[]): void {
+  if (typeof content === "string") {
+    evidence.push(content);
+    return;
+  }
+
+  if (!Array.isArray(content)) return;
+
+  for (const block of content) {
+    if (typeof block === "string") {
+      evidence.push(block);
+      continue;
+    }
+
+    if (typeof block !== "object" || block == null) continue;
+
+    const typedBlock = block as {
+      type?: unknown;
+      text?: unknown;
+      thinking?: unknown;
+      name?: unknown;
+      arguments?: unknown;
+      partialJson?: unknown;
+    };
+
+    if (typeof typedBlock.text === "string") {
+      evidence.push(typedBlock.text);
+    }
+
+    if (typeof typedBlock.thinking === "string") {
+      evidence.push(typedBlock.thinking);
+    }
+
+    if (typedBlock.type === "toolCall") {
+      if (typeof typedBlock.name === "string") {
+        evidence.push(typedBlock.name);
+      }
+      if (typeof typedBlock.arguments === "string") {
+        evidence.push(typedBlock.arguments);
+      } else if (typedBlock.arguments != null) {
+        evidence.push(JSON.stringify(typedBlock.arguments));
+      }
+      if (typeof typedBlock.partialJson === "string") {
+        evidence.push(typedBlock.partialJson);
+      }
+    }
+  }
 }
 
 export async function resolveWorkerSessionContext(
@@ -531,6 +650,33 @@ export async function handleWorkerAgentEnd(opts: {
   }
 
   if (!observation.result) {
+    if (observation.executionContractViolation) {
+      if (context) {
+        await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
+          inconclusiveCompletionAt: new Date().toISOString(),
+          inconclusiveCompletionReason: "invalid_execution_path",
+        }).catch(() => {});
+        await auditLog(opts.workspaceDir, "worker_completion_inconclusive", {
+          sessionKey: opts.sessionKey,
+          projectSlug: context.projectSlug,
+          issueId: context.issueId,
+          role,
+          reason: "invalid_execution_path",
+          violationReason: observation.executionContractViolation.reason,
+          evidence: observation.executionContractViolation.evidence,
+        }).catch(() => {});
+      } else {
+        await auditLog(opts.workspaceDir, "worker_result_skipped", {
+          sessionKey: opts.sessionKey,
+          role,
+          reason: "invalid_execution_path",
+          violationReason: observation.executionContractViolation.reason,
+          evidence: observation.executionContractViolation.evidence,
+        }).catch(() => {});
+      }
+      return { applied: false, reason: "invalid_execution_path" };
+    }
+
     if (context && observation.activityObserved) {
       await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
         inconclusiveCompletionAt: new Date().toISOString(),
