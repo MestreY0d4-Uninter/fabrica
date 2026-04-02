@@ -85,7 +85,10 @@ describe("worker-context-hook — before_agent_start", () => {
 
       if (role === "reviewer") {
         expect(executionContract).toContain("execute the review directly");
-        expect(executionContract).toContain("do not emit a `Review result` line");
+        expect(executionContract).toContain("Keep review verdict semantics pure");
+        expect(executionContract).toContain("Review result: APPROVE");
+        expect(executionContract).toContain("Review result: REJECT");
+        expect(executionContract).not.toContain("do not emit a `Review result` line");
         expect(executionContract).not.toContain("blocked result line");
       } else {
         expect(executionContract).toContain("execute the task directly");
@@ -94,7 +97,7 @@ describe("worker-context-hook — before_agent_start", () => {
     }
   });
 
-  it("keeps the reviewer task completion section conditional on an actual verdict", async () => {
+  it("keeps the reviewer task completion section aligned to supported verdicts", async () => {
     const { registerWorkerContextHook } = await import("../../lib/dispatch/worker-context-hook.js");
     const handler = captureHandler(registerWorkerContextHook);
 
@@ -107,8 +110,7 @@ describe("worker-context-hook — before_agent_start", () => {
 
     expect(taskCompletion).toContain("Review result: APPROVE");
     expect(taskCompletion).toContain("Review result: REJECT");
-    expect(taskCompletion).toContain("If you cannot complete a real review");
-    expect(taskCompletion).toContain("do not emit a `Review result` line");
+    expect(taskCompletion).not.toContain("do not emit a `Review result` line");
     expect(taskCompletion).not.toContain("blocked result line");
   });
 

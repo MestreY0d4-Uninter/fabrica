@@ -28,7 +28,7 @@ Do not use the main checkout while an open PR branch exists.
 
 ```bash
 REPO_ROOT="<repo path from task message>"
-git fetch origin
+git -C "$REPO_ROOT" fetch origin
 
 # Find the PR for this issue by branch naming convention
 ISSUE_NUM=<issue number from task message>

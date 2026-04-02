@@ -80,12 +80,31 @@ describe("developer prompt anti-pattern checklist", () => {
 
       if (role === "reviewer") {
         expect(executionContract).toContain("execute the review directly");
-        expect(executionContract).toMatch(/review verdicts only/i);
+        expect(executionContract).toContain("Keep review verdict semantics pure");
+        expect(executionContract).toContain("Review result: APPROVE");
+        expect(executionContract).toContain("Review result: REJECT");
       } else {
         expect(executionContract).toContain("execute the task directly");
         expect(executionContract).toMatch(/canonical blocked result line/i);
       }
     }
+  });
+
+  it("keeps the reviewer prompt on the supported APPROVE or REJECT contract", () => {
+    const reviewerExecutionContract = getSection(reviewerContent, "## Execution Contract");
+    const reviewerTaskCompletion = getSection(reviewerContent, "## Task Completion");
+
+    expect(reviewerExecutionContract).toContain("execute the review directly");
+    expect(reviewerExecutionContract).toContain("Keep review verdict semantics pure");
+    expect(reviewerExecutionContract).toContain("Review result: APPROVE");
+    expect(reviewerExecutionContract).toContain("Review result: REJECT");
+    expect(reviewerExecutionContract).not.toContain("do not emit a `Review result` line");
+    expect(reviewerExecutionContract).not.toContain("blocked result line");
+
+    expect(reviewerTaskCompletion).toContain("Review result: APPROVE");
+    expect(reviewerTaskCompletion).toContain("Review result: REJECT");
+    expect(reviewerTaskCompletion).not.toContain("do not emit a `Review result` line");
+    expect(reviewerTaskCompletion).not.toContain("blocked result line");
   });
 
   it("keeps the developer workflow aligned with reusing the assigned worktree", () => {
@@ -102,6 +121,7 @@ describe("developer prompt anti-pattern checklist", () => {
 
     expect(branchWorkflow).toContain("dedicated worktree");
     expect(branchWorkflow).toContain("git worktree add");
+    expect(branchWorkflow).toMatch(/git -C "\$REPO_ROOT" fetch origin/);
     expect(branchWorkflow).toContain("cd \"$WORKTREE\"");
     expect(branchWorkflow).toMatch(/do not use the main checkout/i);
     expect(branchWorkflow).not.toContain("git checkout \"$PR_BRANCH\"");
