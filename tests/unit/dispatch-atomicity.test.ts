@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Track the order of key side effects to confirm write-then-label ordering.
 
 const callOrder: string[] = [];
+const mockNotify = vi.fn(async () => {});
 
 // --- Mock: ../projects/index.js ---
 // Use importOriginal to preserve pure functions (getRoleWorker, getIssueRuntime, etc.)
@@ -138,7 +139,7 @@ vi.mock("../../lib/dispatch/acknowledge.js", () => ({
 
 // --- Mock: ./notify.js ---
 vi.mock("../../lib/dispatch/notify.js", () => ({
-  notify: vi.fn(async () => {}),
+  notify: mockNotify,
   getNotificationConfig: () => ({}),
 }));
 
@@ -187,6 +188,7 @@ describe("dispatch atomicity (C2 fix)", () => {
   beforeEach(() => {
     callOrder.length = 0;
     vi.clearAllMocks();
+    mockNotify.mockClear();
   });
 
   it("writes worker state before label transition", async () => {
@@ -262,6 +264,40 @@ describe("dispatch atomicity (C2 fix)", () => {
     // updateIssueRuntime after activateWorker, before label transition
     expect(activateIdx).toBeLessThan(runtimeIdx);
     expect(runtimeIdx).toBeLessThan(labelIdx);
+  });
+
+  it("emits workerStart notifications with dispatch cycle identity", async () => {
+    const { dispatchTask } = await import("../../lib/dispatch/index.js");
+
+    await dispatchTask({
+      workspaceDir: "/tmp/test-ws",
+      agentId: "test-agent",
+      project: {
+        name: "test-project",
+        slug: "test-project",
+        channels: [],
+        workers: { developer: { levels: { junior: [{ sessionKey: null, issueId: null, active: false, startTime: null, previousLabel: null, name: null, lastIssueId: null }] } } },
+        baseBranch: "main",
+      } as any,
+      issueId: 42,
+      issueTitle: "Test Issue",
+      issueDescription: "desc",
+      issueUrl: "https://github.com/test/1",
+      role: "developer",
+      level: "junior",
+      fromLabel: "To Do",
+      toLabel: "Doing",
+      provider: makeProvider(),
+      runCommand: makeRunCommand(),
+    });
+
+    expect(mockNotify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "workerStart",
+        dispatchCycleId: expect.any(String),
+      }),
+      expect.anything(),
+    );
   });
 
   it("rolls back worker state if label transition fails", async () => {

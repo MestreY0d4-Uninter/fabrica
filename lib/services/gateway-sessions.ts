@@ -41,6 +41,7 @@ export type GatewaySession = {
   totalTokens?: number;
   contextTokens?: number;
   sessionFile?: string | null;
+  sessionFileMtime?: number | null;
 };
 
 export type SessionLookup = Map<string, GatewaySession>;
@@ -91,6 +92,7 @@ export async function fetchGatewaySessions(gatewayTimeoutMs = 15_000, runCommand
         const fileData = JSON.parse(raw) as Record<string, GatewaySessionRecord>;
         for (const [key, entry] of Object.entries(fileData)) {
           if (key && !lookup.has(key)) {
+            const sessionFile = normalizeSessionFile(entry.sessionFile);
             lookup.set(key, {
               key,
               updatedAt: normalizeUpdatedAt(entry.updatedAt),
@@ -103,7 +105,8 @@ export async function fetchGatewaySessions(gatewayTimeoutMs = 15_000, runCommand
               abortedLastRun: entry.abortedLastRun,
               totalTokens: entry.totalTokens,
               contextTokens: entry.contextTokens,
-              sessionFile: normalizeSessionFile(entry.sessionFile),
+              sessionFile,
+              sessionFileMtime: await getSessionFileMtime(sessionFile),
             });
           }
         }
@@ -118,12 +121,14 @@ export async function fetchGatewaySessions(gatewayTimeoutMs = 15_000, runCommand
       const recentSessions: GatewaySession[] = data?.sessions?.recent ?? [];
       for (const session of recentSessions) {
         if (session.key) {
+          const sessionFile = normalizeSessionFile(session.sessionFile);
           lookup.set(session.key, {
             ...session,
             status: normalizeSessionStatus(session.status),
             endedAt: normalizeUpdatedAt(session.endedAt),
             updatedAt: normalizeUpdatedAt(session.updatedAt),
-            sessionFile: normalizeSessionFile(session.sessionFile),
+            sessionFile,
+            sessionFileMtime: await getSessionFileMtime(sessionFile),
           });
         }
       }
@@ -173,6 +178,7 @@ async function readSessionsFromDisk(): Promise<SessionLookup | null> {
         const updatedAt = normalizeUpdatedAt(entry.updatedAt);
         // Skip sessions that predate the gateway restart window — they are dead.
         if (shouldFilterSession(updatedAt, process.uptime() * 1000)) continue;
+        const nestedSessionFile = normalizeSessionFile(entry.sessionFile);
         lookup.set(key, {
           key,
           updatedAt,
@@ -185,7 +191,8 @@ async function readSessionsFromDisk(): Promise<SessionLookup | null> {
           abortedLastRun: entry.abortedLastRun,
           totalTokens: entry.totalTokens,
           contextTokens: entry.contextTokens,
-          sessionFile: normalizeSessionFile(entry.sessionFile),
+          sessionFile: nestedSessionFile,
+          sessionFileMtime: await getSessionFileMtime(nestedSessionFile),
         });
       }
       foundAny = true;
@@ -213,6 +220,31 @@ export function isSessionAlive(sessionKey: string, sessions: SessionLookup | nul
   return !isTerminalSession(session);
 }
 
+export function hasObservableSessionActivitySince(
+  sessionKey: string,
+  sessions: SessionLookup | null,
+  baselineMs: number | null,
+): boolean {
+  if (!sessions || baselineMs === null) return false;
+  const lastObservableAt = getLastObservableSessionActivityAt(sessionKey, sessions);
+  return lastObservableAt !== null && lastObservableAt > baselineMs;
+}
+
+export function getLastObservableSessionActivityAt(
+  sessionKey: string,
+  sessions: SessionLookup | null,
+): number | null {
+  if (!sessions) return null;
+  const session = sessions.get(sessionKey);
+  if (!session) return null;
+
+  const timestamps = [session.updatedAt ?? null, session.sessionFileMtime ?? null]
+    .filter((value): value is number => value !== null && Number.isFinite(value) && value > 0);
+
+  if (timestamps.length === 0) return null;
+  return Math.max(...timestamps);
+}
+
 function normalizeUpdatedAt(updatedAt: number | null | undefined): number | null {
   return typeof updatedAt === "number" && Number.isFinite(updatedAt) && updatedAt > 0
     ? updatedAt
@@ -229,6 +261,15 @@ function normalizeSessionFile(sessionFile: string | null | undefined): string | 
   return typeof sessionFile === "string" && sessionFile.trim()
     ? sessionFile
     : null;
+}
+
+async function getSessionFileMtime(sessionFile: string | null): Promise<number | null> {
+  if (!sessionFile) return null;
+  try {
+    return (await fs.stat(sessionFile)).mtimeMs;
+  } catch {
+    return null;
+  }
 }
 
 function isTerminalSession(session: GatewaySession): boolean {

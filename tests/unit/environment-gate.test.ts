@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createTestHarness } from "../../lib/testing/harness.js";
 import { projectTick } from "../../lib/services/tick.js";
 import { DEFAULT_WORKFLOW, TestPolicy } from "../../lib/workflow/index.js";
+import { resolveEnvironmentContractVersion } from "../../lib/test-env/state.js";
 
 describe("projectTick environment gate", () => {
   it("blocks developer dispatch while Python environment provisioning is still pending", async () => {
@@ -105,6 +106,99 @@ describe("projectTick environment gate", () => {
         mode: "tester",
         stack: "python-cli",
       }));
+    } finally {
+      await h.cleanup();
+    }
+  });
+
+  it("uses the real persisted provisioning state to block dispatch without re-entering bootstrap", async () => {
+    const h = await createTestHarness();
+    try {
+      const data = await h.readProjects();
+      data.projects[h.project.slug]!.stack = "python-cli";
+      data.projects[h.project.slug]!.environment = {
+        status: "provisioning",
+        stack: "python-cli",
+        contractVersion: resolveEnvironmentContractVersion("python-cli"),
+        provisioningStartedAt: new Date().toISOString(),
+        lastProvisionedAt: null,
+        lastProvisionError: null,
+        nextProvisionRetryAt: null,
+      };
+      await h.writeProjects(data);
+
+      h.provider.seedIssue({
+        iid: 7,
+        title: "Real provisioning block",
+        labels: ["To Do"],
+      });
+
+      const dispatchTask = vi.fn();
+      const runCommand = vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 }));
+
+      const result = await projectTick({
+        workspaceDir: h.workspaceDir,
+        projectSlug: h.project.slug,
+        targetRole: "developer",
+        provider: h.provider,
+        workflow: h.workflow,
+        runCommand,
+        runtime: {} as never,
+        dispatchTask,
+      });
+
+      expect(dispatchTask).not.toHaveBeenCalled();
+      expect(runCommand).not.toHaveBeenCalled();
+      expect(result.skipped).toContainEqual(
+        expect.objectContaining({ role: "developer", reason: "environment_not_ready" }),
+      );
+    } finally {
+      await h.cleanup();
+    }
+  });
+
+  it("keeps dryRun side-effect free by skipping environment provisioning", async () => {
+    const h = await createTestHarness();
+    try {
+      const data = await h.readProjects();
+      data.projects[h.project.slug]!.stack = "python-cli";
+      await h.writeProjects(data);
+
+      h.provider.seedIssue({
+        iid: 7,
+        title: "Preview queued task",
+        labels: ["To Do"],
+      });
+
+      const ensureEnvironmentReady = vi.fn().mockResolvedValue({
+        ready: false,
+        state: {
+          status: "failed",
+          stack: "python-cli",
+          contractVersion: resolveEnvironmentContractVersion("python-cli"),
+          nextProvisionRetryAt: "2026-04-02T12:00:00.000Z",
+        },
+      });
+
+      const result = await projectTick({
+        workspaceDir: h.workspaceDir,
+        projectSlug: h.project.slug,
+        targetRole: "developer",
+        provider: h.provider,
+        workflow: h.workflow,
+        runCommand: h.runCommand,
+        runtime: {} as never,
+        dryRun: true,
+        ensureEnvironmentReady,
+      });
+
+      expect(ensureEnvironmentReady).not.toHaveBeenCalled();
+      expect(result.pickups).toContainEqual(
+        expect.objectContaining({
+          role: "developer",
+          announcement: "[DRY RUN] Would pick up #7",
+        }),
+      );
     } finally {
       await h.cleanup();
     }

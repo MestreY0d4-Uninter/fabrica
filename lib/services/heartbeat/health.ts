@@ -27,6 +27,7 @@
  *   - abortedLastRun: indicates session hit context limit (#287, #290) — triggers immediate healing.
  */
 import type { StateLabel, IssueProvider, Issue } from "../../providers/provider.js";
+import type { RunCommand } from "../../context.js";
 import { PrState } from "../../providers/provider.js";
 import {
   getRoleWorker,
@@ -35,6 +36,7 @@ import {
   getIssueRuntime,
   getCanonicalPrSelector,
   updateSlot,
+  updateIssueRuntime,
   deactivateWorker,
   type Project,
 } from "../../projects/index.js";
@@ -53,10 +55,17 @@ import {
   type WorkflowConfig,
   type Role,
 } from "../../workflow/index.js";
-import { isSessionAlive, type SessionLookup } from "../gateway-sessions.js";
+import {
+  getLastObservableSessionActivityAt,
+  hasObservableSessionActivitySince,
+  isSessionAlive,
+  type SessionLookup,
+} from "../gateway-sessions.js";
+import { recordIssueLifecycle } from "../../projects/lifecycle.js";
 import { withCorrelationContext } from "../../observability/context.js";
 import { withTelemetrySpan } from "../../observability/telemetry.js";
 import { resilientLabelTransition } from "../../workflow/labels.js";
+import { notify, type NotificationConfig } from "../../dispatch/notify.js";
 
 // Re-export for consumers that import from health.ts
 export { fetchGatewaySessions, isSessionAlive, type GatewaySession, type SessionLookup } from "../gateway-sessions.js";
@@ -68,6 +77,7 @@ export const GRACE_PERIOD_MS = 5 * 60 * 1_000; // 5 minutes (enough for dispatch
 /** Dispatch confirm timeout: flag dispatches that were never acknowledged by the worker.
  * Now configurable via resolvedConfig.timeouts.dispatchConfirmTimeoutMs — fallback default preserved for callers without config. */
 export const DISPATCH_CONFIRMATION_TIMEOUT_MS = 2 * 60 * 1_000; // 2 minutes
+export const COMPLETION_RECOVERY_WINDOW_MS = 2 * 60 * 1_000; // 2 minutes
 
 
 // ---------------------------------------------------------------------------
@@ -87,6 +97,7 @@ export type HealthIssue = {
     | "context_overflow"     // Case 1c: active worker but session hit context limit (abortedLastRun)
     | "session_exhausted"   // Case 1d: active worker session near 100% context without work_finish
     | "dispatch_unconfirmed" // Active worker never reached agent bootstrap/activity after dispatch
+    | "completion_recovery_exhausted" // Worker showed activity but never produced a canonical result
     | "stateless_issue";     // Case 8: open managed issue with no state label (#473)
   severity: "critical" | "warning";
   project: string;
@@ -274,6 +285,12 @@ export async function checkWorkerHealth(opts: {
   dispatchConfirmTimeoutMs?: number;
   /** Configurable grace period in ms before a fresh worker is considered session-dead. */
   healthGracePeriodMs?: number;
+  /** Configurable recovery window in ms for inconclusive completion before requeue. */
+  completionRecoveryWindowMs?: number;
+  /** Command runner used for timeline notifications when runtime is unavailable. */
+  runCommand?: RunCommand;
+  /** Optional notification config for per-event suppression. */
+  notificationConfig?: NotificationConfig;
 }): Promise<HealthFix[]> {
   const {
     workspaceDir, projectSlug, project, role, autoFix, provider, sessions,
@@ -281,6 +298,9 @@ export async function checkWorkerHealth(opts: {
     staleWorkerHours = 2,
     dispatchConfirmTimeoutMs = DISPATCH_CONFIRMATION_TIMEOUT_MS,
     healthGracePeriodMs = GRACE_PERIOD_MS,
+    completionRecoveryWindowMs = COMPLETION_RECOVERY_WINDOW_MS,
+    runCommand,
+    notificationConfig,
   } = opts;
 
   const fixes: HealthFix[] = [];
@@ -317,10 +337,36 @@ export async function checkWorkerHealth(opts: {
       let issue: Issue | null = null;
       let currentLabel: StateLabel | null = null;
       const issueRuntime = issueIdNum ? getIssueRuntime(project, issueIdNum) : undefined;
-      const deliveryState = issueRuntime?.firstWorkerActivityAt ? "activity_seen" : "unknown";
       const dispatchRequestedAt = issueRuntime?.dispatchRequestedAt ? Date.parse(issueRuntime.dispatchRequestedAt) : null;
       const agentAcceptedAt = issueRuntime?.agentAcceptedAt ? Date.parse(issueRuntime.agentAcceptedAt) : null;
-      const dispatchConfirmed = Boolean(issueRuntime?.firstWorkerActivityAt);
+      const activityBaselineMs = agentAcceptedAt ?? dispatchRequestedAt;
+      const sessionActivityObserved = Boolean(
+        slot.active &&
+        sessionKey &&
+        hasObservableSessionActivitySince(sessionKey, sessions, activityBaselineMs),
+      );
+      if (sessionActivityObserved && issueIdNum && !issueRuntime?.firstWorkerActivityAt) {
+        await recordIssueLifecycle({
+          workspaceDir,
+          slug: projectSlug,
+          issueId: issueIdNum,
+          stage: "first_worker_activity",
+          sessionKey,
+          details: {
+            source: "heartbeat_session_activity",
+            role,
+            level,
+            slotIndex,
+          },
+        }).catch(() => {});
+      }
+      const dispatchActivityObserved = Boolean(
+        issueRuntime?.firstWorkerActivityAt ||
+        issueRuntime?.inconclusiveCompletionAt ||
+        sessionActivityObserved,
+      );
+      const deliveryState = dispatchActivityObserved ? "activity_seen" : "unknown";
+      const dispatchConfirmed = dispatchActivityObserved;
       const acceptedWithoutActivityTooLong =
         agentAcceptedAt !== null &&
         !dispatchConfirmed &&
@@ -450,6 +496,86 @@ export async function checkWorkerHealth(opts: {
             action: "deactivate_slot",
           });
         }
+        fixes.push(fix);
+        continue;
+      }
+
+      if (slot.active && issue && currentLabel === expectedLabel && issueRuntime?.inconclusiveCompletionAt) {
+        const inconclusiveAt = Date.parse(issueRuntime.inconclusiveCompletionAt);
+        const lastObservableAt = sessionKey
+          ? getLastObservableSessionActivityAt(sessionKey, sessions)
+          : null;
+        const stillProgressing = lastObservableAt !== null && lastObservableAt > inconclusiveAt;
+        const recoveryExpired = Number.isFinite(inconclusiveAt) && (Date.now() - inconclusiveAt) > completionRecoveryWindowMs;
+
+        if (stillProgressing || !recoveryExpired) {
+          continue;
+        }
+
+        const fix: HealthFix = {
+          issue: {
+            type: "completion_recovery_exhausted",
+            severity: "critical",
+            project: project.name,
+            projectSlug,
+            role,
+            sessionKey,
+            level,
+            issueId: slot.issueId,
+            expectedLabel,
+            actualLabel: currentLabel,
+            slotIndex,
+            message: `${role.toUpperCase()} ${level}[${slotIndex}] completion recovery exhausted after observable activity without canonical result`,
+          },
+          fixed: false,
+        };
+
+        if (autoFix) {
+          const channel = project.channels?.[0];
+          await notify(
+            {
+              type: "workerRecoveryExhausted",
+              project: project.name,
+              issueId: issueIdNum!,
+              issueUrl: issue.web_url,
+              issueTitle: issue.title,
+              role,
+              detail: "No canonical completion result was produced after observable activity",
+              nextState: slotQueueLabel,
+              dispatchCycleId: slot.dispatchCycleId ?? issueRuntime?.lastDispatchCycleId ?? null,
+              dispatchRunId: slot.dispatchRunId ?? issueRuntime?.dispatchRunId ?? null,
+            },
+            {
+              workspaceDir,
+              config: notificationConfig,
+              target: channel
+                ? {
+                    channelId: channel.channelId,
+                    channel: channel.channel,
+                    accountId: channel.accountId,
+                    messageThreadId: channel.messageThreadId,
+                  }
+                : undefined,
+              runCommand,
+            },
+          ).catch(() => {});
+          await revertLabel(fix, expectedLabel, slotQueueLabel);
+          if (!fix.labelRevertFailed) {
+            await deactivateSlot();
+            await updateIssueRuntime(workspaceDir, projectSlug, issueIdNum!, {
+              inconclusiveCompletionAt: null,
+              inconclusiveCompletionReason: null,
+            }).catch(() => {});
+            fix.fixed = true;
+            await auditHealthFixApplied(workspaceDir, fix, {
+              action: "requeue_issue",
+              fromLabel: expectedLabel,
+              toLabel: slotQueueLabel,
+              deliveryState,
+            });
+          }
+        }
+
         fixes.push(fix);
         continue;
       }

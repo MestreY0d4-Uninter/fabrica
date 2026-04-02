@@ -37,6 +37,8 @@ export type IssueRuntimeState = {
   sessionPatchedAt?: string | null;
   agentAcceptedAt?: string | null;
   firstWorkerActivityAt?: string | null;
+  inconclusiveCompletionAt?: string | null;
+  inconclusiveCompletionReason?: string | null;
   sessionCompletedAt?: string | null;
   artifactOfRecord?: {
     prNumber: number;
@@ -81,6 +83,7 @@ export type ProjectEnvironmentState = {
   status: ProjectEnvironmentStatus;
   stack: CanonicalStack | null;
   contractVersion: string | null;
+  provisioningStartedAt?: string | null;
   lastProvisionedAt?: string | null;
   lastProvisionError?: string | null;
   nextProvisionRetryAt?: string | null;

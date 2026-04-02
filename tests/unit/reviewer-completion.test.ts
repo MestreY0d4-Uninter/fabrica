@@ -115,7 +115,9 @@ describe("reviewer-completion", () => {
     mockResilientLabelTransition.mockResolvedValue(undefined);
     mockAuditLog.mockResolvedValue(undefined);
     mockNotify.mockResolvedValue(true);
-    mockGetNotificationConfig.mockReturnValue({});
+    mockGetNotificationConfig.mockImplementation((cfg?: { notifications?: Record<string, unknown> }) => (
+      (cfg?.notifications as Record<string, unknown>) ?? {}
+    ));
   });
 
   it("maps approve to the reviewing APPROVE transition", () => {
@@ -209,6 +211,11 @@ describe("reviewer-completion", () => {
       ],
       workspaceDir: "/tmp/fabrica-workspace",
       runCommand: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })) as any,
+      pluginConfig: {
+        notifications: {
+          reviewRejected: true,
+        },
+      },
     });
 
     expect(mockNotify).toHaveBeenCalledWith(
@@ -231,9 +238,13 @@ describe("reviewer-completion", () => {
           accountId: "acct-1",
           messageThreadId: 42,
         }),
-        config: {},
+        config: { reviewRejected: true },
       }),
     );
-    expect(mockGetNotificationConfig).toHaveBeenCalledWith({});
+    expect(mockGetNotificationConfig).toHaveBeenCalledWith({
+      notifications: {
+        reviewRejected: true,
+      },
+    });
   });
 });

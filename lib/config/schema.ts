@@ -139,6 +139,17 @@ const TelegramPluginConfigSchema = z.object({
 const NotificationPluginConfigSchema = z.object({
   workerStart: z.boolean().optional(),
   workerComplete: z.boolean().optional(),
+  workerRecoveryExhausted: z.boolean().optional(),
+  reviewNeeded: z.boolean().optional(),
+  reviewRejected: z.boolean().optional(),
+  reviewApproved: z.boolean().optional(),
+  prMerged: z.boolean().optional(),
+  changesRequested: z.boolean().optional(),
+  mergeConflict: z.boolean().optional(),
+  prClosed: z.boolean().optional(),
+  issueComplete: z.boolean().optional(),
+  holdEscapeResolved: z.boolean().optional(),
+  infraFailure: z.boolean().optional(),
 }).optional();
 
 export const FabricaPluginConfigSchema = z.object({

@@ -45,6 +45,8 @@ export type NotifyEvent =
       modelDowngraded?: boolean;
       originalModel?: string;
       effectiveModel?: string;
+      dispatchCycleId?: string | null;
+      dispatchRunId?: string | null;
     }
   | {
       type: "workerComplete";
@@ -59,6 +61,18 @@ export type NotifyEvent =
       nextState?: string;
       prUrl?: string;
       createdTasks?: Array<{ id: number; title: string; url: string }>;
+      dispatchCycleId?: string | null;
+      dispatchRunId?: string | null;
+    }
+  | {
+      type: "workerRecoveryExhausted";
+      project: string;
+      issueId: number;
+      issueUrl: string;
+      issueTitle: string;
+      role: string;
+      detail?: string;
+      nextState?: string;
       dispatchCycleId?: string | null;
       dispatchRunId?: string | null;
     }
@@ -276,6 +290,14 @@ export function buildMessage(event: NotifyEvent): string {
       let msg = `${icon} ${who} for #${event.issueId}: ${event.issueTitle}`;
       if (event.prUrl) msg += `\n🔗 ${prLink(event.prUrl)}`;
       msg += `\n📋 [Issue #${event.issueId}](${event.issueUrl})`;
+      return msg;
+    }
+
+    case "workerRecoveryExhausted": {
+      let msg = `⚠️ ${event.role.toUpperCase()} recovery exhausted for #${event.issueId}: ${event.issueTitle}`;
+      if (event.detail) msg += `\n${event.detail}`;
+      msg += `\n📋 [Issue #${event.issueId}](${event.issueUrl})`;
+      msg += `\n→ Moving to ${event.nextState ?? "To Improve"} for a fresh worker cycle`;
       return msg;
     }
 

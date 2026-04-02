@@ -321,6 +321,18 @@ export async function projectTick(opts: {
         continue;
       }
 
+      if (dryRun) {
+        const existingSession = roleWorker.levels[effectiveLevel]?.[freeSlot]?.sessionKey;
+        pickups.push({
+          project: project.name, projectSlug, issueId: issue.iid, issueTitle: issue.title, issueUrl: issue.web_url,
+          role, level: effectiveLevel,
+          sessionAction: existingSession ? "send" : "spawn",
+          announcement: `[DRY RUN] Would pick up #${issue.iid}`,
+        });
+        pickupCount++;
+        continue;
+      }
+
       const environment = await ensureEnvironment({
         workspaceDir,
         projectSlug,

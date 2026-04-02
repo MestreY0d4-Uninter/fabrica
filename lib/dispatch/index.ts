@@ -288,6 +288,8 @@ export async function dispatchTask(
     dispatchRunId: null,
     agentAcceptedAt: null,
     firstWorkerActivityAt: null,
+    inconclusiveCompletionAt: null,
+    inconclusiveCompletionReason: null,
     sessionCompletedAt: null,
     lastSessionKey: sessionKey,
   }).catch((err) => {
@@ -399,6 +401,8 @@ export async function dispatchTask(
       modelDowngraded: effectiveModel.downgraded,
       originalModel: effectiveModel.downgraded ? resolvedModel : undefined,
       effectiveModel: effectiveModel.downgraded ? model : undefined,
+      dispatchCycleId,
+      dispatchRunId: null,
     },
     {
       workspaceDir,

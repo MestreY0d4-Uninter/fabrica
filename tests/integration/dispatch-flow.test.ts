@@ -20,6 +20,7 @@ const {
   mockRecordWorkerState,
   mockRecordIssueLifecycle,
   mockFetchGatewaySessions,
+  mockIsSessionAlive,
 } = vi.hoisted(() => ({
   mockAuditLog: vi.fn(async () => {}),
   mockLoadConfig: vi.fn(),
@@ -28,6 +29,7 @@ const {
   mockRecordWorkerState: vi.fn(async () => {}),
   mockRecordIssueLifecycle: vi.fn(async () => true),
   mockFetchGatewaySessions: vi.fn(async () => null),
+  mockIsSessionAlive: vi.fn(() => true),
 }));
 
 vi.mock("../../lib/audit.js", () => ({ log: mockAuditLog }));
@@ -48,6 +50,7 @@ vi.mock("../../lib/projects/index.js", () => ({
 }));
 vi.mock("../../lib/services/gateway-sessions.js", () => ({
   fetchGatewaySessions: mockFetchGatewaySessions,
+  isSessionAlive: mockIsSessionAlive,
 }));
 vi.mock("../../lib/dispatch/notify.js", () => ({
   notify: vi.fn(async () => {}),

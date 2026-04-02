@@ -9,6 +9,7 @@ import { registerSubagentLifecycleHook } from "../../lib/dispatch/subagent-lifec
 import { setPluginWakeHandler } from "../../lib/services/heartbeat/wake-bridge.js";
 import { DATA_DIR } from "../../lib/setup/constants.js";
 import { DEFAULT_WORKFLOW, ReviewPolicy, TestPolicy, type WorkflowConfig } from "../../lib/workflow/index.js";
+import { resolveEnvironmentContractVersion } from "../../lib/test-env/state.js";
 
 const { mockCreateProvider } = vi.hoisted(() => ({
   mockCreateProvider: vi.fn(),
@@ -51,6 +52,17 @@ describe.sequential("orchestration smoke", () => {
         tester: { level: "medior" },
       },
     });
+    const seeded = await h.readProjects();
+    seeded.projects[h.project.slug]!.stack = "python-cli";
+    seeded.projects[h.project.slug]!.environment = {
+      status: "ready",
+      stack: "python-cli",
+      contractVersion: resolveEnvironmentContractVersion("python-cli"),
+      lastProvisionedAt: new Date().toISOString(),
+      lastProvisionError: null,
+      nextProvisionRetryAt: null,
+    };
+    await h.writeProjects(seeded);
     await fs.mkdir(path.join(h.workspaceDir, DATA_DIR, "projects", h.project.slug), { recursive: true });
     await fs.writeFile(
       path.join(h.workspaceDir, DATA_DIR, "projects", h.project.slug, "workflow.yaml"),

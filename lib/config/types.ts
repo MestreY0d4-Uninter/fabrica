@@ -119,6 +119,17 @@ export type TelegramPluginConfig = {
 export type NotificationPluginConfig = {
   workerStart?: boolean;
   workerComplete?: boolean;
+  workerRecoveryExhausted?: boolean;
+  reviewNeeded?: boolean;
+  reviewRejected?: boolean;
+  reviewApproved?: boolean;
+  prMerged?: boolean;
+  changesRequested?: boolean;
+  mergeConflict?: boolean;
+  prClosed?: boolean;
+  issueComplete?: boolean;
+  holdEscapeResolved?: boolean;
+  infraFailure?: boolean;
 };
 
 export type FabricaPluginConfig = {

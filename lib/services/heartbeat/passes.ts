@@ -114,12 +114,12 @@ export async function performHealthPass(
   runtime?: PluginRuntime,
 ): Promise<number> {
   let fixedCount = 0;
+  const notifyConfig = getNotificationConfig(resolvedConfig as unknown as Record<string, unknown> | undefined);
 
   // Reprocess any notifications pending > 2 minutes (crash recovery)
   try {
     const pendingIntents = await getPendingIntents(workspaceDir).catch(() => []);
     const staleThreshold = Date.now() - 2 * 60_000;
-    const notifyConfig = getNotificationConfig(resolvedConfig as unknown as Record<string, unknown> | undefined);
     for (const intent of pendingIntents) {
       if (intent.ts < staleThreshold) {
         try {
@@ -168,6 +168,8 @@ export async function performHealthPass(
       workflow: resolvedConfig?.workflow,
       dispatchConfirmTimeoutMs: resolvedConfig?.timeouts?.dispatchConfirmTimeoutMs,
       healthGracePeriodMs: resolvedConfig?.timeouts?.healthGracePeriodMs,
+      runCommand,
+      notificationConfig: notifyConfig,
     });
     fixedCount += healthFixes.filter((f) => f.fixed).length;
 

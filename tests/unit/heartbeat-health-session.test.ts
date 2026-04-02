@@ -188,11 +188,12 @@ describe("checkWorkerHealth", () => {
     });
     h.provider.seedIssue({ iid: 42, title: "Recover accepted but idle dispatch", labels: ["Doing"] });
 
+    const acceptedAt = Date.now() - 10 * 60_000;
     const data = await h.readProjects();
     data.projects[h.project.slug]!.issueRuntime = {
       "42": {
         dispatchRequestedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
-        agentAcceptedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+        agentAcceptedAt: new Date(acceptedAt).toISOString(),
         lastSessionKey: "agent:main:subagent:test-project-developer-senior-ada",
         firstWorkerActivityAt: null,
       },
@@ -204,7 +205,7 @@ describe("checkWorkerHealth", () => {
         "agent:main:subagent:test-project-developer-senior-ada",
         {
           key: "agent:main:subagent:test-project-developer-senior-ada",
-          updatedAt: Date.now(),
+          updatedAt: acceptedAt,
           percentUsed: 0,
         },
       ],
@@ -232,6 +233,203 @@ describe("checkWorkerHealth", () => {
       from: "Doing",
       to: "To Improve",
     });
+  });
+
+  it("does not mark dispatch_unconfirmed after an inconclusive completion already proved worker activity", async () => {
+    h = await createTestHarness({
+      workers: {
+        developer: {
+          active: true,
+          issueId: "42",
+          sessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+          level: "senior",
+          startTime: new Date(Date.now() - 20 * 60_000).toISOString(),
+          previousLabel: "To Improve",
+        },
+      },
+    });
+    h.provider.seedIssue({ iid: 42, title: "Keep inconclusive worker alive", labels: ["Doing"] });
+
+    const data = await h.readProjects();
+    data.projects[h.project.slug]!.issueRuntime = {
+      "42": {
+        dispatchRequestedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+        agentAcceptedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+        lastSessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+        firstWorkerActivityAt: null,
+        inconclusiveCompletionAt: new Date(Date.now() - 60_000).toISOString(),
+        inconclusiveCompletionReason: "missing_result_line",
+      },
+    };
+    await writeProjects(h.workspaceDir, data);
+
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-senior-ada",
+        {
+          key: "agent:main:subagent:test-project-developer-senior-ada",
+          updatedAt: Date.now(),
+          percentUsed: 0,
+        },
+      ],
+    ]);
+
+    const fixes = await checkWorkerHealth({
+      workspaceDir: h.workspaceDir,
+      projectSlug: h.project.slug,
+      project: data.projects[h.project.slug]!,
+      role: "developer",
+      autoFix: true,
+      provider: h.provider,
+      sessions,
+      staleWorkerHours: 999,
+    });
+
+    expect(fixes).toHaveLength(0);
+    expect(h.provider.callsTo("transitionLabel")).toHaveLength(0);
+  });
+
+  it("requeues a live-but-silent worker only after completion recovery is exhausted", async () => {
+    h = await createTestHarness({
+      workers: {
+        developer: {
+          active: true,
+          issueId: "42",
+          sessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+          level: "senior",
+          startTime: new Date(Date.now() - 20 * 60_000).toISOString(),
+          previousLabel: "To Improve",
+        },
+      },
+    });
+    h.provider.seedIssue({ iid: 42, title: "Recover silent completion", labels: ["Doing"] });
+
+    const inconclusiveAt = Date.now() - 5 * 60_000;
+    const data = await h.readProjects();
+    data.projects[h.project.slug]!.issueRuntime = {
+      "42": {
+        dispatchRequestedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+        agentAcceptedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+        lastSessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+        firstWorkerActivityAt: new Date(Date.now() - 9 * 60_000).toISOString(),
+        inconclusiveCompletionAt: new Date(inconclusiveAt).toISOString(),
+        inconclusiveCompletionReason: "missing_result_line",
+      },
+    };
+    await writeProjects(h.workspaceDir, data);
+
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-senior-ada",
+        {
+          key: "agent:main:subagent:test-project-developer-senior-ada",
+          updatedAt: inconclusiveAt - 1_000,
+          percentUsed: 12,
+          totalTokens: 100,
+          contextTokens: 500,
+        },
+      ],
+    ]);
+
+    const fixes = await checkWorkerHealth({
+      workspaceDir: h.workspaceDir,
+      projectSlug: h.project.slug,
+      project: data.projects[h.project.slug]!,
+      role: "developer",
+      autoFix: true,
+      provider: h.provider,
+      sessions,
+      staleWorkerHours: 999,
+      runCommand: h.runCommand,
+      completionRecoveryWindowMs: 60_000,
+    });
+
+    expect(fixes).toHaveLength(1);
+    expect(fixes[0]?.issue.type).toBe("completion_recovery_exhausted");
+    expect(fixes[0]?.fixed).toBe(true);
+
+    const transitions = h.provider.callsTo("transitionLabel");
+    expect(transitions).toHaveLength(1);
+    expect(transitions[0]?.args).toEqual({
+      issueId: 42,
+      from: "Doing",
+      to: "To Improve",
+    });
+
+    const updated = await h.readProjects();
+    expect(updated.projects[h.project.slug]!.issueRuntime?.["42"]?.inconclusiveCompletionAt).toBeNull();
+    expect(updated.projects[h.project.slug]!.issueRuntime?.["42"]?.inconclusiveCompletionReason).toBeNull();
+
+    const messageCommands = h.commands.commandsFor("openclaw");
+    expect(messageCommands.some((command) => command.argv.includes("message") && command.argv.includes("send"))).toBe(true);
+  });
+
+  it("records first worker activity from a live session update after acceptance and skips dispatch_unconfirmed", async () => {
+    h = await createTestHarness({
+      workers: {
+        developer: {
+          active: true,
+          issueId: "42",
+          sessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+          level: "senior",
+          startTime: new Date(Date.now() - 20 * 60_000).toISOString(),
+          previousLabel: "To Improve",
+        },
+      },
+    });
+    h.provider.seedIssue({ iid: 42, title: "Observe live worker activity", labels: ["Doing"] });
+
+    const acceptedAt = Date.now() - 10 * 60_000;
+    const data = await h.readProjects();
+    data.projects[h.project.slug]!.issueRuntime = {
+      "42": {
+        dispatchRequestedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+        agentAcceptedAt: new Date(acceptedAt).toISOString(),
+        lastSessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+        firstWorkerActivityAt: null,
+      },
+    };
+    await writeProjects(h.workspaceDir, data);
+
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-senior-ada",
+        {
+          key: "agent:main:subagent:test-project-developer-senior-ada",
+          updatedAt: acceptedAt + 30_000,
+          percentUsed: 5,
+          totalTokens: 100,
+          contextTokens: 500,
+        },
+      ],
+    ]);
+
+    const fixes = await checkWorkerHealth({
+      workspaceDir: h.workspaceDir,
+      projectSlug: h.project.slug,
+      project: data.projects[h.project.slug]!,
+      role: "developer",
+      autoFix: true,
+      provider: h.provider,
+      sessions,
+      staleWorkerHours: 999,
+    });
+
+    expect(fixes).toHaveLength(0);
+    expect(h.provider.callsTo("transitionLabel")).toHaveLength(0);
+
+    const updated = await h.readProjects();
+    expect(updated.projects[h.project.slug]!.issueRuntime?.["42"]?.firstWorkerActivityAt).toBeTruthy();
+
+    const events = await readAuditEvents(h.workspaceDir);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "first_worker_activity",
+          source: "heartbeat_session_activity",
+        }),
+      ]),
+    );
   });
 
   it("requeues an active issue when the session record exists but is already terminal", async () => {
@@ -333,10 +531,11 @@ describe("checkWorkerHealth", () => {
     });
     h.provider.seedIssue({ iid: 42, title: "Recover unconfirmed dispatch", labels: ["Doing"] });
 
+    const dispatchedAt = Date.now() - 10 * 60_000;
     const data = await h.readProjects();
     data.projects[h.project.slug]!.issueRuntime = {
       "42": {
-        dispatchRequestedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+        dispatchRequestedAt: new Date(dispatchedAt).toISOString(),
         lastSessionKey: "agent:main:subagent:test-project-developer-senior-ada",
       },
     };
@@ -347,7 +546,7 @@ describe("checkWorkerHealth", () => {
         "agent:main:subagent:test-project-developer-senior-ada",
         {
           key: "agent:main:subagent:test-project-developer-senior-ada",
-          updatedAt: Date.now() - 10 * 60_000,
+          updatedAt: dispatchedAt,
           percentUsed: 5,
           totalTokens: 100,
           contextTokens: 500,

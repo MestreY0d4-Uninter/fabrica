@@ -74,6 +74,8 @@ export function createHealthTool(ctx: PluginContext) {
             workflow: resolvedConfig.workflow,
             dispatchConfirmTimeoutMs: resolvedConfig.timeouts.dispatchConfirmTimeoutMs,
             healthGracePeriodMs: resolvedConfig.timeouts.healthGracePeriodMs,
+            runCommand: ctx.runCommand,
+            notificationConfig: ctx.pluginConfig?.notifications,
           });
           issues.push(...healthFixes.map((f) => ({ ...f, project: project.name, role })));
 

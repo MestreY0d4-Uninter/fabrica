@@ -38,6 +38,7 @@ export async function handleReviewerAgentEnd(opts: {
   runtime?: { subagent?: { getSessionMessages?: (opts: { sessionKey: string }) => Promise<unknown> } };
   workspaceDir?: string;
   runCommand?: RunCommand;
+  pluginConfig?: { notifications?: Record<string, unknown> };
   fallbackToQueueOnUndetermined?: boolean;
 }): Promise<ReviewerDecision | null> {
   const eventDecision = Array.isArray(opts.messages) && opts.messages.length > 0
@@ -63,7 +64,7 @@ export async function handleReviewerAgentEnd(opts: {
     return decision;
   }
 
-  const { workflow, pluginConfig } = await loadConfig(opts.workspaceDir, context.projectSlug);
+  const { workflow } = await loadConfig(opts.workspaceDir, context.projectSlug);
   const activeLabel = getActiveLabel(workflow, "reviewer");
   const revertLabel = getRevertLabel(workflow, "reviewer");
   const { provider } = await createProvider({
@@ -114,7 +115,7 @@ export async function handleReviewerAgentEnd(opts: {
         },
         {
           workspaceDir: opts.workspaceDir,
-          config: getNotificationConfig(pluginConfig),
+          config: getNotificationConfig(opts.pluginConfig),
           target: channel
             ? {
                 channelId: channel.channelId,

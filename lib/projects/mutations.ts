@@ -220,6 +220,7 @@ export async function updateProjectEnvironment(
       status: "pending",
       stack: project.environment?.stack ?? null,
       contractVersion: project.environment?.contractVersion ?? null,
+      provisioningStartedAt: project.environment?.provisioningStartedAt ?? null,
       lastProvisionedAt: project.environment?.lastProvisionedAt ?? null,
       lastProvisionError: project.environment?.lastProvisionError ?? null,
       nextProvisionRetryAt: project.environment?.nextProvisionRetryAt ?? null,

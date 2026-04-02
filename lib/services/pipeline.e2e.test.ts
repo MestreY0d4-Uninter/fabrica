@@ -16,6 +16,7 @@ import { executeCompletion } from "./pipeline.js";
 import { projectTick } from "./tick.js";
 import { reviewPass } from "./heartbeat/review.js";
 import { DEFAULT_WORKFLOW, ReviewPolicy, TestPolicy, type WorkflowConfig } from "../workflow/index.js";
+import { resolveEnvironmentContractVersion } from "../test-env/state.js";
 import { readProjects, writeProjects, getRoleWorker, getProject, countActiveSlots } from "../projects/index.js";
 import { slotName } from "../names.js";
 
@@ -1238,6 +1239,15 @@ describe("E2E pipeline", () => {
         currentIssueMatch: true,
       });
       const data = await h.readProjects();
+      data.projects[h.project.slug]!.stack = "python-cli";
+      data.projects[h.project.slug]!.environment = {
+        status: "ready",
+        stack: "python-cli",
+        contractVersion: resolveEnvironmentContractVersion("python-cli"),
+        lastProvisionedAt: new Date().toISOString(),
+        lastProvisionError: null,
+        nextProvisionRetryAt: null,
+      };
       data.projects[h.project.slug]!.issueRuntime = {
         "85": {
           currentPrNumber: 850,

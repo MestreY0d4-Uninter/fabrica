@@ -186,6 +186,92 @@ describe("notify", () => {
     }
   });
 
+  it("treats workerStart notifications from different dispatch cycles as distinct events", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-notify-worker-start-cycle-"));
+    const calls: Array<{ target: string; message: string; opts: Record<string, unknown> }> = [];
+    const runtime = {
+      channel: {
+        telegram: {
+          sendMessageTelegram: async (
+            target: string,
+            message: string,
+            opts: Record<string, unknown>,
+          ) => {
+            calls.push({ target, message, opts });
+          },
+        },
+      },
+    } as any;
+
+    try {
+      const baseEvent = {
+        type: "workerStart" as const,
+        project: "demo",
+        issueId: 12,
+        issueUrl: "https://example.com/issues/12",
+        issueTitle: "Started",
+        role: "developer",
+        level: "senior",
+        sessionAction: "spawn" as const,
+      };
+
+      const first = await notify(
+        {
+          ...baseEvent,
+          dispatchCycleId: "cycle-1",
+        },
+        {
+          workspaceDir,
+          runtime,
+          target: {
+            channelId: "-100123",
+            channel: "telegram",
+            messageThreadId: 42,
+          },
+        },
+      );
+
+      const second = await notify(
+        {
+          ...baseEvent,
+          dispatchCycleId: "cycle-2",
+        },
+        {
+          workspaceDir,
+          runtime,
+          target: {
+            channelId: "-100123",
+            channel: "telegram",
+            messageThreadId: 42,
+          },
+        },
+      );
+
+      expect(first).toBe(true);
+      expect(second).toBe(true);
+      expect(calls).toHaveLength(2);
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("formats workerRecoveryExhausted as an explicit operational failure timeline event", () => {
+    const message = buildMessage({
+      type: "workerRecoveryExhausted",
+      project: "demo",
+      issueId: 15,
+      issueUrl: "https://example.com/issues/15",
+      issueTitle: "Silent worker",
+      role: "developer",
+      detail: "No valid Work result arrived after observable activity",
+    } as any);
+
+    expect(message).toContain("DEVELOPER");
+    expect(message).toContain("recovery exhausted");
+    expect(message).toContain("No valid Work result arrived after observable activity");
+    expect(message).toContain("To Improve");
+  });
+
   it("falls back to the CLI when the Telegram runtime sender exists but fails structurally", async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-notify-cli-broken-telegram-"));
     const calls: Array<{ args: string[]; opts?: Record<string, unknown> }> = [];

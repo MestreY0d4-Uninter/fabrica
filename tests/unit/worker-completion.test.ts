@@ -12,6 +12,7 @@ const {
   mockGetNotificationConfig,
   mockDeactivateWorker,
   mockUpdateIssueRuntime,
+  mockRecordIssueLifecycle,
 } = vi.hoisted(() => ({
   mockAuditLog: vi.fn(),
   mockReadProjects: vi.fn(),
@@ -23,6 +24,7 @@ const {
   mockGetNotificationConfig: vi.fn(),
   mockDeactivateWorker: vi.fn(),
   mockUpdateIssueRuntime: vi.fn(),
+  mockRecordIssueLifecycle: vi.fn(),
 }));
 
 vi.mock("../../lib/audit.js", () => ({
@@ -33,7 +35,7 @@ vi.mock("../../lib/projects/index.js", () => ({
   readProjects: mockReadProjects,
   getRoleWorker: (project: any, role: string) => project.workers[role],
   getIssueRuntime: (project: any, issueId: number) => project.issueRuntime?.[String(issueId)],
-  recordIssueLifecycle: vi.fn().mockResolvedValue(true),
+  recordIssueLifecycle: mockRecordIssueLifecycle,
   resolveRepoPath: vi.fn((repo: string) => `/tmp/${repo.replace("/", "-")}`),
   updateIssueRuntime: mockUpdateIssueRuntime,
   deactivateWorker: mockDeactivateWorker,
@@ -151,6 +153,7 @@ describe("worker-completion", () => {
     mockGetNotificationConfig.mockReturnValue({});
     mockDeactivateWorker.mockResolvedValue(undefined);
     mockUpdateIssueRuntime.mockResolvedValue(undefined);
+    mockRecordIssueLifecycle.mockResolvedValue(true);
     mockAuditLog.mockResolvedValue(undefined);
   });
 
@@ -200,7 +203,7 @@ describe("worker-completion", () => {
     expect(mockExecuteCompletion).not.toHaveBeenCalled();
   });
 
-  it("records skipped completion when the final result line is missing", async () => {
+  it("records inconclusive completion when observable worker activity lacks the final result line", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 
     const result = await handleWorkerAgentEnd({
@@ -210,14 +213,56 @@ describe("worker-completion", () => {
       runCommand: vi.fn(),
     });
 
-    expect(result).toMatchObject({ applied: false, reason: "missing_result_line" });
+    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
+    expect(mockRecordIssueLifecycle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceDir: "/tmp/ws",
+        slug: "demo",
+        issueId: 7,
+        stage: "first_worker_activity",
+        sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      }),
+    );
+    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "demo",
+      7,
+      expect.objectContaining({
+        inconclusiveCompletionAt: expect.any(String),
+        inconclusiveCompletionReason: "missing_result_line",
+      }),
+    );
     expect(mockAuditLog).toHaveBeenCalledWith(
       "/tmp/ws",
-      "worker_result_skipped",
+      "worker_completion_inconclusive",
       expect.objectContaining({
         sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
         role: "developer",
         reason: "missing_result_line",
+      }),
+    );
+  });
+
+  it("does not mark inconclusive activity for a stale run that no longer owns the dispatch", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      runId: "run-stale",
+      messages: [{ role: "assistant", content: [{ type: "text", text: "I finished the work." }] }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "stale_dispatch_cycle" });
+    expect(mockRecordIssueLifecycle).not.toHaveBeenCalled();
+    expect(mockUpdateIssueRuntime).not.toHaveBeenCalled();
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_skipped",
+      expect.objectContaining({
+        issueId: 7,
+        reason: "stale_dispatch_cycle",
       }),
     );
   });

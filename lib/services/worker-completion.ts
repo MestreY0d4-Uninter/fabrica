@@ -31,6 +31,11 @@ type DeveloperDoneValidationResult = {
   prStatus?: PrStatus;
 };
 
+type WorkerObservation = {
+  result: WorkerResult | null;
+  activityObserved: boolean;
+};
+
 type WorkerSessionContext = {
   sessionKey: string;
   parsed: { projectName: string; role: WorkerRole };
@@ -68,30 +73,43 @@ async function resolveWorkerResultFromRuntime(
   sessionKey: string,
   messages: unknown[] | undefined,
   runtime?: RuntimeLike,
-): Promise<WorkerResult | null> {
-  const eventResult = extractWorkerResultFromMessages(role, messages ?? []);
+): Promise<WorkerObservation> {
+  const eventMessages = Array.isArray(messages) ? messages : [];
+  const eventActivityObserved = hasObservableWorkerActivity(eventMessages);
+  const eventResult = extractWorkerResultFromMessages(role, eventMessages);
   if (eventResult) {
-    return eventResult;
+    return { result: eventResult, activityObserved: eventActivityObserved };
   }
 
   try {
     const messagesResult = await runtime?.subagent?.getSessionMessages?.({ sessionKey });
-    if (!messagesResult) return null;
+    if (!messagesResult) {
+      return { result: null, activityObserved: eventActivityObserved };
+    }
 
     const sessionMessages: unknown[] = Array.isArray(messagesResult)
       ? messagesResult
       : (Array.isArray((messagesResult as { messages?: unknown[] }).messages)
         ? (messagesResult as { messages: unknown[] }).messages
         : []);
+    const sessionActivityObserved = hasObservableWorkerActivity(sessionMessages);
     const historyResult = extractWorkerResultFromMessages(role, sessionMessages);
-    if (!historyResult) return null;
+    if (!historyResult) {
+      return {
+        result: null,
+        activityObserved: eventActivityObserved || sessionActivityObserved,
+      };
+    }
 
     return {
-      ...historyResult,
-      source: "session_history",
+      result: {
+        ...historyResult,
+        source: "session_history",
+      },
+      activityObserved: eventActivityObserved || sessionActivityObserved,
     };
   } catch {
-    return null;
+    return { result: null, activityObserved: eventActivityObserved };
   }
 }
 
@@ -99,6 +117,88 @@ function asWorkerRole(role: string): WorkerRole | null {
   return role === "developer" || role === "tester" || role === "architect" || role === "reviewer"
     ? role
     : null;
+}
+
+function hasObservableWorkerActivity(messages: unknown[]): boolean {
+  return messages.some((message) => {
+    if (typeof message !== "object" || message == null) return false;
+    const role = (message as { role?: unknown }).role;
+    if (role !== "assistant" && role !== "toolResult") return false;
+    return hasObservableContent((message as { content?: unknown }).content);
+  });
+}
+
+async function ensureCurrentWorkerDispatch(opts: {
+  context: WorkerSessionContext | null;
+  workspaceDir: string;
+  sessionKey: string;
+  role: Exclude<WorkerRole, "reviewer">;
+  runId?: string;
+}): Promise<WorkerCompletionOutcome | null> {
+  const context = opts.context;
+  if (!context) return null;
+
+  const currentDispatchRunId = context.dispatchRunId ?? context.issueRuntime?.dispatchRunId ?? null;
+  if (opts.runId && currentDispatchRunId && opts.runId !== currentDispatchRunId) {
+    await auditLog(opts.workspaceDir, "worker_completion_skipped", {
+      sessionKey: opts.sessionKey,
+      projectSlug: context.projectSlug,
+      issueId: context.issueId,
+      role: opts.role,
+      reason: "stale_dispatch_cycle",
+      eventRunId: opts.runId,
+      currentDispatchRunId,
+    }).catch(() => {});
+    return { applied: false, reason: "stale_dispatch_cycle" };
+  }
+
+  if (
+    context.dispatchCycleId &&
+    context.issueRuntime?.lastDispatchCycleId &&
+    context.dispatchCycleId !== context.issueRuntime.lastDispatchCycleId
+  ) {
+    await auditLog(opts.workspaceDir, "worker_completion_skipped", {
+      sessionKey: opts.sessionKey,
+      projectSlug: context.projectSlug,
+      issueId: context.issueId,
+      role: opts.role,
+      reason: "stale_dispatch_cycle",
+    }).catch(() => {});
+    return { applied: false, reason: "stale_dispatch_cycle" };
+  }
+
+  if (hasCurrentDispatchAlreadyCompleted(context.issueRuntime)) {
+    await auditLog(opts.workspaceDir, "worker_completion_skipped", {
+      sessionKey: opts.sessionKey,
+      projectSlug: context.projectSlug,
+      issueId: context.issueId,
+      role: opts.role,
+      reason: "already_completed",
+    }).catch(() => {});
+    return { applied: false, reason: "already_completed" };
+  }
+
+  return null;
+}
+
+function hasObservableContent(content: unknown): boolean {
+  if (typeof content === "string") return content.trim().length > 0;
+  if (!Array.isArray(content)) return false;
+
+  return content.some((block) => {
+    if (typeof block === "string") return block.trim().length > 0;
+    if (typeof block !== "object" || block == null) return false;
+
+    const typedBlock = block as { type?: unknown; text?: unknown; thinking?: unknown };
+    if (typedBlock.type === "toolCall" || typedBlock.type === "toolResult") return true;
+    if (typedBlock.type === "text" && typeof typedBlock.text === "string") {
+      return typedBlock.text.trim().length > 0;
+    }
+    if (typedBlock.type === "thinking" && typeof typedBlock.thinking === "string") {
+      return typedBlock.thinking.trim().length > 0;
+    }
+    return false;
+  });
 }
 
 export async function resolveWorkerSessionContext(
@@ -372,6 +472,13 @@ export async function applyWorkerResult(opts: {
   if (context.parsed.role === "tester" && context.issueRuntime?.infraFailCount) {
     await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
       infraFailCount: 0,
+      inconclusiveCompletionAt: null,
+      inconclusiveCompletionReason: null,
+    }).catch(() => {});
+  } else {
+    await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
+      inconclusiveCompletionAt: null,
+      inconclusiveCompletionReason: null,
     }).catch(() => {});
   }
 
@@ -401,8 +508,44 @@ export async function handleWorkerAgentEnd(opts: {
   const role = parsed ? asWorkerRole(parsed.role) : null;
   if (!parsed || !role || role === "reviewer") return null;
 
-  const result = await resolveWorkerResultFromRuntime(role, opts.sessionKey, opts.messages, opts.runtime);
-  if (!result) {
+  const observation = await resolveWorkerResultFromRuntime(role, opts.sessionKey, opts.messages, opts.runtime);
+  const context = await resolveWorkerSessionContext(opts.sessionKey, opts.workspaceDir);
+  const ownership = await ensureCurrentWorkerDispatch({
+    context,
+    workspaceDir: opts.workspaceDir,
+    sessionKey: opts.sessionKey,
+    role,
+    runId: opts.runId,
+  });
+  if (ownership) return ownership;
+
+  if (context && observation.activityObserved) {
+    await recordIssueLifecycle({
+      workspaceDir: opts.workspaceDir,
+      slug: context.projectSlug,
+      issueId: context.issueId,
+      stage: "first_worker_activity",
+      sessionKey: opts.sessionKey,
+      details: { role, source: "agent_end" },
+    }).catch(() => {});
+  }
+
+  if (!observation.result) {
+    if (context && observation.activityObserved) {
+      await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
+        inconclusiveCompletionAt: new Date().toISOString(),
+        inconclusiveCompletionReason: "missing_result_line",
+      }).catch(() => {});
+      await auditLog(opts.workspaceDir, "worker_completion_inconclusive", {
+        sessionKey: opts.sessionKey,
+        projectSlug: context.projectSlug,
+        issueId: context.issueId,
+        role,
+        reason: "missing_result_line",
+      }).catch(() => {});
+      return { applied: false, reason: "inconclusive_completion" };
+    }
+
     await auditLog(opts.workspaceDir, "worker_result_skipped", {
       sessionKey: opts.sessionKey,
       role,
@@ -411,12 +554,11 @@ export async function handleWorkerAgentEnd(opts: {
     return { applied: false, reason: "missing_result_line" };
   }
 
-  const context = await resolveWorkerSessionContext(opts.sessionKey, opts.workspaceDir);
   if (!context || context.parsed.role === "reviewer") return null;
 
   return applyWorkerResult({
     context,
-    result,
+    result: observation.result,
     workspaceDir: opts.workspaceDir,
     runCommand: opts.runCommand,
     runId: opts.runId,

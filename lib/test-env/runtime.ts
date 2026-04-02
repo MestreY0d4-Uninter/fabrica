@@ -8,6 +8,8 @@ import { ensureProjectTestEnvironment, type BootstrapMode } from "./bootstrap.js
 import { resolveStackEnvironmentContract } from "./contracts.js";
 import { getProjectEnvironmentState } from "./state.js";
 
+const STALE_PROVISIONING_WINDOW_MS = 10 * 60 * 1000;
+
 function projectEnvironmentStateFor(
   project: Project,
   stack: CanonicalStack,
@@ -38,8 +40,25 @@ export async function ensureEnvironmentReady(opts: {
     return { ready: true, state: current };
   }
 
+  if (current.status === "provisioning") {
+    const provisioningStartedAt = current.provisioningStartedAt
+      ? Date.parse(current.provisioningStartedAt)
+      : Number.NaN;
+    const provisioningIsFresh = Number.isFinite(provisioningStartedAt)
+      && (Date.now() - provisioningStartedAt) < STALE_PROVISIONING_WINDOW_MS;
+    if (provisioningIsFresh) {
+      return { ready: false, state: current };
+    }
+    await auditLog(opts.workspaceDir, "environment_bootstrap_retry_scheduled", {
+      projectSlug: opts.projectSlug,
+      stack: opts.stack,
+      reason: "stale_provisioning_state",
+      staleProvisioningStartedAt: current.provisioningStartedAt ?? null,
+    }).catch(() => {});
+  }
+
   if (
-    (current.status === "failed" || current.status === "provisioning") &&
+    current.status === "failed" &&
     current.nextProvisionRetryAt &&
     Date.parse(current.nextProvisionRetryAt) > Date.now()
   ) {
@@ -50,7 +69,9 @@ export async function ensureEnvironmentReady(opts: {
     status: "provisioning",
     stack: opts.stack,
     contractVersion: contract.version,
+    provisioningStartedAt: new Date().toISOString(),
     lastProvisionError: null,
+    nextProvisionRetryAt: null,
   });
   await auditLog(opts.workspaceDir, "environment_bootstrap_started", {
     projectSlug: opts.projectSlug,
@@ -58,12 +79,35 @@ export async function ensureEnvironmentReady(opts: {
     contractVersion: contract.version,
   }).catch(() => {});
 
+  const bootstrapRunCommand: Parameters<typeof ensureProjectTestEnvironment>[0]["runCommand"] = async (
+    cmd,
+    args,
+    bootstrapOpts,
+  ) => {
+    const result = await opts.runCommand([cmd, ...args], {
+      timeoutMs: typeof bootstrapOpts?.timeout === "number" ? bootstrapOpts.timeout : 60_000,
+      cwd: bootstrapOpts?.cwd,
+      env: bootstrapOpts?.env,
+    });
+    return {
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? "",
+      exitCode: typeof result.code === "number" ? result.code : 0,
+    };
+  };
+
   const result = await ensureProjectTestEnvironment({
     repoPath: resolveRepoPath(opts.project.repo),
     stack: opts.stack,
     mode: opts.mode,
-    runCommand: opts.runCommand,
-  });
+    runCommand: bootstrapRunCommand,
+  }).catch((error: unknown) => ({
+    ready: false as const,
+    reason:
+      error instanceof Error
+        ? error.message
+        : "environment_bootstrap_failed",
+  }));
 
   if (!result.ready) {
     const nextRetryAt = new Date(Date.now() + 60_000).toISOString();
@@ -71,6 +115,7 @@ export async function ensureEnvironmentReady(opts: {
       status: "failed",
       stack: opts.stack,
       contractVersion: contract.version,
+      provisioningStartedAt: null,
       lastProvisionError: result.reason ?? "environment_bootstrap_failed",
       nextProvisionRetryAt: nextRetryAt,
     });
@@ -79,6 +124,7 @@ export async function ensureEnvironmentReady(opts: {
       status: state.status,
       stack: state.stack,
       contractVersion: state.contractVersion,
+      provisioningStartedAt: state.provisioningStartedAt,
       lastProvisionedAt: state.lastProvisionedAt,
       lastProvisionError: state.lastProvisionError,
       nextProvisionRetryAt: state.nextProvisionRetryAt,
@@ -98,6 +144,7 @@ export async function ensureEnvironmentReady(opts: {
     status: "ready",
     stack: opts.stack,
     contractVersion: contract.version,
+    provisioningStartedAt: null,
     lastProvisionedAt: provisionedAt,
     lastProvisionError: null,
     nextProvisionRetryAt: null,
@@ -107,6 +154,7 @@ export async function ensureEnvironmentReady(opts: {
     status: state.status,
     stack: state.stack,
     contractVersion: state.contractVersion,
+    provisioningStartedAt: state.provisioningStartedAt,
     lastProvisionedAt: state.lastProvisionedAt,
     lastProvisionError: state.lastProvisionError,
     nextProvisionRetryAt: state.nextProvisionRetryAt,
