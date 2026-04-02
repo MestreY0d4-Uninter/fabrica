@@ -12,6 +12,7 @@ import { log as auditLog } from "../audit.js";
 import { selectLevel } from "../roles/model-selector.js";
 import { getRoleWorker, getProject, readProjects, findFreeSlot, countActiveSlots, reconcileSlots, getIssueRuntime, updateIssueRuntime, getCanonicalPrSelector } from "../projects/index.js";
 import { dispatchTask } from "../dispatch/index.js";
+import { ensureEnvironmentReady as defaultEnsureEnvironmentReady } from "../test-env/runtime.js";
 import { getLevelsForRole } from "../roles/index.js";
 import { loadConfig } from "../config/index.js";
 import {
@@ -75,11 +76,17 @@ export async function projectTick(opts: {
   instanceName?: string;
   /** Injected runCommand for dependency injection. */
   runCommand?: RunCommand;
+  /** Injected environment bootstrap gate for tests and orchestration control. */
+  ensureEnvironmentReady?: typeof import("../test-env/runtime.js").ensureEnvironmentReady;
+  /** Injected dispatch function for tests. */
+  dispatchTask?: typeof import("../dispatch/index.js").dispatchTask;
 }): Promise<TickResult> {
   const {
     workspaceDir, projectSlug, agentId, sessionKey, pluginConfig, dryRun,
     maxPickups, targetRole, runtime, instanceName, runCommand,
   } = opts;
+  const ensureEnvironment = opts.ensureEnvironmentReady ?? defaultEnsureEnvironmentReady;
+  const dispatch = opts.dispatchTask ?? dispatchTask;
 
   const project = getProject(await readProjects(workspaceDir), projectSlug);
   if (!project) return { pickups: [], skipped: [{ reason: `Project not found: ${projectSlug}` }] };
@@ -307,6 +314,33 @@ export async function projectTick(opts: {
       continue;
     }
 
+    if (role === "developer" || role === "tester") {
+      const stack = fresh.stack;
+      if (!stack) {
+        skipped.push({ role, reason: "missing_project_stack" });
+        continue;
+      }
+
+      const environment = await ensureEnvironment({
+        workspaceDir,
+        projectSlug,
+        project: fresh,
+        stack,
+        mode: role === "tester" ? "tester" : "developer",
+        runCommand: runCommand!,
+      });
+      if (!environment.ready) {
+        skipped.push({ role, reason: "environment_not_ready" });
+        await auditLog(workspaceDir, "dispatch_blocked_environment_not_ready", {
+          projectSlug,
+          role,
+          issueId: issue.iid,
+          environmentStatus: environment.state.status,
+        }).catch(() => {});
+        continue;
+      }
+    }
+
     if (dryRun) {
       const existingSession = roleWorker.levels[effectiveLevel]?.[freeSlot]?.sessionKey;
       pickups.push({
@@ -317,7 +351,7 @@ export async function projectTick(opts: {
       });
     } else {
       try {
-        const dr = await dispatchTask({
+        const dr = await dispatch({
           workspaceDir, agentId, project: fresh, issueId: issue.iid,
           issueTitle: issue.title, issueDescription: issue.description ?? "", issueUrl: issue.web_url,
           role, level: effectiveLevel, fromLabel: currentLabel, toLabel: targetLabel,

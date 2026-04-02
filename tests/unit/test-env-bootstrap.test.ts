@@ -184,6 +184,45 @@ dev = ["pytest>=8.0.0"]
     expect(calls.some((call) => call.cmd === "uv" && call.args.join(" ") === "pip install --python .venv/bin/python -e .[dev]")).toBe(true);
   });
 
+  it("reuses the Python bootstrap path for developer mode", async () => {
+    const repoPath = await makeTempRepo("fabrica-python-developer-bootstrap-");
+    await fs.writeFile(path.join(repoPath, "pyproject.toml"), `
+[project]
+name = "password-cli"
+version = "0.1.0"
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+`, "utf-8");
+
+    const calls: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
+    const result = await ensureProjectTestEnvironment({
+      repoPath,
+      stack: "python-cli",
+      mode: "developer",
+      runCommand: async (cmd, args, opts) => {
+        calls.push({ cmd, args, cwd: opts?.cwd });
+        if (cmd === "uv" && args[0] === "--version") {
+          return { stdout: "uv 0.6.0\n", stderr: "", exitCode: 0 };
+        }
+        if (cmd === "uv" && args.join(" ") === "venv .venv") {
+          await fs.mkdir(path.join(repoPath, ".venv", "bin"), { recursive: true });
+          await fs.writeFile(path.join(repoPath, ".venv", "bin", "python"), "", "utf-8");
+          await fs.writeFile(path.join(repoPath, ".venv", "bin", "ruff"), "", { mode: 0o755 });
+          return { stdout: "", stderr: "", exitCode: 0 };
+        }
+        if (cmd === "uv" && args.join(" ") === "pip install --python .venv/bin/python -e .[dev]") {
+          return { stdout: "", stderr: "", exitCode: 0 };
+        }
+        return { stdout: "", stderr: "", exitCode: 0 };
+      },
+    });
+
+    expect(result.ready).toBe(true);
+    expect(result.packageManager).toBe("uv");
+    expect(calls.some((call) => call.cmd === "uv" && call.args.join(" ") === "venv .venv")).toBe(true);
+    expect(calls.some((call) => call.cmd === "uv" && call.args.join(" ") === "pip install --python .venv/bin/python -e .[dev]")).toBe(true);
+  });
+
   it("uses uv sync --locked when uv.lock exists", async () => {
     const repoPath = await makeTempRepo("fabrica-uv-lock-");
     await fs.writeFile(path.join(repoPath, "uv.lock"), "version = 1\n", "utf-8");

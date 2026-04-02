@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Project } from "../../lib/projects/types.js";
 import {
   getProjectEnvironmentState,
   resolveEnvironmentContractVersion,
 } from "../../lib/test-env/state.js";
 import { resolveStackEnvironmentContract } from "../../lib/test-env/contracts.js";
+import { createTestHarness } from "../../lib/testing/harness.js";
+import { ensureEnvironmentReady } from "../../lib/test-env/runtime.js";
 
 function makeProject(overrides: Partial<Project> = {}): Project {
   return {
@@ -56,5 +58,40 @@ describe("stack contract resolution", () => {
     expect(contract.family).toBe("python");
     expect(contract.version).toBe(resolveEnvironmentContractVersion("python-cli"));
     expect(contract.requiresSharedToolchain).toBe(true);
+  });
+});
+
+describe("ensureEnvironmentReady", () => {
+  it("returns pending failure without re-running bootstrap before nextProvisionRetryAt", async () => {
+    const h = await createTestHarness();
+    try {
+      const data = await h.readProjects();
+      data.projects[h.project.slug]!.stack = "python-cli";
+      data.projects[h.project.slug]!.environment = {
+        status: "failed",
+        stack: "python-cli",
+        contractVersion: resolveEnvironmentContractVersion("python-cli"),
+        lastProvisionedAt: null,
+        lastProvisionError: "environment_bootstrap_failed",
+        nextProvisionRetryAt: new Date(Date.now() + 60_000).toISOString(),
+      };
+      await h.writeProjects(data);
+
+      const runCommand = vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 }));
+      const result = await ensureEnvironmentReady({
+        workspaceDir: h.workspaceDir,
+        projectSlug: h.project.slug,
+        project: data.projects[h.project.slug]!,
+        stack: "python-cli",
+        mode: "developer",
+        runCommand,
+      });
+
+      expect(result.ready).toBe(false);
+      expect(result.state.status).toBe("failed");
+      expect(runCommand).not.toHaveBeenCalled();
+    } finally {
+      await h.cleanup();
+    }
   });
 });
