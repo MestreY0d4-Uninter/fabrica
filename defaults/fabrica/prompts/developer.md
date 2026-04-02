@@ -22,9 +22,9 @@ Read the comments carefully — they often contain clarifications, decisions, or
 
 ## Workflow
 
-### 1. Create a worktree
+### 1. Use the assigned worktree
 
-**NEVER work in the main checkout.** Create a dedicated git worktree as a sibling to the repo:
+**NEVER work in the main checkout.** Use the assigned git worktree for this task. If it does not already exist, create it as a sibling to the repo:
 
 ```bash
 # Example: repo is at ~/git/myproject
@@ -36,7 +36,7 @@ git worktree add "$WORKTREE" -b "$BRANCH"
 cd "$WORKTREE"
 ```
 
-The `.worktrees/` directory sits NEXT TO the repo folder (not inside it). This keeps the main checkout clean for the orchestrator and other workers. If a worktree already exists from a previous task on the same branch, verify it's clean before reusing it.
+The `.worktrees/` directory sits NEXT TO the repo folder (not inside it). This keeps the main checkout clean for the orchestrator and other workers. If the assigned worktree already exists from a previous task on the same branch, verify it's clean and reuse it.
 Once you are in the assigned worktree, stay there for the rest of the task and do not switch back to the main checkout.
 
 ### 2. Implement the changes

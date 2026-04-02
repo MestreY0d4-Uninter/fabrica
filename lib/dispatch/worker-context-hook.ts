@@ -43,10 +43,11 @@ Do not rely on tool availability to conclude the task. The orchestrator reads th
 
 const REVIEWER_COMPLETION_CONTEXT = `## Task Completion
 
-When you finish the review, signal completion by ending your response with the decision line below.
-End your response with exactly one decision line in plain text:
+When you finish an actual review verdict, signal completion by ending your response with exactly one decision line in plain text:
 - \`Review result: APPROVE\`
 - \`Review result: REJECT\`
+
+If you cannot complete a real review, explain the blocker in your review commentary and do not emit a \`Review result\` line.
 
 The orchestrator reads that line directly from your response and advances the review stage automatically.
 If you need the project slug for follow-up tools such as \`task_create\`, use the value from the \`Channel:\` line in the task message.
@@ -71,7 +72,7 @@ Do not delegate review work to another coding agent.
 Do not use nested coding agents.
 Do not use planning or meta-skills such as brainstorming, writing-plans, or coding-agent.
 Do not spawn, supervise, or instruct another agent to do the work for you.
-If you cannot proceed directly, report the blocker in your review commentary and keep \`Review result: APPROVE\` and \`Review result: REJECT\` reserved for actual review verdicts only.
+If you cannot proceed directly, explain the blocker in your review commentary and do not emit a \`Review result\` line.
 `;
 
 export function registerWorkerContextHook(

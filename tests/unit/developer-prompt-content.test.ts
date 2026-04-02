@@ -87,4 +87,23 @@ describe("developer prompt anti-pattern checklist", () => {
       }
     }
   });
+
+  it("keeps the developer workflow aligned with reusing the assigned worktree", () => {
+    const worktreeWorkflow = getSection(content, "### 1. Use the assigned worktree");
+
+    expect(worktreeWorkflow).toContain("assigned worktree");
+    expect(worktreeWorkflow).toContain("reuse it");
+    expect(worktreeWorkflow).toContain("verify it's clean");
+    expect(worktreeWorkflow).not.toContain("fresh worktree");
+  });
+
+  it("keeps the tester workflow aligned with the dedicated worktree path", () => {
+    const branchWorkflow = getSection(testerContent, "### 1. Open the PR branch in its dedicated worktree");
+
+    expect(branchWorkflow).toContain("dedicated worktree");
+    expect(branchWorkflow).toContain("git worktree add");
+    expect(branchWorkflow).toContain("cd \"$WORKTREE\"");
+    expect(branchWorkflow).toMatch(/do not use the main checkout/i);
+    expect(branchWorkflow).not.toContain("git checkout \"$PR_BRANCH\"");
+  });
 });

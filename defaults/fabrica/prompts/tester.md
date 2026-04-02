@@ -21,13 +21,13 @@ If you cannot proceed directly in the assigned worktree, end with your role's ca
 
 ## Your Job
 
-### 1. Checkout the correct branch
+### 1. Open the PR branch in its dedicated worktree
 
-The PR may NOT be merged yet when you are dispatched. You MUST test the PR branch, not main.
+The PR may NOT be merged yet when you are dispatched. You MUST test the PR branch in its dedicated worktree, not the main checkout.
+Do not use the main checkout while an open PR branch exists.
 
 ```bash
 REPO_ROOT="<repo path from task message>"
-cd "$REPO_ROOT"
 git fetch origin
 
 # Find the PR for this issue by branch naming convention
@@ -36,11 +36,19 @@ REMOTE_URL="$(git remote get-url origin)"
 PR_BRANCH=$(gh pr list --repo "$REMOTE_URL" --state open --json headRefName --jq "[.[] | select(.headRefName | test(\"/(${ISSUE_NUM})-\"))][0].headRefName" 2>/dev/null)
 
 if [[ -n "$PR_BRANCH" && "$PR_BRANCH" != "null" ]]; then
-  # Open PR exists with matching branch — checkout the PR branch
-  git checkout "$PR_BRANCH" && git pull origin "$PR_BRANCH"
-  echo "Testing PR branch: $PR_BRANCH"
+  WORKTREE="${REPO_ROOT}.worktrees/${PR_BRANCH}"
+  if [[ -d "$WORKTREE" ]]; then
+    # Open PR exists with matching branch — reuse the dedicated worktree
+    cd "$WORKTREE"
+  else
+    # Open PR exists with matching branch — create the dedicated worktree
+    git worktree add "$WORKTREE" "origin/$PR_BRANCH"
+    cd "$WORKTREE"
+  fi
+  echo "Testing PR branch in dedicated worktree: $WORKTREE"
 else
   # No open PR for this issue — test on main (post-merge scenario)
+  cd "$REPO_ROOT"
   git checkout main && git pull origin main
   echo "Testing main branch (PR already merged)"
 fi
