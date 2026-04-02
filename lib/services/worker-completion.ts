@@ -220,60 +220,83 @@ function detectExecutionContractViolation(messages: unknown[]): {
   reason: "meta_skill" | "nested_coding_agent";
   evidence: string;
 } | null {
-  for (const evidence of collectWorkerTranscriptEvidence(messages)) {
-    const normalized = evidence.toLowerCase();
+  const evidenceEntries = collectWorkerTranscriptEvidence(messages);
+  const assistantEntries = evidenceEntries.filter((entry) => entry.role === "assistant");
+  const commandEntries = evidenceEntries.filter((entry) => entry.kind === "command");
 
-    if (normalized.includes("codex exec --full-auto")) {
-      return { reason: "nested_coding_agent", evidence: "codex exec --full-auto" };
-    }
-
-    if (/\bcoding-agent\b/.test(normalized)) {
-      return { reason: "nested_coding_agent", evidence: "coding-agent" };
-    }
-
-    if (
-      /\b(spawn|delegate|delegating|launch|launching|hand off|handoff)\b/.test(normalized)
-      && /\b(coding agent|coding-agent|codex|subagent|another agent|child agent)\b/.test(normalized)
-      && /\b(task|work|issue|implement|handle|complete|finish)\b/.test(normalized)
-    ) {
+  for (const entry of assistantEntries) {
+    const explicitDelegation = matchPositiveExplicitDelegation(entry.text);
+    if (explicitDelegation) {
       return {
         reason: "nested_coding_agent",
-        evidence: normalized.match(
-          /\b(spawn|delegate|delegating|launch|launching|hand off|handoff)\b[\s\S]{0,80}\b(coding agent|coding-agent|codex|subagent|another agent|child agent)\b[\s\S]{0,80}\b(task|work|issue|implement|handle|complete|finish)\b/,
-        )?.[0] ?? evidence.trim().slice(0, 120),
+        evidence: explicitDelegation,
       };
     }
 
-    if (/\bbrainstorming\b/.test(normalized)) {
-      return { reason: "meta_skill", evidence: "brainstorming" };
+    const metaSkillUsage = matchPositiveMetaSkillUsage(entry.text);
+    if (metaSkillUsage) {
+      return {
+        reason: "meta_skill",
+        evidence: metaSkillUsage,
+      };
     }
+  }
 
-    if (/\bwriting-plans\b/.test(normalized)) {
-      return { reason: "meta_skill", evidence: "writing-plans" };
-    }
+  const codingAgentIntent = assistantEntries
+    .map((entry) => matchCodingAgentIntent(entry.text))
+    .find((match): match is string => Boolean(match));
+  const nestedCommand = commandEntries
+    .map((entry) => matchNestedCommand(entry.text))
+    .find((match): match is string => Boolean(match));
+
+  if (codingAgentIntent && nestedCommand) {
+    return {
+      reason: "nested_coding_agent",
+      evidence: `${codingAgentIntent} | ${nestedCommand}`.slice(0, 160),
+    };
   }
 
   return null;
 }
 
-function collectWorkerTranscriptEvidence(messages: unknown[]): string[] {
-  const evidence: string[] = [];
+function collectWorkerTranscriptEvidence(messages: unknown[]): Array<{
+  role: "assistant" | "toolCall" | "toolResult";
+  kind: "text" | "thinking" | "command";
+  text: string;
+}> {
+  const evidence: Array<{
+    role: "assistant" | "toolCall" | "toolResult";
+    kind: "text" | "thinking" | "command";
+    text: string;
+  }> = [];
 
   for (const message of messages) {
     if (typeof message !== "object" || message == null) continue;
 
     const role = (message as { role?: unknown }).role;
-    if (role !== "assistant" && role !== "toolResult") continue;
+    if (role !== "assistant" && role !== "toolResult" && role !== "toolCall") continue;
 
-    collectContentEvidence((message as { content?: unknown }).content, evidence);
+    collectContentEvidence(role, (message as { content?: unknown }).content, evidence);
   }
 
   return evidence;
 }
 
-function collectContentEvidence(content: unknown, evidence: string[]): void {
+function collectContentEvidence(
+  role: "assistant" | "toolCall" | "toolResult",
+  content: unknown,
+  evidence: Array<{
+    role: "assistant" | "toolCall" | "toolResult";
+    kind: "text" | "thinking" | "command";
+    text: string;
+  }>,
+): void {
   if (typeof content === "string") {
-    evidence.push(content);
+    evidence.push({
+      role,
+      kind: role === "assistant" ? "text" : "command",
+      text: content,
+    });
     return;
   }
 
@@ -281,7 +304,11 @@ function collectContentEvidence(content: unknown, evidence: string[]): void {
 
   for (const block of content) {
     if (typeof block === "string") {
-      evidence.push(block);
+      evidence.push({
+        role,
+        kind: role === "assistant" ? "text" : "command",
+        text: block,
+      });
       continue;
     }
 
@@ -297,27 +324,88 @@ function collectContentEvidence(content: unknown, evidence: string[]): void {
     };
 
     if (typeof typedBlock.text === "string") {
-      evidence.push(typedBlock.text);
+      evidence.push({
+        role,
+        kind: role === "assistant" ? "text" : "command",
+        text: typedBlock.text,
+      });
     }
 
     if (typeof typedBlock.thinking === "string") {
-      evidence.push(typedBlock.thinking);
+      evidence.push({
+        role,
+        kind: "thinking",
+        text: typedBlock.thinking,
+      });
     }
 
     if (typedBlock.type === "toolCall") {
       if (typeof typedBlock.name === "string") {
-        evidence.push(typedBlock.name);
+        evidence.push({
+          role,
+          kind: "command",
+          text: typedBlock.name,
+        });
       }
       if (typeof typedBlock.arguments === "string") {
-        evidence.push(typedBlock.arguments);
+        evidence.push({
+          role,
+          kind: "command",
+          text: typedBlock.arguments,
+        });
       } else if (typedBlock.arguments != null) {
-        evidence.push(JSON.stringify(typedBlock.arguments));
+        evidence.push({
+          role,
+          kind: "command",
+          text: JSON.stringify(typedBlock.arguments),
+        });
       }
       if (typeof typedBlock.partialJson === "string") {
-        evidence.push(typedBlock.partialJson);
+        evidence.push({
+          role,
+          kind: "command",
+          text: typedBlock.partialJson,
+        });
       }
     }
   }
+}
+
+function matchPositiveExplicitDelegation(text: string): string | null {
+  const normalized = text.toLowerCase();
+  const match = normalized.match(
+    /\b(?:i(?:'ll| will)?|let me|going to|should|need to)\s+(?:spawn|delegate|delegating|launch|launching|hand off|handoff)\b[\s\S]{0,80}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b[\s\S]{0,80}\b(?:task|work|issue|implement|handle|complete|finish)\b/,
+  );
+
+  return match ? match[0] : null;
+}
+
+function matchPositiveMetaSkillUsage(text: string): string | null {
+  const normalized = text.toLowerCase();
+  const patterns = [
+    /\b(?:i(?:'ll| will)?|let me|going to|should|need to|can)\s+(?:use|load|invoke|follow|read)\s+brainstorming\b/,
+    /\b(?:i(?:'ll| will)?|let me|going to|should|need to|can)\s+(?:use|load|invoke|follow|read)\s+writing-plans\b/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (match) return match[0];
+  }
+
+  return null;
+}
+
+function matchCodingAgentIntent(text: string): string | null {
+  const normalized = text.toLowerCase();
+  const pattern = /\b(?:i(?:'ll| will)?|let me|going to|should|need to)\s+(?:use|load|invoke|follow|read)\b[\s\S]{0,40}\bcoding-agent\b/;
+  const match = normalized.match(pattern);
+  return match ? match[0] : null;
+}
+
+function matchNestedCommand(text: string): string | null {
+  const normalized = text.toLowerCase();
+  const match = normalized.match(/\bcodex exec --full-auto\b/);
+  return match ? match[0] : null;
 }
 
 export async function resolveWorkerSessionContext(

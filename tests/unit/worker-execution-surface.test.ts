@@ -224,6 +224,125 @@ describe("worker execution surface", () => {
     );
   });
 
+  it("does not flag negated meta-skill wording as an execution-contract violation", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "I will not use brainstorming. The worker prompt explicitly forbids it.",
+          },
+        ],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
+    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "demo",
+      7,
+      expect.objectContaining({
+        inconclusiveCompletionReason: "missing_result_line",
+      }),
+    );
+    expect(mockAuditLog).not.toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
+      }),
+    );
+  });
+
+  it("does not flag policy text that merely says coding-agent is forbidden", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "The prompt forbids coding-agent and writing-plans, so I stayed in this worktree.",
+          },
+        ],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
+    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "demo",
+      7,
+      expect.objectContaining({
+        inconclusiveCompletionReason: "missing_result_line",
+      }),
+    );
+  });
+
+  it("does not flag tool output that only quotes forbidden terms without action intent", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+      runtime: {
+        subagent: {
+          getSessionMessages: vi.fn().mockResolvedValue({
+            messages: [
+              {
+                role: "toolResult",
+                content: [
+                  {
+                    type: "text",
+                    text: "Do not use planning or meta-skills such as brainstorming, writing-plans, or coding-agent.",
+                  },
+                ],
+              },
+              {
+                role: "assistant",
+                content: [
+                  {
+                    type: "text",
+                    text: "I followed that instruction and edited the code directly.",
+                  },
+                ],
+              },
+            ],
+          }),
+        },
+      } as never,
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
+    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "demo",
+      7,
+      expect.objectContaining({
+        inconclusiveCompletionReason: "missing_result_line",
+      }),
+    );
+    expect(mockAuditLog).not.toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
+      }),
+    );
+  });
+
   it("leaves ordinary direct-execution text on the existing missing-result path", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 
