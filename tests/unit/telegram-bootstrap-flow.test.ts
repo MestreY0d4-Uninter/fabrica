@@ -888,4 +888,103 @@ describe("telegram bootstrap clarification flow", () => {
     expect(session.error).toContain("register step failed");
     expect(String(sendMessageTelegram.mock.calls.at(-1)?.[1] ?? "")).toContain("Nao consegui registrar o projeto automaticamente");
   });
+
+  it("stops the successful pipeline path when ownership changes before project_registered is persisted", async () => {
+    await fs.mkdir(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+      JSON.stringify({
+        id: "tgdm-owner-loss",
+        conversationId: CONVERSATION_ID,
+        sourceChannel: "telegram",
+        sourceRoute: { channel: "telegram", channelId: CONVERSATION_ID },
+        requestHash: "req-hash",
+        requestFingerprint: "req-hash",
+        rawIdea: "Build a simple Python CLI for todo summary",
+        projectName: "todo-summary-tool",
+        stackHint: "python-cli",
+        projectSlug: "todo-summary-tool",
+        status: "bootstrapping",
+        bootstrapStep: "awaiting_pipeline",
+        attemptId: "attempt-1",
+        attemptSeq: 1,
+        ackSentAt: "2026-04-01T00:00:01.000Z",
+        language: "en",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:01.000Z",
+        suppressUntil: new Date(Date.now() + 60_000).toISOString(),
+      }, null, 2) + "\n",
+      "utf-8",
+    );
+
+    mockRunPipeline.mockImplementationOnce(async () => {
+      await fs.writeFile(
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        JSON.stringify({
+          id: "tgdm-owner-loss-new",
+          conversationId: CONVERSATION_ID,
+          sourceChannel: "telegram",
+          sourceRoute: { channel: "telegram", channelId: CONVERSATION_ID },
+          requestHash: "req-hash-new",
+          requestFingerprint: "req-hash-new",
+          rawIdea: "Build the replacement summary service",
+          projectName: "replacement-summary-service",
+          stackHint: "python-cli",
+          projectSlug: "replacement-summary-service",
+          status: "bootstrapping",
+          bootstrapStep: "awaiting_pipeline",
+          attemptId: "attempt-2",
+          attemptSeq: 2,
+          ackSentAt: "2026-04-01T00:00:10.000Z",
+          language: "en",
+          createdAt: "2026-04-01T00:00:09.000Z",
+          updatedAt: "2026-04-01T00:00:10.000Z",
+          suppressUntil: new Date(Date.now() + 60_000).toISOString(),
+        }, null, 2) + "\n",
+        "utf-8",
+      );
+
+      return {
+        success: true,
+        payload: {
+          metadata: {
+            channel_id: "-1003709213169",
+            message_thread_id: 977,
+            project_slug: "todo-summary-tool",
+          },
+        },
+      };
+    });
+
+    await _testContinueBootstrap(
+      ctx,
+      CONVERSATION_ID,
+      workspaceDir,
+      {
+        rawIdea: "Build a simple Python CLI for todo summary",
+        projectName: "todo-summary-tool",
+        stackHint: "python-cli",
+      },
+      {
+        channel: "telegram",
+        channelId: CONVERSATION_ID,
+      },
+    );
+
+    expect(sendMessageTelegram).not.toHaveBeenCalled();
+    expect(mockProjectTick).not.toHaveBeenCalled();
+
+    const persisted = JSON.parse(
+      await fs.readFile(
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        "utf-8",
+      ),
+    );
+    expect(persisted.attemptId).toBe("attempt-2");
+    expect(persisted.projectName).toBe("replacement-summary-service");
+    expect(persisted.projectRegisteredAt ?? null).toBeNull();
+    expect(persisted.messageThreadId ?? null).toBeNull();
+    expect(persisted.projectChannelId ?? null).toBeNull();
+    expect(persisted.status).toBe("bootstrapping");
+  });
 });

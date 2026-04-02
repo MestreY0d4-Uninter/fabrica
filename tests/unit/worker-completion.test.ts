@@ -222,6 +222,41 @@ describe("worker-completion", () => {
     );
   });
 
+  it("falls back to session history when agent_end payload is missing the final worker result", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const provider = {
+      getIssue: vi.fn().mockResolvedValue({ labels: ["Doing"] }),
+      transitionLabel: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+      runtime: {
+        subagent: {
+          getSessionMessages: vi.fn().mockResolvedValue({
+            messages: [
+              { role: "assistant", content: [{ type: "text", text: "Work result: DONE" }] },
+            ],
+          }),
+        },
+      } as never,
+      providerOverride: provider as never,
+      validateDeveloperDone: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    expect(result?.applied).toBe(true);
+    expect(mockExecuteCompletion).toHaveBeenCalledOnce();
+    expect(mockAuditLog).not.toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_result_skipped",
+      expect.objectContaining({ reason: "missing_result_line" }),
+    );
+  });
+
   it("applies tester FAIL_INFRA without routing through generic pipeline completion", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 

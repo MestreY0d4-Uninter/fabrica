@@ -19,6 +19,7 @@ import { wakeHeartbeat } from "../services/heartbeat/wake-bridge.js";
 import { resolveWorkspaceDir } from "./attachment-hook.js";
 import { bindDispatchRunIdBySessionKey } from "../projects/index.js";
 import { handleWorkerAgentEnd } from "../services/worker-completion.js";
+import { handleReviewerAgentEnd } from "../services/reviewer-completion.js";
 
 /** Tools whose completion should immediately trigger heartbeat triage. */
 const COMPLETION_TOOLS = new Set(["work_finish"]);
@@ -69,15 +70,25 @@ export function registerReactiveDispatchHooks(
     if (!parsed) return;
     const lifecycleRunId = (eventCtx as { runId?: string }).runId ?? (event as { runId?: string }).runId;
     if (workspaceDir) {
-      handleWorkerAgentEnd({
-        sessionKey,
-        runId: lifecycleRunId,
-        messages: event.messages,
-        workspaceDir,
-        runCommand: ctx.runCommand,
-        runtime: ctx.runtime as never,
-        pluginConfig: ctx.pluginConfig,
-      }).catch(() => {});
+      if (parsed.role === "reviewer") {
+        handleReviewerAgentEnd({
+          sessionKey,
+          messages: event.messages,
+          runtime: ctx.runtime as never,
+          workspaceDir,
+          runCommand: ctx.runCommand,
+        }).catch(() => {});
+      } else {
+        handleWorkerAgentEnd({
+          sessionKey,
+          runId: lifecycleRunId,
+          messages: event.messages,
+          workspaceDir,
+          runCommand: ctx.runCommand,
+          runtime: ctx.runtime as never,
+          pluginConfig: ctx.pluginConfig,
+        }).catch(() => {});
+      }
     }
     ctx.runtime?.system.requestHeartbeatNow({ reason: "agent_end", coalesceMs: 2000 });
     wakeHeartbeat("agent_end").catch(() => {});

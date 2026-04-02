@@ -22,6 +22,7 @@ type WorkerCompletionOutcome = { applied: boolean; reason?: string };
 
 type RuntimeLike = {
   system?: { requestHeartbeatNow?: (opts: { reason: string; coalesceMs?: number }) => void };
+  subagent?: { getSessionMessages?: (opts: { sessionKey: string }) => Promise<unknown> };
 };
 
 type DeveloperDoneValidationResult = {
@@ -61,6 +62,38 @@ const RESULT_MAP: Record<Exclude<WorkerRole, "reviewer">, Record<string, string>
     BLOCKED: "blocked",
   },
 };
+
+async function resolveWorkerResultFromRuntime(
+  role: Exclude<WorkerRole, "reviewer">,
+  sessionKey: string,
+  messages: unknown[] | undefined,
+  runtime?: RuntimeLike,
+): Promise<WorkerResult | null> {
+  const eventResult = extractWorkerResultFromMessages(role, messages ?? []);
+  if (eventResult) {
+    return eventResult;
+  }
+
+  try {
+    const messagesResult = await runtime?.subagent?.getSessionMessages?.({ sessionKey });
+    if (!messagesResult) return null;
+
+    const sessionMessages: unknown[] = Array.isArray(messagesResult)
+      ? messagesResult
+      : (Array.isArray((messagesResult as { messages?: unknown[] }).messages)
+        ? (messagesResult as { messages: unknown[] }).messages
+        : []);
+    const historyResult = extractWorkerResultFromMessages(role, sessionMessages);
+    if (!historyResult) return null;
+
+    return {
+      ...historyResult,
+      source: "session_history",
+    };
+  } catch {
+    return null;
+  }
+}
 
 function asWorkerRole(role: string): WorkerRole | null {
   return role === "developer" || role === "tester" || role === "architect" || role === "reviewer"
@@ -368,7 +401,7 @@ export async function handleWorkerAgentEnd(opts: {
   const role = parsed ? asWorkerRole(parsed.role) : null;
   if (!parsed || !role || role === "reviewer") return null;
 
-  const result = extractWorkerResultFromMessages(role, opts.messages ?? []);
+  const result = await resolveWorkerResultFromRuntime(role, opts.sessionKey, opts.messages, opts.runtime);
   if (!result) {
     await auditLog(opts.workspaceDir, "worker_result_skipped", {
       sessionKey: opts.sessionKey,

@@ -2,9 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockRequestHeartbeatNow = vi.fn();
 const mockHandleWorkerAgentEnd = vi.fn();
+const mockHandleReviewerAgentEnd = vi.fn();
 
 vi.mock("../../lib/services/worker-completion.js", () => ({
   handleWorkerAgentEnd: mockHandleWorkerAgentEnd,
+}));
+
+vi.mock("../../lib/services/reviewer-completion.js", () => ({
+  handleReviewerAgentEnd: mockHandleReviewerAgentEnd,
 }));
 
 describe("reactive-dispatch-hook", () => {
@@ -28,6 +33,7 @@ describe("reactive-dispatch-hook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockHandleWorkerAgentEnd.mockResolvedValue({ applied: true });
+    mockHandleReviewerAgentEnd.mockResolvedValue("approve");
   });
 
   describe("after_tool_call", () => {
@@ -95,7 +101,7 @@ describe("reactive-dispatch-hook", () => {
   });
 
   describe("agent_end", () => {
-    it("wakes heartbeat for reviewer sessions even though worker completion resolves as a no-op", async () => {
+    it("routes reviewer sessions through reviewer completion before waking heartbeat", async () => {
       const { registerReactiveDispatchHooks } = await import("../../lib/dispatch/reactive-dispatch-hook.js");
       const h = captureHandlers(registerReactiveDispatchHooks);
 
@@ -111,7 +117,12 @@ describe("reactive-dispatch-hook", () => {
       expect(mockRequestHeartbeatNow).toHaveBeenCalledWith(
         expect.objectContaining({ reason: "agent_end" }),
       );
-      expect(mockHandleWorkerAgentEnd).toHaveBeenCalledOnce();
+      expect(mockHandleReviewerAgentEnd).toHaveBeenCalledOnce();
+      expect(mockHandleReviewerAgentEnd.mock.calls[0]?.[0]).toMatchObject({
+        sessionKey: "agent:main:subagent:my-project-reviewer-junior-bob",
+        messages: [{ role: "assistant", content: [{ type: "text", text: "Review result: REJECT" }] }],
+      });
+      expect(mockHandleWorkerAgentEnd).not.toHaveBeenCalled();
     });
 
     it("applies worker completion before waking heartbeat for a Fabrica worker session", async () => {

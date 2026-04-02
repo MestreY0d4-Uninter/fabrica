@@ -806,6 +806,25 @@ async function persistDispatchProgress(
   }) ?? session;
 }
 
+async function refreshOwnedBootstrapAttempt(
+  workspaceDir: string,
+  owner: BootstrapAttemptOwner,
+  fallback: TelegramBootstrapSession,
+): Promise<{ session: TelegramBootstrapSession; owned: boolean }> {
+  const currentSession = await readOwnedBootstrapSession(workspaceDir, owner);
+  if (!ownsBootstrapAttempt(currentSession, owner)) {
+    return {
+      session: (currentSession ?? fallback) as TelegramBootstrapSession,
+      owned: false,
+    };
+  }
+
+  return {
+    session: currentSession as TelegramBootstrapSession,
+    owned: true,
+  };
+}
+
 async function runBootstrapHandoff(
   ctx: PluginContext,
   workspaceDir: string,
@@ -886,6 +905,12 @@ async function completeRegisteredBootstrap(
   }
   session = currentSession as TelegramBootstrapSession;
 
+  let ownership = await refreshOwnedBootstrapAttempt(workspaceDir, owner, session);
+  if (!ownership.owned) {
+    return ownership.session;
+  }
+  session = ownership.session;
+
   const projectRoute = buildProjectRoute(session);
   const projectChannelId = projectRoute?.channelId;
   const messageThreadId = projectRoute?.messageThreadId;
@@ -936,7 +961,16 @@ async function completeRegisteredBootstrap(
       projectTickedAt: session.projectTickedAt ?? null,
       completionAckSentAt: session.completionAckSentAt ?? null,
     });
+    if (!ownsBootstrapAttempt(session, owner)) {
+      return session;
+    }
   }
+
+  ownership = await refreshOwnedBootstrapAttempt(workspaceDir, owner, session);
+  if (!ownership.owned) {
+    return ownership.session;
+  }
+  session = ownership.session;
 
   const agents = discoverAgents(ctx.config);
   const primaryAgent = agents[0];
@@ -964,7 +998,16 @@ async function completeRegisteredBootstrap(
       projectTickedAt: new Date().toISOString(),
       completionAckSentAt: session.completionAckSentAt ?? null,
     });
+    if (!ownsBootstrapAttempt(session, owner)) {
+      return session;
+    }
   }
+
+  ownership = await refreshOwnedBootstrapAttempt(workspaceDir, owner, session);
+  if (!ownership.owned) {
+    return ownership.session;
+  }
+  session = ownership.session;
 
   if (!session.completionAckSentAt) {
     await sendTelegramText(
@@ -981,6 +1024,9 @@ async function completeRegisteredBootstrap(
       projectTickedAt: session.projectTickedAt ?? null,
       completionAckSentAt: new Date().toISOString(),
     });
+    if (!ownsBootstrapAttempt(session, owner)) {
+      return session;
+    }
   }
 
   const completedSession = await persistOwnedBootstrapCheckpoint(workspaceDir, owner, {
@@ -1420,7 +1466,7 @@ async function continueBootstrap(
     const projectRegistered = result.payload?.metadata?.project_registered === true;
     if (orphanedRepoArtifact && !projectRegistered) {
       if (currentOwner) {
-        await persistOwnedBootstrapCheckpoint(workspaceDir, currentOwner, {
+        const persistedSession = await persistOwnedBootstrapCheckpoint(workspaceDir, currentOwner, {
           ...incomingRequest,
           sourceRoute,
           status: "orphaned_repo",
@@ -1429,6 +1475,9 @@ async function continueBootstrap(
           error: result.error ?? "pipeline_failed_after_repo_creation",
           ackSentAt: currentSession?.ackSentAt ?? null,
         });
+        if (persistedSession && !ownsBootstrapAttempt(persistedSession, currentOwner)) {
+          return;
+        }
       } else {
         await upsertTelegramBootstrapSession(workspaceDir, {
           conversationId,
@@ -1448,7 +1497,7 @@ async function continueBootstrap(
       return;
     }
     if (currentOwner) {
-      await persistOwnedBootstrapCheckpoint(workspaceDir, currentOwner, {
+      const persistedSession = await persistOwnedBootstrapCheckpoint(workspaceDir, currentOwner, {
         ...incomingRequest,
         sourceRoute,
         status: "failed",
@@ -1457,6 +1506,9 @@ async function continueBootstrap(
         error: result.error ?? "pipeline_failed",
         ackSentAt: currentSession?.ackSentAt ?? null,
       });
+      if (persistedSession && !ownsBootstrapAttempt(persistedSession, currentOwner)) {
+        return;
+      }
     } else {
       await upsertTelegramBootstrapSession(workspaceDir, {
         conversationId,
@@ -1523,6 +1575,9 @@ async function continueBootstrap(
     if (!registeredSession) {
       return;
     }
+    if (currentOwner && !ownsBootstrapAttempt(registeredSession, currentOwner)) {
+      return;
+    }
     await completeRegisteredBootstrap(ctx, workspaceDir, {
       ...registeredSession,
       projectName: resolvedProjectName,
@@ -1535,7 +1590,7 @@ async function continueBootstrap(
 
   logBootstrapWarning(ctx, `[telegram-bootstrap] pipeline completed without a project topic for "${resolvedProjectName}"`);
   if (currentOwner) {
-    await persistOwnedBootstrapCheckpoint(workspaceDir, currentOwner, {
+    const persistedSession = await persistOwnedBootstrapCheckpoint(workspaceDir, currentOwner, {
       ...incomingRequest,
       sourceRoute,
       status: "failed",
@@ -1544,6 +1599,9 @@ async function continueBootstrap(
       error: "missing_telegram_topic",
       ackSentAt: currentSession?.ackSentAt ?? null,
     });
+    if (persistedSession && !ownsBootstrapAttempt(persistedSession, currentOwner)) {
+      return;
+    }
   } else {
     await upsertTelegramBootstrapSession(workspaceDir, {
       conversationId,
