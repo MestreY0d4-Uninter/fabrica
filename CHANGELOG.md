@@ -1,11 +1,14 @@
 # Changelog
 
-## 0.2.14 - 2026-04-01
+## 0.2.14 - 2026-04-02
 
-- Made `agent_end` authoritative for reviewer completion as well, so reviewer sessions no longer depend on delayed `subagent_ended` or reviewer polling to advance the FSM.
-- Added session-history fallback for developer/tester/architect lifecycle completion when `agent_end` arrives without the final assistant result line.
-- Hardened Telegram bootstrap ownership so stale attempts stop before stamping `project_registered` data or replaying kickoff, `projectTick`, or completion DM side effects onto a newer attempt.
-- Added regression coverage for reviewer `agent_end` routing, worker lifecycle session-history fallback, and successful bootstrap owner-loss races.
+- Added a stack-aware environment gate so developer and tester pickup only start after project environments are provisioned and marked ready.
+- Hardened Python stack bootstrap around durable environment state, retry scheduling, and stale provisioning recovery without `sudo`.
+- Reworked worker recovery so observable activity without a canonical result enters bounded completion recovery instead of immediately corrupting dispatch health.
+- Made heartbeat distinguish accepted-but-idle dispatches, inconclusive completion, terminal sessions, and true dead sessions with cycle-aware ownership checks.
+- Added explicit timeline events for reviewer outcomes and worker recovery exhaustion, with cycle-aware dedupe and corrected destination-state messaging.
+- Preserved reviewer notification routing through plugin notification config instead of bypassing runtime settings.
+- Extended regression coverage for environment provisioning, gateway session transcript activity, heartbeat recovery, reviewer notifications, and end-to-end hot-path orchestration.
 
 ## 0.2.13 - 2026-03-31
 

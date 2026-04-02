@@ -5,7 +5,7 @@
 
 > Autonomous software engineering pipeline for OpenClaw.
 
-Fabrica turns a natural-language project description into a fully executed engineering workflow: intake, specification, issue decomposition, development, code review, testing, and merge — with zero manual intervention. It orchestrates AI agents as specialized workers (developers, reviewers, testers) through a deterministic finite state machine.
+Fabrica turns a natural-language project description into a fully executed engineering workflow: intake, specification, issue decomposition, development, code review, testing, and merge. It orchestrates AI agents as specialized workers (developers, reviewers, testers) through a deterministic finite state machine, with repair-oriented recovery when runtime signals or stack environments are incomplete.
 
 ## How it works
 
@@ -34,7 +34,7 @@ Fabrica turns a natural-language project description into a fully executed engin
        done
 ```
 
-The heartbeat ticks every 60 seconds. On each tick, Fabrica alternates between a **repair** pass (fixes stale states) and a **triage** pass (advances work that is ready to move). No human intervention is required after the initial project description.
+The heartbeat ticks every 60 seconds. On each tick, Fabrica alternates between a **repair** pass (fixes stale states, retries incomplete completion signals, and reconciles broken runtime ownership) and a **triage** pass (advances work that is ready to move). No human intervention is required after the initial project description.
 
 ## Features
 
@@ -43,9 +43,12 @@ The heartbeat ticks every 60 seconds. On each tick, Fabrica alternates between a
 - **Pluggable AI workers** — each role (developer, reviewer, tester, architect) maps to a configurable model and level
 - **Polling-first GitHub integration** — uses `gh` CLI for all GitHub operations; no webhook infrastructure or GitHub App required
 - **Telegram bootstrap** (optional) — describe a new project via DM; Fabrica asks clarifying questions and provisions the repo automatically
+- **Stack-aware environment gate** — developer and tester dispatch only start after the project stack environment is provisioned and marked ready
+- **Lifecycle-driven worker completion** — reviewer, developer, tester, and architect completion resolve from agent lifecycle plus canonical result lines, not from fragile tool availability assumptions
+- **Detailed event timeline** — project topics receive explicit worker start, completion, review, rejection, and recovery events with cycle-aware dedupe
 - **Programmatic genesis** — trigger the full pipeline from a CLI script without Telegram
 - **Observability built-in** — audit log, metrics subcommand, heartbeat health checks, and OpenTelemetry tracing
-- **Safe-by-default** — conflict detection, mutex-guarded heartbeat, session validation, and label integrity guards
+- **Safe-by-default** — conflict detection, mutex-guarded heartbeat, stack bootstrap retries, session validation, completion recovery, and label integrity guards
 
 ## Requirements
 
@@ -54,6 +57,7 @@ The heartbeat ticks every 60 seconds. On each tick, Fabrica alternates between a
 - Node.js 20+ (for local development or programmatic genesis)
 - `gh` CLI authenticated to GitHub (required for issue and PR operations)
 - A GitHub organization or personal account where repositories will be created
+- For Python stacks, Fabrica provisions `uv` and project-local environments itself without `sudo`
 - (Optional) Telegram bot token and group chat IDs for DM bootstrap and notifications
 
 ## Installation
@@ -116,6 +120,13 @@ openclaw fabrica setup --workspace /path/to/workspace --new-agent fabrica
 Use `openclaw fabrica setup --agent <id>` if you already have an agent. GitHub,
 Telegram, and webhook behavior are separate operational concerns, not
 installation dependencies.
+
+**Environment provisioning note**:
+
+Developer and tester pickup now pass through a stack environment gate. For
+supported stacks such as `python-cli`, Fabrica provisions the required toolchain
+and project-local environment before dispatching workers, instead of discovering
+missing dependencies inside a live worker run.
 
 **4. Restart the gateway**:
 
@@ -243,6 +254,11 @@ Telegram enables DM-based project bootstrap, per-project forum topics, and a sep
 ```
 
 With Telegram enabled, send a project idea to the bot in a DM. Fabrica will ask clarifying questions, provision the GitHub repo, create a dedicated forum topic for the project, and keep ops-only notifications on the separate `opsChatId` route.
+
+Project topics are event-driven timelines. Fabrica emits explicit messages for
+worker start, worker completion, review queueing, reviewer reject/approve, and
+operational recovery events, with cycle-aware dedupe so late deliveries from an
+older dispatch do not masquerade as current work.
 
 ## Programmatic genesis
 
