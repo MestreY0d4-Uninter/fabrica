@@ -140,7 +140,7 @@ export async function isValidBinary(filePath: string): Promise<boolean> {
   }
 }
 
-function familyForStack(stack: CanonicalStack): TestEnvironmentFamily {
+export function familyForStack(stack: CanonicalStack): TestEnvironmentFamily {
   if (NODE_STACKS.has(stack)) return "node";
   if (PYTHON_STACKS.has(stack)) return "python";
   if (stack === "go") return "go";

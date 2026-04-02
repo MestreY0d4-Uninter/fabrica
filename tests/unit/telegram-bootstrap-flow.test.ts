@@ -557,6 +557,7 @@ describe("telegram bootstrap clarification flow", () => {
     expect(mockRunPipeline).toHaveBeenCalledTimes(1);
     const pipelinePayload = mockRunPipeline.mock.calls[0]?.[0];
     expect(pipelinePayload.metadata.project_name).toBeTruthy();
+    expect(pipelinePayload.metadata.stack_hint).toBe("python-cli");
     expect(String(pipelinePayload.metadata.project_name)).toMatch(/^project-\d+$/);
   });
 

@@ -2,6 +2,8 @@
  * projects/types.ts — Type definitions for the projects module.
  */
 
+import type { CanonicalStack } from "../intake/types.js";
+
 // ---------------------------------------------------------------------------
 // Per-level worker model — each level gets its own slot array
 // ---------------------------------------------------------------------------
@@ -73,6 +75,17 @@ export type IssueRuntimeState = {
   lastDiagnosticResult?: string | null;
 };
 
+export type ProjectEnvironmentStatus = "pending" | "provisioning" | "ready" | "failed";
+
+export type ProjectEnvironmentState = {
+  status: ProjectEnvironmentStatus;
+  stack: CanonicalStack | null;
+  contractVersion: string | null;
+  lastProvisionedAt?: string | null;
+  lastProvisionError?: string | null;
+  nextProvisionRetryAt?: string | null;
+};
+
 /**
  * Channel registration: maps a channelId to messaging endpoint with event filters.
  */
@@ -107,6 +120,10 @@ export type Project = {
   workers: Record<string, RoleWorkerState>;
   /** Runtime state tracked per issue to avoid rediscovering the "current PR" heuristically. */
   issueRuntime?: Record<string, IssueRuntimeState>;
+  /** Canonical stack selected for this project, when known. */
+  stack?: CanonicalStack | null;
+  /** Durable environment provisioning state used for contract-based bootstrap and recovery. */
+  environment?: ProjectEnvironmentState | null;
 };
 
 /**

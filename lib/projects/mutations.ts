@@ -1,7 +1,14 @@
 /**
  * projects/mutations.ts — State mutations for project worker slots.
  */
-import type { SlotState, RoleWorkerState, Project, ProjectsData, IssueRuntimeState } from "./types.js";
+import type {
+  SlotState,
+  RoleWorkerState,
+  Project,
+  ProjectsData,
+  IssueRuntimeState,
+  ProjectEnvironmentState,
+} from "./types.js";
 import { resolveProjectSlug, withProjectsMutation } from "./io.js";
 import { emptySlot, findFreeSlot, findSlotByIssue } from "./slots.js";
 
@@ -191,6 +198,32 @@ export async function updateIssueRuntime(
     const key = String(issueId);
     project.issueRuntime[key] = {
       ...(project.issueRuntime[key] ?? {}),
+      ...updates,
+    };
+  });
+  return data;
+}
+
+export async function updateProjectEnvironment(
+  workspaceDir: string,
+  slugOrChannelId: string,
+  updates: Partial<ProjectEnvironmentState>,
+): Promise<ProjectsData> {
+  const { data } = await withProjectsMutation(workspaceDir, (data) => {
+    const slug = resolveProjectSlug(data, slugOrChannelId);
+    if (!slug) {
+      throw new Error(`Project not found for slug or channelId: ${slugOrChannelId}`);
+    }
+
+    const project = data.projects[slug]!;
+    project.environment = {
+      status: "pending",
+      stack: project.environment?.stack ?? null,
+      contractVersion: project.environment?.contractVersion ?? null,
+      lastProvisionedAt: project.environment?.lastProvisionedAt ?? null,
+      lastProvisionError: project.environment?.lastProvisionError ?? null,
+      nextProvisionRetryAt: project.environment?.nextProvisionRetryAt ?? null,
+      ...project.environment,
       ...updates,
     };
   });

@@ -8,6 +8,7 @@ import { resolveWorkspaceDir } from "./attachment-hook.js";
 import { hasGenesisAgent } from "../setup/agent.js";
 import { runPipeline, type GenesisPayload, type StepContext } from "../intake/index.js";
 import { createProvider } from "../providers/index.js";
+import { normalizeStackHint } from "../intake/lib/stack-detection.js";
 import { readFabricaTelegramConfig } from "../telegram/config.js";
 import { readProjects } from "../projects/index.js";
 import { discoverAgents } from "../services/heartbeat/agent-discovery.js";
@@ -139,7 +140,8 @@ function parseBootstrapRequest(text: string): BootstrapRequest {
   const rawIdea = parseIdeaBlock(text) ?? text.trim();
   const projectName = parseField(text, ["project name", "nome do projeto", "repo name", "repository name"]);
   const repoPath = parseField(text, ["local repository path", "repo path", "caminho local", "local path"]);
-  const stackHint = parseField(text, ["stack", "framework", "linguagem"]) ?? detectStackHint(text);
+  const explicitStack = parseField(text, ["stack", "framework", "linguagem"]);
+  const stackHint = (explicitStack ? normalizeStackHint(explicitStack) : "") || detectStackHint(text);
   return {
     rawIdea,
     projectName,
@@ -291,7 +293,8 @@ function parseClarificationResponse(text: string, session: TelegramBootstrapSess
   // Try structured field format first (e.g. "Stack: python-cli")
   const stackField = parseField(text, ["stack", "framework", "linguagem", "language"]);
   if (stackField) {
-    return { recognized: true, stackHint: detectStackHint(stackField) ?? stackField };
+    const normalizedStack = normalizeStackHint(stackField) || detectStackHint(stackField) || stackField;
+    return { recognized: true, stackHint: normalizedStack };
   }
   // Try direct stack hint detection on the whole message
   const detectedStack = detectStackHint(text);

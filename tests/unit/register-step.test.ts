@@ -124,6 +124,7 @@ describe("registerStep", () => {
         source: "telegram-dm-bootstrap",
         factory_change: false,
         channel_id: "6951571380",
+        stack_hint: "python-cli",
       },
       scaffold: {
         created: true,
@@ -180,6 +181,7 @@ describe("registerStep", () => {
         channelId: "6951571380",
         messageThreadId: undefined,
       },
+      stack: "python-cli",
     }));
     expect(result.metadata.channel_id).toBe("-1003709213169");
     expect(result.metadata.message_thread_id).toBe(501);

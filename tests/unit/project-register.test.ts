@@ -70,13 +70,18 @@ describe("registerProject", () => {
         },
         baseBranch: "main",
         createProjectTopic: true,
+        stack: "python-cli",
       });
 
       const workflowPath = path.join(workspaceDir, DATA_DIR, "projects", "demo-autonomous", "workflow.yaml");
       const projectsPath = path.join(workspaceDir, DATA_DIR, "projects.json");
       const workflowContent = await fs.readFile(workflowPath, "utf-8");
       const projects = JSON.parse(await fs.readFile(projectsPath, "utf-8")) as {
-        projects: Record<string, { channels: Array<{ channelId: string; messageThreadId?: number }> }>;
+        projects: Record<string, {
+          channels: Array<{ channelId: string; messageThreadId?: number }>;
+          stack?: string | null;
+          environment?: unknown;
+        }>;
       };
 
       expect(result.channelId).toBe("-1003709213169");
@@ -88,6 +93,8 @@ describe("registerProject", () => {
         channelId: "-1003709213169",
         messageThreadId: 602,
       }));
+      expect(projects.projects["demo-autonomous"]?.stack).toBe("python-cli");
+      expect(projects.projects["demo-autonomous"]?.environment).toBeNull();
     } finally {
       await fs.rm(workspaceDir, { recursive: true, force: true });
     }

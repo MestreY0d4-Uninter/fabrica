@@ -30,7 +30,7 @@ import { createProjectForumTopic } from "../../telegram/topic-service.js";
 import { readFabricaTelegramConfig } from "../../telegram/config.js";
 import { buildRouteRef, routeMatchesChannel, type RouteRef } from "../../projects/index.js";
 import { buildForumTopicArtifactId } from "../../intake/lib/artifact-ids.js";
-import type { PipelineArtifact } from "../../intake/types.js";
+import type { CanonicalStack, PipelineArtifact } from "../../intake/types.js";
 
 /**
  * Scaffold project directory with prompts/ folder and a README explaining overrides.
@@ -216,6 +216,7 @@ export type ProjectRegisterParams = {
   deployBranch?: string;
   deployUrl?: string;
   createProjectTopic?: boolean;
+  stack?: CanonicalStack | null;
   projectWorkflowConfig?: {
     workflow?: {
       reviewPolicy?: string;
@@ -280,6 +281,7 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
     deployBranch = baseBranch,
     deployUrl = "",
     createProjectTopic = false,
+    stack = null,
     projectWorkflowConfig,
   } = params;
 
@@ -424,6 +426,8 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
       messageThreadId: targetRoute.messageThreadId ?? undefined,
     });
     if (repoRemote && !existing.repoRemote) existing.repoRemote = repoRemote;
+    existing.stack = stack ?? existing.stack ?? null;
+    existing.environment = existing.environment ?? null;
     } else {
     const workers: Record<string, import("../../projects/index.js").RoleWorkerState> = {};
     for (const role of getAllRoleIds()) {
@@ -450,6 +454,8 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
       }],
       provider: providerType,
       workers,
+      stack,
+      environment: null,
     };
     }
 
@@ -621,6 +627,10 @@ export function createProjectRegisterTool(ctx: PluginContext) {
           type: "string",
           description: "Deployment URL for the project",
         },
+        stack: {
+          type: "string",
+          description: "Optional canonical stack for durable environment contract resolution.",
+        },
       },
     },
 
@@ -649,6 +659,7 @@ export function createProjectRegisterTool(ctx: PluginContext) {
         baseBranch: params.baseBranch as string,
         deployBranch: params.deployBranch as string | undefined,
         deployUrl: params.deployUrl as string | undefined,
+        stack: (params.stack as CanonicalStack | null | undefined) ?? null,
       });
 
       return jsonResult(result);

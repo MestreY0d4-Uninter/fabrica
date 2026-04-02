@@ -6,6 +6,7 @@
  */
 import type { PipelineStep, GenesisPayload } from "../types.js";
 import { log as auditLog } from "../../audit.js";
+import { normalizeStackHint } from "../lib/stack-detection.js";
 import { adaptStepRunCommand, registerProject } from "../../tools/admin/project-register.js";
 import type { FabricaConfig } from "../../config/types.js";
 
@@ -37,6 +38,9 @@ export const registerStep: PipelineStep = {
     const resolvedRepo = repo ?? fail("Missing project name or repository target for registration");
     const resolvedChannelId = channelId ?? fail("Missing channel binding for project registration");
     const createProjectTopic = payload.metadata.source === "telegram-dm-bootstrap";
+    const resolvedStack = payload.metadata.stack_hint
+      ? normalizeStackHint(payload.metadata.stack_hint) || null
+      : null;
 
     try {
       const programmaticSources = ["telegram-dm-bootstrap", "genesis-trigger-script"];
@@ -60,6 +64,7 @@ export const registerStep: PipelineStep = {
         baseBranch,
         deployBranch: baseBranch,
         createProjectTopic,
+        stack: resolvedStack,
         projectWorkflowConfig,
       });
       if (
