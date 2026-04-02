@@ -40,9 +40,21 @@ export type GatewaySession = {
   abortedLastRun?: boolean;
   totalTokens?: number;
   contextTokens?: number;
+  sessionFile?: string | null;
 };
 
 export type SessionLookup = Map<string, GatewaySession>;
+
+type GatewaySessionRecord = {
+  updatedAt?: number;
+  percentUsed?: number;
+  status?: string;
+  endedAt?: number;
+  abortedLastRun?: boolean;
+  totalTokens?: number;
+  contextTokens?: number;
+  sessionFile?: string | null;
+};
 
 /**
  * Query gateway status and build a lookup map of active sessions.
@@ -76,15 +88,7 @@ export async function fetchGatewaySessions(gatewayTimeoutMs = 15_000, runCommand
     for (const filePath of sessionPaths) {
       try {
         const raw = await fs.readFile(filePath, "utf-8");
-        const fileData = JSON.parse(raw) as Record<string, {
-          updatedAt?: number;
-          percentUsed?: number;
-          status?: string;
-          endedAt?: number;
-          abortedLastRun?: boolean;
-          totalTokens?: number;
-          contextTokens?: number;
-        }>;
+        const fileData = JSON.parse(raw) as Record<string, GatewaySessionRecord>;
         for (const [key, entry] of Object.entries(fileData)) {
           if (key && !lookup.has(key)) {
             lookup.set(key, {
@@ -99,6 +103,7 @@ export async function fetchGatewaySessions(gatewayTimeoutMs = 15_000, runCommand
               abortedLastRun: entry.abortedLastRun,
               totalTokens: entry.totalTokens,
               contextTokens: entry.contextTokens,
+              sessionFile: normalizeSessionFile(entry.sessionFile),
             });
           }
         }
@@ -118,6 +123,7 @@ export async function fetchGatewaySessions(gatewayTimeoutMs = 15_000, runCommand
             status: normalizeSessionStatus(session.status),
             endedAt: normalizeUpdatedAt(session.endedAt),
             updatedAt: normalizeUpdatedAt(session.updatedAt),
+            sessionFile: normalizeSessionFile(session.sessionFile),
           });
         }
       }
@@ -161,15 +167,7 @@ async function readSessionsFromDisk(): Promise<SessionLookup | null> {
     const sessionFile = `${agentsDir}/${agentId}/sessions/sessions.json`;
     try {
       const raw = await fs.readFile(sessionFile, "utf-8");
-      const fileData = JSON.parse(raw) as Record<string, {
-        updatedAt?: number;
-        percentUsed?: number;
-        status?: string;
-        endedAt?: number;
-        abortedLastRun?: boolean;
-        totalTokens?: number;
-        contextTokens?: number;
-      }>;
+      const fileData = JSON.parse(raw) as Record<string, GatewaySessionRecord>;
       for (const [key, entry] of Object.entries(fileData)) {
         if (!key || lookup.has(key)) continue;
         const updatedAt = normalizeUpdatedAt(entry.updatedAt);
@@ -187,6 +185,7 @@ async function readSessionsFromDisk(): Promise<SessionLookup | null> {
           abortedLastRun: entry.abortedLastRun,
           totalTokens: entry.totalTokens,
           contextTokens: entry.contextTokens,
+          sessionFile: normalizeSessionFile(entry.sessionFile),
         });
       }
       foundAny = true;
@@ -202,8 +201,9 @@ async function readSessionsFromDisk(): Promise<SessionLookup | null> {
 
 /**
  * Check if a session key exists in the gateway and is considered "alive".
- * A session is alive if it exists. We don't consider percentUsed or abortedLastRun
- * as dead indicators — those are normal states for reusable sessions.
+ * A session is alive if it exists and is not terminal.
+ * We don't consider percentUsed or abortedLastRun as dead indicators — those are
+ * normal states for reusable sessions.
  * Returns false if sessions lookup is null (gateway unavailable).
  */
 export function isSessionAlive(sessionKey: string, sessions: SessionLookup | null): boolean {
@@ -225,7 +225,34 @@ function normalizeSessionStatus(status: string | null | undefined): string | und
     : undefined;
 }
 
+function normalizeSessionFile(sessionFile: string | null | undefined): string | null {
+  return typeof sessionFile === "string" && sessionFile.trim()
+    ? sessionFile
+    : null;
+}
+
 function isTerminalSession(session: GatewaySession): boolean {
   if (session.endedAt) return true;
   return session.status === "done" || session.status === "failed" || session.status === "aborted";
+}
+
+/**
+ * Stronger liveness proof for recovery paths:
+ * the session must be alive and, when a sessionFile is registered, the file must exist.
+ */
+export async function canProveSessionAlive(
+  sessionKey: string,
+  sessions: SessionLookup | null,
+): Promise<boolean> {
+  if (!isSessionAlive(sessionKey, sessions)) return false;
+
+  const sessionFile = normalizeSessionFile(sessions?.get(sessionKey)?.sessionFile);
+  if (!sessionFile) return true;
+
+  try {
+    await fs.access(sessionFile);
+    return true;
+  } catch {
+    return false;
+  }
 }

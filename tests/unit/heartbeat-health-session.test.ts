@@ -173,20 +173,32 @@ describe("checkWorkerHealth", () => {
     );
   });
 
-  it("requeues an active issue when the session exists but is already terminal", async () => {
+  it("requeues an active developer slot when its registered session file is missing", async () => {
     h = await createTestHarness({
       workers: {
         developer: {
           active: true,
           issueId: "42",
-          sessionKey: "agent:main:subagent:test-project-developer-senior-ada",
-          level: "senior",
+          sessionKey: "agent:main:subagent:test-project-developer-medior-brittne",
+          level: "medior",
           startTime: new Date(Date.now() - 20 * 60_000).toISOString(),
           previousLabel: "To Improve",
         },
       },
     });
-    h.provider.seedIssue({ iid: 42, title: "Recover completed session", labels: ["Doing"] });
+    h.provider.seedIssue({ iid: 42, title: "Recover missing session file", labels: ["Doing"] });
+
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-medior-brittne",
+        {
+          key: "agent:main:subagent:test-project-developer-medior-brittne",
+          updatedAt: Date.now(),
+          percentUsed: 0,
+          sessionFile: "/missing/session.jsonl",
+        },
+      ],
+    ]);
 
     const fixes = await checkWorkerHealth({
       workspaceDir: h.workspaceDir,
@@ -195,18 +207,7 @@ describe("checkWorkerHealth", () => {
       role: "developer",
       autoFix: true,
       provider: h.provider,
-      sessions: new Map([
-        [
-          "agent:main:subagent:test-project-developer-senior-ada",
-          {
-            key: "agent:main:subagent:test-project-developer-senior-ada",
-            updatedAt: Date.now() - 60_000,
-            percentUsed: 35,
-            status: "done",
-            endedAt: Date.now() - 30_000,
-          },
-        ],
-      ]),
+      sessions,
       staleWorkerHours: 999,
     });
 
@@ -247,6 +248,18 @@ describe("checkWorkerHealth", () => {
           percentUsed: 15,
           status: "done",
           endedAt: Date.now() - 30_000,
+=======
+    h.provider.seedIssue({ iid: 42, title: "Recover missing session file", labels: ["Doing"] });
+
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-medior-brittne",
+        {
+          key: "agent:main:subagent:test-project-developer-medior-brittne",
+          updatedAt: Date.now(),
+          percentUsed: 0,
+          sessionFile: "/missing/session.jsonl",
+>>>>>>> 6fe993c (fix(health): recover stale developer cycles)
         },
       ],
     ]);
