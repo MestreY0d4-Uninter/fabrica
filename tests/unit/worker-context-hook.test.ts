@@ -5,6 +5,14 @@ import { describe, it, expect, vi } from "vitest";
 // We test by calling the handler with mock event + ctx
 
 describe("worker-context-hook — before_agent_start", () => {
+  function getSection(content: string, heading: string): string {
+    const start = content.indexOf(heading);
+    if (start < 0) return "";
+
+    const nextHeading = content.indexOf("\n## ", start + heading.length);
+    return nextHeading < 0 ? content.slice(start) : content.slice(start, nextHeading);
+  }
+
   // Mock api.on to capture the registered handler
   function captureHandler(
     register: (api: any, ctx: any) => void,
@@ -68,12 +76,21 @@ describe("worker-context-hook — before_agent_start", () => {
         { sessionKey },
       );
 
-      expect(result?.prependSystemContext).toContain("Execution Contract");
-      expect(result?.prependSystemContext).toContain("execute the task directly");
-      expect(result?.prependSystemContext).toContain("nested coding agents");
-      expect(result?.prependSystemContext).toContain("planning or meta-skills");
-      expect(result?.prependSystemContext).toContain("another coding agent");
-      expect(result?.prependSystemContext).toContain("assigned worktree");
+      const executionContract = getSection(result?.prependSystemContext ?? "", "## Execution Contract");
+
+      expect(executionContract).toContain("nested coding agents");
+      expect(executionContract).toContain("planning or meta-skills");
+      expect(executionContract).toContain("another coding agent");
+      expect(executionContract).toMatch(/Do not leave the assigned worktree execution path\./);
+
+      if (role === "reviewer") {
+        expect(executionContract).toContain("execute the review directly");
+        expect(executionContract).toMatch(/review verdicts only/i);
+        expect(executionContract).not.toContain("blocked or reject");
+      } else {
+        expect(executionContract).toContain("execute the task directly");
+        expect(executionContract).toMatch(/canonical blocked result line/i);
+      }
     }
   });
 

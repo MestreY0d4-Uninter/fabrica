@@ -54,12 +54,24 @@ If you need the project slug for follow-up tools such as \`task_create\`, use th
 
 const EXECUTION_CONTRACT_CONTEXT = `## Execution Contract
 
-You must execute the task directly in the assigned worktree execution path.
+You must execute the task directly in the worktree assigned to this task.
+Do not leave the assigned worktree execution path.
 Do not delegate implementation, testing, review, or planning to another coding agent.
 Do not use nested coding agents.
 Do not use planning or meta-skills such as brainstorming, writing-plans, or coding-agent.
 Do not spawn, supervise, or instruct another agent to do the work for you.
-If you cannot proceed directly in the assigned worktree, end with your role's canonical blocked or reject result line.
+If you cannot proceed directly in the assigned worktree, end with your role's canonical blocked result line.
+`;
+
+const REVIEWER_EXECUTION_CONTRACT_CONTEXT = `## Execution Contract
+
+You must execute the review directly in the worktree assigned to this task.
+Do not leave the assigned worktree execution path.
+Do not delegate review work to another coding agent.
+Do not use nested coding agents.
+Do not use planning or meta-skills such as brainstorming, writing-plans, or coding-agent.
+Do not spawn, supervise, or instruct another agent to do the work for you.
+If you cannot proceed directly, report the blocker in your review commentary and keep \`Review result: APPROVE\` and \`Review result: REJECT\` reserved for actual review verdicts only.
 `;
 
 export function registerWorkerContextHook(
@@ -80,16 +92,15 @@ export function registerWorkerContextHook(
 }
 
 function getCompletionContext(role: string): string {
-  const executionContract = EXECUTION_CONTRACT_CONTEXT;
   switch (role) {
     case "reviewer":
-      return `${executionContract}\n${REVIEWER_COMPLETION_CONTEXT}`;
+      return `${REVIEWER_EXECUTION_CONTRACT_CONTEXT}\n${REVIEWER_COMPLETION_CONTEXT}`;
     case "tester":
-      return `${executionContract}\n${TESTER_COMPLETION_CONTEXT}`;
+      return `${EXECUTION_CONTRACT_CONTEXT}\n${TESTER_COMPLETION_CONTEXT}`;
     case "architect":
-      return `${executionContract}\n${ARCHITECT_COMPLETION_CONTEXT}`;
+      return `${EXECUTION_CONTRACT_CONTEXT}\n${ARCHITECT_COMPLETION_CONTEXT}`;
     case "developer":
     default:
-      return `${executionContract}\n${DEVELOPER_COMPLETION_CONTEXT}`;
+      return `${EXECUTION_CONTRACT_CONTEXT}\n${DEVELOPER_COMPLETION_CONTEXT}`;
   }
 }
