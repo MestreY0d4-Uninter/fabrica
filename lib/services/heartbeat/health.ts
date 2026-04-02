@@ -78,6 +78,7 @@ export const GRACE_PERIOD_MS = 5 * 60 * 1_000; // 5 minutes (enough for dispatch
  * Now configurable via resolvedConfig.timeouts.dispatchConfirmTimeoutMs — fallback default preserved for callers without config. */
 export const DISPATCH_CONFIRMATION_TIMEOUT_MS = 2 * 60 * 1_000; // 2 minutes
 export const COMPLETION_RECOVERY_WINDOW_MS = 2 * 60 * 1_000; // 2 minutes
+export const EXECUTION_CONTRACT_RECOVERY_WINDOW_MS = 60 * 1_000; // 1 minute
 
 
 // ---------------------------------------------------------------------------
@@ -98,6 +99,7 @@ export type HealthIssue = {
     | "session_exhausted"   // Case 1d: active worker session near 100% context without work_finish
     | "dispatch_unconfirmed" // Active worker never reached agent bootstrap/activity after dispatch
     | "completion_recovery_exhausted" // Worker showed activity but never produced a canonical result
+    | "execution_contract_recovery_exhausted" // Worker violated execution contract and did not recover canonically
     | "stateless_issue";     // Case 8: open managed issue with no state label (#473)
   severity: "critical" | "warning";
   project: string;
@@ -287,6 +289,8 @@ export async function checkWorkerHealth(opts: {
   healthGracePeriodMs?: number;
   /** Configurable recovery window in ms for inconclusive completion before requeue. */
   completionRecoveryWindowMs?: number;
+  /** Configurable short recovery window in ms for execution-contract violations before requeue. */
+  executionContractRecoveryWindowMs?: number;
   /** Command runner used for timeline notifications when runtime is unavailable. */
   runCommand?: RunCommand;
   /** Optional notification config for per-event suppression. */
@@ -299,6 +303,7 @@ export async function checkWorkerHealth(opts: {
     dispatchConfirmTimeoutMs = DISPATCH_CONFIRMATION_TIMEOUT_MS,
     healthGracePeriodMs = GRACE_PERIOD_MS,
     completionRecoveryWindowMs = COMPLETION_RECOVERY_WINDOW_MS,
+    executionContractRecoveryWindowMs = EXECUTION_CONTRACT_RECOVERY_WINDOW_MS,
     runCommand,
     notificationConfig,
   } = opts;
@@ -502,19 +507,42 @@ export async function checkWorkerHealth(opts: {
 
       if (slot.active && issue && currentLabel === expectedLabel && issueRuntime?.inconclusiveCompletionAt) {
         const inconclusiveAt = Date.parse(issueRuntime.inconclusiveCompletionAt);
+        const inconclusiveReason = issueRuntime.inconclusiveCompletionReason ?? "missing_result_line";
+        const executionContractRecovery = inconclusiveReason === "invalid_execution_path";
+        const recoveryWindowMs = executionContractRecovery
+          ? executionContractRecoveryWindowMs
+          : completionRecoveryWindowMs;
         const lastObservableAt = sessionKey
           ? getLastObservableSessionActivityAt(sessionKey, sessions)
           : null;
-        const stillProgressing = lastObservableAt !== null && lastObservableAt > inconclusiveAt;
-        const recoveryExpired = Number.isFinite(inconclusiveAt) && (Date.now() - inconclusiveAt) > completionRecoveryWindowMs;
+        const stillProgressing = !executionContractRecovery && lastObservableAt !== null && lastObservableAt > inconclusiveAt;
+        const recoveryExpired = Number.isFinite(inconclusiveAt) && (Date.now() - inconclusiveAt) > recoveryWindowMs;
 
         if (stillProgressing || !recoveryExpired) {
           continue;
         }
 
+        if (executionContractRecovery) {
+          await auditLog(workspaceDir, "worker_execution_recovery_exhausted", {
+            project: project.name,
+            projectSlug,
+            role,
+            level,
+            sessionKey,
+            issueId: slot.issueId,
+            slotIndex,
+            reason: inconclusiveReason,
+            recoveryWindowMs,
+            dispatchCycleId: slot.dispatchCycleId ?? issueRuntime?.lastDispatchCycleId ?? null,
+            dispatchRunId: slot.dispatchRunId ?? issueRuntime?.dispatchRunId ?? null,
+          }).catch(() => {});
+        }
+
         const fix: HealthFix = {
           issue: {
-            type: "completion_recovery_exhausted",
+            type: executionContractRecovery
+              ? "execution_contract_recovery_exhausted"
+              : "completion_recovery_exhausted",
             severity: "critical",
             project: project.name,
             projectSlug,
@@ -525,7 +553,9 @@ export async function checkWorkerHealth(opts: {
             expectedLabel,
             actualLabel: currentLabel,
             slotIndex,
-            message: `${role.toUpperCase()} ${level}[${slotIndex}] completion recovery exhausted after observable activity without canonical result`,
+            message: executionContractRecovery
+              ? `${role.toUpperCase()} ${level}[${slotIndex}] execution-contract recovery exhausted without canonical result`
+              : `${role.toUpperCase()} ${level}[${slotIndex}] completion recovery exhausted after observable activity without canonical result`,
           },
           fixed: false,
         };
@@ -540,7 +570,9 @@ export async function checkWorkerHealth(opts: {
               issueUrl: issue.web_url,
               issueTitle: issue.title,
               role,
-              detail: "No canonical completion result was produced after observable activity",
+              detail: executionContractRecovery
+                ? "Execution contract violation did not recover with a canonical completion result"
+                : "No canonical completion result was produced after observable activity",
               nextState: slotQueueLabel,
               dispatchCycleId: slot.dispatchCycleId ?? issueRuntime?.lastDispatchCycleId ?? null,
               dispatchRunId: slot.dispatchRunId ?? issueRuntime?.dispatchRunId ?? null,
@@ -567,6 +599,22 @@ export async function checkWorkerHealth(opts: {
               inconclusiveCompletionReason: null,
             }).catch(() => {});
             fix.fixed = true;
+            if (executionContractRecovery) {
+              await auditLog(workspaceDir, "worker_execution_requeued", {
+                project: project.name,
+                projectSlug,
+                role,
+                level,
+                sessionKey,
+                issueId: slot.issueId,
+                slotIndex,
+                reason: inconclusiveReason,
+                fromLabel: expectedLabel,
+                toLabel: slotQueueLabel,
+                dispatchCycleId: slot.dispatchCycleId ?? issueRuntime?.lastDispatchCycleId ?? null,
+                dispatchRunId: slot.dispatchRunId ?? issueRuntime?.dispatchRunId ?? null,
+              }).catch(() => {});
+            }
             await auditHealthFixApplied(workspaceDir, fix, {
               action: "requeue_issue",
               fromLabel: expectedLabel,

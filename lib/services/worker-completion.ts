@@ -763,11 +763,7 @@ export async function handleWorkerAgentEnd(opts: {
   if (!observation.result) {
     if (observation.executionContractViolation) {
       if (context) {
-        await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
-          inconclusiveCompletionAt: new Date().toISOString(),
-          inconclusiveCompletionReason: "invalid_execution_path",
-        }).catch(() => {});
-        await auditLog(opts.workspaceDir, "worker_completion_inconclusive", {
+        const violationPayload = {
           sessionKey: opts.sessionKey,
           projectSlug: context.projectSlug,
           issueId: context.issueId,
@@ -775,14 +771,27 @@ export async function handleWorkerAgentEnd(opts: {
           reason: "invalid_execution_path",
           violationReason: observation.executionContractViolation.reason,
           evidence: observation.executionContractViolation.evidence,
+        };
+        await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
+          inconclusiveCompletionAt: new Date().toISOString(),
+          inconclusiveCompletionReason: "invalid_execution_path",
+        }).catch(() => {});
+        await auditLog(opts.workspaceDir, "worker_execution_contract_violation", violationPayload).catch(() => {});
+        await auditLog(opts.workspaceDir, "worker_execution_recovery_started", violationPayload).catch(() => {});
+        await auditLog(opts.workspaceDir, "worker_completion_inconclusive", {
+          ...violationPayload,
         }).catch(() => {});
       } else {
-        await auditLog(opts.workspaceDir, "worker_result_skipped", {
+        const violationPayload = {
           sessionKey: opts.sessionKey,
           role,
           reason: "invalid_execution_path",
           violationReason: observation.executionContractViolation.reason,
           evidence: observation.executionContractViolation.evidence,
+        };
+        await auditLog(opts.workspaceDir, "worker_execution_contract_violation", violationPayload).catch(() => {});
+        await auditLog(opts.workspaceDir, "worker_result_skipped", {
+          ...violationPayload,
         }).catch(() => {});
       }
       return { applied: false, reason: "invalid_execution_path" };

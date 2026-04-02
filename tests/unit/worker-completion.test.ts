@@ -243,6 +243,51 @@ describe("worker-completion", () => {
     );
   });
 
+  it("records execution-contract violation recovery start when worker exits without canonical result", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{ role: "assistant", content: [{ type: "text", text: "I delegated this issue to Codex to do the work." }] }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
+    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "demo",
+      7,
+      expect.objectContaining({
+        inconclusiveCompletionAt: expect.any(String),
+        inconclusiveCompletionReason: "invalid_execution_path",
+      }),
+    );
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_execution_contract_violation",
+      expect.objectContaining({
+        sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+        projectSlug: "demo",
+        issueId: 7,
+        role: "developer",
+        reason: "invalid_execution_path",
+        violationReason: "nested_coding_agent",
+      }),
+    );
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_execution_recovery_started",
+      expect.objectContaining({
+        sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+        projectSlug: "demo",
+        issueId: 7,
+        role: "developer",
+        reason: "invalid_execution_path",
+      }),
+    );
+  });
+
   it("does not mark inconclusive activity for a stale run that no longer owns the dispatch", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 
