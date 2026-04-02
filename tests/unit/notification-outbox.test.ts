@@ -24,15 +24,42 @@ afterEach(async () => {
 
 describe("computeNotifyKey", () => {
   it("produces deterministic key for same inputs", () => {
-    const k1 = computeNotifyKey("proj", 1, "workerStart", 1000);
-    const k2 = computeNotifyKey("proj", 1, "workerStart", 1000);
+    const k1 = computeNotifyKey("proj", 1, "workerStart", {
+      dispatchCycleId: "cycle-a",
+      dispatchRunId: "run-a",
+    });
+    const k2 = computeNotifyKey("proj", 1, "workerStart", {
+      dispatchCycleId: "cycle-a",
+      dispatchRunId: "run-a",
+    });
     expect(k1).toBe(k2);
   });
 
   it("produces different key for different event type", () => {
-    const k1 = computeNotifyKey("proj", 1, "workerStart", 1000);
-    const k2 = computeNotifyKey("proj", 1, "workerComplete", 1000);
+    const k1 = computeNotifyKey("proj", 1, "workerStart", {
+      dispatchCycleId: "cycle-a",
+      dispatchRunId: "run-a",
+    });
+    const k2 = computeNotifyKey("proj", 1, "workerComplete", {
+      dispatchCycleId: "cycle-a",
+      dispatchRunId: "run-a",
+    });
     expect(k1).not.toBe(k2);
+  });
+
+  it("allows the same event type across different dispatch cycles", () => {
+    const first = computeNotifyKey("todo-summary", 1, "workerComplete", {
+      dispatchCycleId: "cycle-a",
+      dispatchRunId: "run-a",
+      result: "DONE",
+    });
+    const second = computeNotifyKey("todo-summary", 1, "workerComplete", {
+      dispatchCycleId: "cycle-b",
+      dispatchRunId: "run-b",
+      result: "DONE",
+    });
+
+    expect(first).not.toBe(second);
   });
 });
 
