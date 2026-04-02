@@ -35,7 +35,7 @@ type WorkerObservation = {
   result: WorkerResult | null;
   activityObserved: boolean;
   executionContractViolation?: {
-    reason: "nested_coding_agent";
+    reason: "nested_coding_agent" | "meta_skill";
     evidence: string;
   };
 };
@@ -83,7 +83,11 @@ async function resolveWorkerResultFromRuntime(
   const eventResult = extractWorkerResultFromMessages(role, eventMessages);
   const eventViolation = detectExecutionContractViolation(eventMessages);
   if (eventResult) {
-    return { result: eventResult, activityObserved: eventActivityObserved };
+    return {
+      result: eventResult,
+      activityObserved: eventActivityObserved,
+      executionContractViolation: eventViolation ?? undefined,
+    };
   }
 
   try {
@@ -103,8 +107,8 @@ async function resolveWorkerResultFromRuntime(
         : []);
     const sessionActivityObserved = hasObservableWorkerActivity(sessionMessages);
     const historyResult = extractWorkerResultFromMessages(role, sessionMessages);
+    const sessionViolation = detectExecutionContractViolation(sessionMessages);
     if (!historyResult) {
-      const sessionViolation = detectExecutionContractViolation(sessionMessages);
       return {
         result: null,
         activityObserved: eventActivityObserved || sessionActivityObserved,
@@ -118,6 +122,7 @@ async function resolveWorkerResultFromRuntime(
         source: "session_history",
       },
       activityObserved: eventActivityObserved || sessionActivityObserved,
+      executionContractViolation: sessionViolation ?? eventViolation ?? undefined,
     };
   } catch {
     return {
@@ -217,7 +222,7 @@ function hasObservableContent(content: unknown): boolean {
 }
 
 function detectExecutionContractViolation(messages: unknown[]): {
-  reason: "nested_coding_agent";
+  reason: "nested_coding_agent" | "meta_skill";
   evidence: string;
 } | null {
   const evidenceEntries = collectWorkerTranscriptEvidence(messages);
@@ -228,6 +233,14 @@ function detectExecutionContractViolation(messages: unknown[]): {
     .find((match): match is string => Boolean(match));
 
   for (const entry of assistantEntries) {
+    const metaSkillUsage = matchStrongMetaSkillUsage(entry.text);
+    if (metaSkillUsage) {
+      return {
+        reason: "meta_skill",
+        evidence: metaSkillUsage,
+      };
+    }
+
     const codingAgentUsage = matchStrongCodingAgentUsage(entry.text);
     if (codingAgentUsage && nestedCommand) {
       return {
@@ -370,15 +383,22 @@ function collectContentEvidence(
 function matchStrongCodingAgentUsage(text: string): string | null {
   const normalized = text.toLowerCase();
   return findAcceptedMatch(normalized, [
-    /\b(?:i(?:'ll| will)?|let me|going to|need to|can|i(?:'ve| have)|i(?:'m| am)|i)\s+(?:use|used|using)\s+coding-agent\b[\s\S]{0,80}\b(?:task|work|issue|ticket|handle|complete|finish|implement|fix|do the work|do this)\b/g,
+    /\b(?:i(?:'ll| will)?|let me|going to|need to|can|i(?:'ve| have)|i(?:'m| am)|i)\s+(?:use|used|using)\s+(?:(?:an?|the)\s+)?(?:coding agent|coding-agent|codex)\b[\s\S]{0,80}\b(?:task|work|issue|ticket|handle|complete|finish|implement|fix|do the work|do this)\b/g,
   ]);
 }
 
 function matchStrongDelegation(text: string): string | null {
   const normalized = text.toLowerCase();
   return findAcceptedMatch(normalized, [
-    /\b(?:i(?:'ll| will)?|let me|going to|need to|can|i(?:'ve| have)|i(?:'m| am)|i)\s+(?:spawn|spawned|delegate|delegated|launch|launched|hand off|handed off)\b[\s\S]{0,80}\b(?:coding agent|coding-agent|codex|subagent|another agent|another coding agent|child agent)\b[\s\S]{0,80}\b(?:task|work|issue|ticket|handle|complete|finish|implement|fix|do the work|do this)\b/g,
-    /\b(?:i(?:'ll| will)?|let me|going to|need to|can|i(?:'ve| have)|i(?:'m| am)|i)\s+(?:delegate|delegated|hand off|handed off)\b[\s\S]{0,40}\b(?:task|work|issue|ticket)\b[\s\S]{0,40}\bto\b[\s\S]{0,20}\b(?:coding agent|coding-agent|codex|subagent|another agent|another coding agent|child agent)\b/g,
+    /\b(?:i(?:'ll| will)?|let me|going to|need to|can|i(?:'ve| have)|i(?:'m| am)|i)\s+(?:spawn|spawned|spawning|delegate|delegated|delegating|launch|launched|launching|hand off|handed off|handing off)\b[\s\S]{0,80}\b(?:(?:an?|the)\s+)?(?:coding agent|coding-agent|codex|subagent|another agent|another coding agent|child agent)\b[\s\S]{0,80}\b(?:task|work|issue|ticket|handle|complete|finish|implement|fix|do the work|do this)\b/g,
+    /\b(?:i(?:'ll| will)?|let me|going to|need to|can|i(?:'ve| have)|i(?:'m| am)|i)\s+(?:delegate|delegated|delegating|hand off|handed off|handing off)\b[\s\S]{0,40}\b(?:task|work|issue|ticket)\b[\s\S]{0,40}\bto\b[\s\S]{0,20}\b(?:(?:an?|the)\s+)?(?:coding agent|coding-agent|codex|subagent|another agent|another coding agent|child agent)\b/g,
+  ]);
+}
+
+function matchStrongMetaSkillUsage(text: string): string | null {
+  const normalized = text.toLowerCase();
+  return findAcceptedMatch(normalized, [
+    /\b(?:i(?:'ll| will)?|let me|going to|need to|i(?:'ve| have)|i(?:'m| am)|i)\s+(?:use|used|using)\s+(?:(?:the)\s+)?(?:brainstorming|writing-plans)\b[\s\S]{0,80}\b(?:task|work|issue|ticket|handle|complete|finish|implement|fix|do the work|do this|plan|planning)\b/g,
   ]);
 }
 
@@ -739,34 +759,34 @@ export async function handleWorkerAgentEnd(opts: {
     }).catch(() => {});
   }
 
-  if (!observation.result) {
-    if (observation.executionContractViolation) {
-      if (context) {
-        await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
-          inconclusiveCompletionAt: new Date().toISOString(),
-          inconclusiveCompletionReason: "invalid_execution_path",
-        }).catch(() => {});
-        await auditLog(opts.workspaceDir, "worker_completion_inconclusive", {
-          sessionKey: opts.sessionKey,
-          projectSlug: context.projectSlug,
-          issueId: context.issueId,
-          role,
-          reason: "invalid_execution_path",
-          violationReason: observation.executionContractViolation.reason,
-          evidence: observation.executionContractViolation.evidence,
-        }).catch(() => {});
-      } else {
-        await auditLog(opts.workspaceDir, "worker_result_skipped", {
-          sessionKey: opts.sessionKey,
-          role,
-          reason: "invalid_execution_path",
-          violationReason: observation.executionContractViolation.reason,
-          evidence: observation.executionContractViolation.evidence,
-        }).catch(() => {});
-      }
-      return { applied: false, reason: "invalid_execution_path" };
+  if (observation.executionContractViolation) {
+    if (context) {
+      await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
+        inconclusiveCompletionAt: new Date().toISOString(),
+        inconclusiveCompletionReason: "invalid_execution_path",
+      }).catch(() => {});
+      await auditLog(opts.workspaceDir, "worker_completion_inconclusive", {
+        sessionKey: opts.sessionKey,
+        projectSlug: context.projectSlug,
+        issueId: context.issueId,
+        role,
+        reason: "invalid_execution_path",
+        violationReason: observation.executionContractViolation.reason,
+        evidence: observation.executionContractViolation.evidence,
+      }).catch(() => {});
+    } else {
+      await auditLog(opts.workspaceDir, "worker_result_skipped", {
+        sessionKey: opts.sessionKey,
+        role,
+        reason: "invalid_execution_path",
+        violationReason: observation.executionContractViolation.reason,
+        evidence: observation.executionContractViolation.evidence,
+      }).catch(() => {});
     }
+    return { applied: false, reason: "invalid_execution_path" };
+  }
 
+  if (!observation.result) {
     if (context && observation.activityObserved) {
       await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
         inconclusiveCompletionAt: new Date().toISOString(),

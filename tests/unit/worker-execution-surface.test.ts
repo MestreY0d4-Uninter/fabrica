@@ -202,7 +202,132 @@ describe("worker execution surface", () => {
     );
   }, TEST_TIMEOUT_MS);
 
-  it("keeps canonical result precedence over strong-evidence transcript matches", async () => {
+  it("classifies explicit Codex usage admissions as invalid execution paths", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [{ type: "text", text: "I used Codex to handle this task." }],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
+        violationReason: "nested_coding_agent",
+        evidence: expect.stringContaining("used codex to handle this task"),
+      }),
+    );
+  }, TEST_TIMEOUT_MS);
+
+  it("classifies explicit coding agent usage admissions as invalid execution paths", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [{ type: "text", text: "I used a coding agent to handle this task." }],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
+        violationReason: "nested_coding_agent",
+        evidence: expect.stringContaining("used a coding agent to handle this task"),
+      }),
+    );
+  }, TEST_TIMEOUT_MS);
+
+  it("classifies explicit progressive coding-agent launch admissions as invalid execution paths", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [{ type: "text", text: "I am launching a coding agent to handle this task." }],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
+        violationReason: "nested_coding_agent",
+        evidence: expect.stringContaining("launching a coding agent to handle this task"),
+      }),
+    );
+  }, TEST_TIMEOUT_MS);
+
+  it("classifies strong-evidence brainstorming usage as meta-skill execution-path violations", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [{ type: "text", text: "I used brainstorming to plan this task." }],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
+        violationReason: "meta_skill",
+        evidence: expect.stringContaining("used brainstorming to plan this task"),
+      }),
+    );
+  }, TEST_TIMEOUT_MS);
+
+  it("classifies strong-evidence writing-plans usage as meta-skill execution-path violations", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [{ type: "text", text: "I used writing-plans to plan this issue." }],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
+        violationReason: "meta_skill",
+        evidence: expect.stringContaining("used writing-plans to plan this issue"),
+      }),
+    );
+  }, TEST_TIMEOUT_MS);
+
+  it("treats canonical result lines as invalid when explicit forbidden execution evidence is present", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 
     const provider = {
@@ -225,13 +350,22 @@ describe("worker execution surface", () => {
       validateDeveloperDone: vi.fn().mockResolvedValue({ ok: true }),
     });
 
-    expect(result).toMatchObject({ applied: true });
-    expect(mockExecuteCompletion).toHaveBeenCalledOnce();
-    expect(mockAuditLog).not.toHaveBeenCalledWith(
+    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
+    expect(mockExecuteCompletion).not.toHaveBeenCalled();
+    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "demo",
+      7,
+      expect.objectContaining({
+        inconclusiveCompletionReason: "invalid_execution_path",
+      }),
+    );
+    expect(mockAuditLog).toHaveBeenCalledWith(
       "/tmp/ws",
       "worker_completion_inconclusive",
       expect.objectContaining({
         reason: "invalid_execution_path",
+        violationReason: "nested_coding_agent",
       }),
     );
   }, TEST_TIMEOUT_MS);
