@@ -5,9 +5,11 @@ import { deactivateWorker, readProjects } from "../projects/index.js";
 import { resilientLabelTransition } from "../workflow/labels.js";
 import { findStateByLabel, getActiveLabel, getRevertLabel, type WorkflowConfig, WorkflowEvent } from "../workflow/index.js";
 import type { RunCommand } from "../context.js";
+import { getNotificationConfig, notify } from "../dispatch/notify.js";
 import { parseFabricaSessionKey } from "../dispatch/bootstrap-hook.js";
 import {
   extractReviewerDecisionFromMessages,
+  extractReviewerRationaleFromMessages,
   type ReviewerDecision,
   parseReviewerSessionResult,
 } from "./reviewer-session.js";
@@ -82,7 +84,8 @@ export async function handleReviewerAgentEnd(opts: {
     return decision;
   }
 
-  const { workflow } = await loadConfig(opts.workspaceDir, projectSlug);
+  const resolvedConfig = await loadConfig(opts.workspaceDir, projectSlug);
+  const { workflow } = resolvedConfig;
   const activeLabel = getActiveLabel(workflow, "reviewer");
   const revertLabel = getRevertLabel(workflow, "reviewer");
   const { provider } = await createProvider({
@@ -116,6 +119,34 @@ export async function handleReviewerAgentEnd(opts: {
         from: currentLabel,
         to: transition.targetLabel,
       }).catch(() => {});
+
+      const summary = decision === "reject" && Array.isArray(opts.messages)
+        ? extractReviewerRationaleFromMessages(opts.messages)
+        : null;
+      const channel = project.channels?.[0];
+      await notify(
+        {
+          type: decision === "reject" ? "reviewRejected" : "reviewApproved",
+          project: project.name,
+          issueId,
+          issueUrl: issue.web_url,
+          issueTitle: issue.title,
+          summary: summary ?? undefined,
+        },
+        {
+          workspaceDir: opts.workspaceDir,
+          config: getNotificationConfig(undefined),
+          target: channel
+            ? {
+                channelId: channel.channelId,
+                channel: channel.channel,
+                accountId: channel.accountId,
+                messageThreadId: channel.messageThreadId,
+              }
+            : undefined,
+          runCommand: opts.runCommand,
+        },
+      ).catch(() => {});
     }
     return decision;
   }
