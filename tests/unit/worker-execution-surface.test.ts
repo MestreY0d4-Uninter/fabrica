@@ -172,7 +172,7 @@ describe("worker execution surface", () => {
       expect.objectContaining({
         reason: "invalid_execution_path",
         violationReason: "nested_coding_agent",
-        evidence: expect.stringContaining("codex exec --full-auto"),
+        evidence: expect.stringContaining("use coding-agent for this issue"),
       }),
     );
   }, TEST_TIMEOUT_MS);
@@ -367,10 +367,11 @@ describe("worker execution surface", () => {
     const result = await handleWorkerAgentEnd({
       sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
       messages: [{
-        role: "toolResult",
+        role: "toolCall",
         content: [{
-          type: "text",
-          text: "bash pty:true workdir:~/project background:true command:\"codex exec --full-auto 'Fix issue #7'\"",
+          type: "toolCall",
+          name: "bash",
+          arguments: "pty:true workdir:~/project background:true command:\"codex exec --full-auto 'Fix issue #7'\"",
         }],
       }],
       workspaceDir: "/tmp/ws",
