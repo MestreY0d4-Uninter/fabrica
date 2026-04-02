@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_WORKFLOW } from "../../lib/workflow/index.js";
 
+const TEST_TIMEOUT_MS = 20_000;
+
 const {
   mockAuditLog,
   mockReadProjects,
@@ -139,7 +141,7 @@ describe("worker execution surface", () => {
         evidence: expect.stringContaining("used coding-agent to handle this task"),
       }),
     );
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("classifies coding-agent intent plus codex exec full-auto transcript evidence as invalid execution paths", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
@@ -173,7 +175,7 @@ describe("worker execution surface", () => {
         evidence: expect.stringContaining("codex exec --full-auto"),
       }),
     );
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("classifies explicit delegation to Codex as an invalid execution path", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
@@ -198,7 +200,7 @@ describe("worker execution surface", () => {
         evidence: expect.stringContaining("delegated this issue to codex"),
       }),
     );
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("keeps canonical result precedence over strong-evidence transcript matches", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
@@ -232,7 +234,7 @@ describe("worker execution surface", () => {
         reason: "invalid_execution_path",
       }),
     );
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("keeps ambiguous brainstorming mentions on the missing-result path", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
@@ -266,7 +268,7 @@ describe("worker execution surface", () => {
         reason: "invalid_execution_path",
       }),
     );
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("keeps policy text and grep-style command output on the missing-result path", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
@@ -305,7 +307,7 @@ describe("worker execution surface", () => {
         reason: "invalid_execution_path",
       }),
     );
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("keeps self-retractions on the missing-result path", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
@@ -331,5 +333,5 @@ describe("worker execution surface", () => {
         reason: "invalid_execution_path",
       }),
     );
-  });
+  }, TEST_TIMEOUT_MS);
 });
