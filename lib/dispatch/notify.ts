@@ -81,6 +81,8 @@ export type NotifyEvent =
       issueTitle: string;
       prUrl?: string;
       summary?: string;
+      dispatchCycleId?: string | null;
+      dispatchRunId?: string | null;
     }
   | {
       type: "reviewApproved";
@@ -89,6 +91,8 @@ export type NotifyEvent =
       issueUrl: string;
       issueTitle: string;
       prUrl?: string;
+      dispatchCycleId?: string | null;
+      dispatchRunId?: string | null;
     }
   | {
       type: "prMerged";

@@ -63,7 +63,7 @@ export async function handleReviewerAgentEnd(opts: {
     return decision;
   }
 
-  const { workflow } = await loadConfig(opts.workspaceDir, context.projectSlug);
+  const { workflow, pluginConfig } = await loadConfig(opts.workspaceDir, context.projectSlug);
   const activeLabel = getActiveLabel(workflow, "reviewer");
   const revertLabel = getRevertLabel(workflow, "reviewer");
   const { provider } = await createProvider({
@@ -107,11 +107,14 @@ export async function handleReviewerAgentEnd(opts: {
           issueId: context.issueId,
           issueUrl: issue.web_url,
           issueTitle: issue.title,
+          prUrl: context.issueRuntime?.currentPrUrl ?? undefined,
           summary: summary ?? undefined,
+          dispatchCycleId: context.dispatchCycleId ?? context.issueRuntime?.lastDispatchCycleId ?? null,
+          dispatchRunId: context.dispatchRunId ?? context.issueRuntime?.dispatchRunId ?? null,
         },
         {
           workspaceDir: opts.workspaceDir,
-          config: getNotificationConfig(undefined),
+          config: getNotificationConfig(pluginConfig),
           target: channel
             ? {
                 channelId: channel.channelId,

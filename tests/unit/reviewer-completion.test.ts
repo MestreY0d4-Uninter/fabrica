@@ -28,6 +28,8 @@ vi.mock("../../lib/audit.js", () => ({
 vi.mock("../../lib/projects/index.js", () => ({
   readProjects: mockReadProjects,
   deactivateWorker: mockDeactivateWorker,
+  getRoleWorker: (project: any, role: string) => project.workers[role],
+  getIssueRuntime: (project: any, issueId: number) => project.issueRuntime?.[String(issueId)],
 }));
 
 vi.mock("../../lib/config/index.js", () => ({
@@ -63,6 +65,13 @@ describe("reviewer-completion", () => {
           slug: "demo",
           repo: "org/repo",
           provider: "github",
+          issueRuntime: {
+            "7": {
+              currentPrUrl: "https://example.com/pulls/17",
+              dispatchRunId: "run-review-1",
+              lastDispatchCycleId: "cycle-review-1",
+            },
+          },
           channels: [
             {
               channelId: "-100123",
@@ -83,6 +92,8 @@ describe("reviewer-completion", () => {
                     lastIssueId: null,
                     sessionKey: "agent:main:subagent:demo-reviewer-junior-ada",
                     startTime: "2026-03-31T12:00:00.000Z",
+                    dispatchCycleId: "cycle-review-1",
+                    dispatchRunId: "run-review-1",
                     previousLabel: "To Review",
                     name: "ada",
                   },
@@ -207,7 +218,10 @@ describe("reviewer-completion", () => {
         issueId: 7,
         issueUrl: "https://example.com/issues/7",
         issueTitle: "Demo issue",
+        prUrl: "https://example.com/pulls/17",
         summary: "Correctness bug: prefix detection is too permissive; tests do not fully cover the acceptance criteria",
+        dispatchCycleId: "cycle-review-1",
+        dispatchRunId: "run-review-1",
       }),
       expect.objectContaining({
         workspaceDir: "/tmp/fabrica-workspace",
@@ -217,7 +231,9 @@ describe("reviewer-completion", () => {
           accountId: "acct-1",
           messageThreadId: 42,
         }),
+        config: {},
       }),
     );
+    expect(mockGetNotificationConfig).toHaveBeenCalledWith({});
   });
 });
