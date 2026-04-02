@@ -35,6 +35,8 @@ export type GatewaySession = {
   key: string;
   updatedAt: number | null;
   percentUsed: number;
+  status?: string;
+  endedAt?: number | null;
   abortedLastRun?: boolean;
   totalTokens?: number;
   contextTokens?: number;
@@ -74,7 +76,15 @@ export async function fetchGatewaySessions(gatewayTimeoutMs = 15_000, runCommand
     for (const filePath of sessionPaths) {
       try {
         const raw = await fs.readFile(filePath, "utf-8");
-        const fileData = JSON.parse(raw) as Record<string, { updatedAt?: number; percentUsed?: number; abortedLastRun?: boolean; totalTokens?: number; contextTokens?: number }>;
+        const fileData = JSON.parse(raw) as Record<string, {
+          updatedAt?: number;
+          percentUsed?: number;
+          status?: string;
+          endedAt?: number;
+          abortedLastRun?: boolean;
+          totalTokens?: number;
+          contextTokens?: number;
+        }>;
         for (const [key, entry] of Object.entries(fileData)) {
           if (key && !lookup.has(key)) {
             lookup.set(key, {
@@ -84,6 +94,8 @@ export async function fetchGatewaySessions(gatewayTimeoutMs = 15_000, runCommand
                 ?? (entry.contextTokens && entry.totalTokens
                   ? Math.round((entry.contextTokens / entry.totalTokens) * 100)
                   : 0),
+              status: normalizeSessionStatus(entry.status),
+              endedAt: normalizeUpdatedAt(entry.endedAt),
               abortedLastRun: entry.abortedLastRun,
               totalTokens: entry.totalTokens,
               contextTokens: entry.contextTokens,
@@ -103,6 +115,8 @@ export async function fetchGatewaySessions(gatewayTimeoutMs = 15_000, runCommand
         if (session.key) {
           lookup.set(session.key, {
             ...session,
+            status: normalizeSessionStatus(session.status),
+            endedAt: normalizeUpdatedAt(session.endedAt),
             updatedAt: normalizeUpdatedAt(session.updatedAt),
           });
         }
@@ -147,7 +161,15 @@ async function readSessionsFromDisk(): Promise<SessionLookup | null> {
     const sessionFile = `${agentsDir}/${agentId}/sessions/sessions.json`;
     try {
       const raw = await fs.readFile(sessionFile, "utf-8");
-      const fileData = JSON.parse(raw) as Record<string, { updatedAt?: number; percentUsed?: number; abortedLastRun?: boolean; totalTokens?: number; contextTokens?: number }>;
+      const fileData = JSON.parse(raw) as Record<string, {
+        updatedAt?: number;
+        percentUsed?: number;
+        status?: string;
+        endedAt?: number;
+        abortedLastRun?: boolean;
+        totalTokens?: number;
+        contextTokens?: number;
+      }>;
       for (const [key, entry] of Object.entries(fileData)) {
         if (!key || lookup.has(key)) continue;
         const updatedAt = normalizeUpdatedAt(entry.updatedAt);
@@ -160,6 +182,8 @@ async function readSessionsFromDisk(): Promise<SessionLookup | null> {
             ?? (entry.contextTokens && entry.totalTokens
               ? Math.round((entry.contextTokens / entry.totalTokens) * 100)
               : 0),
+          status: normalizeSessionStatus(entry.status),
+          endedAt: normalizeUpdatedAt(entry.endedAt),
           abortedLastRun: entry.abortedLastRun,
           totalTokens: entry.totalTokens,
           contextTokens: entry.contextTokens,
@@ -183,11 +207,25 @@ async function readSessionsFromDisk(): Promise<SessionLookup | null> {
  * Returns false if sessions lookup is null (gateway unavailable).
  */
 export function isSessionAlive(sessionKey: string, sessions: SessionLookup | null): boolean {
-  return sessions ? sessions.has(sessionKey) : false;
+  if (!sessions) return false;
+  const session = sessions.get(sessionKey);
+  if (!session) return false;
+  return !isTerminalSession(session);
 }
 
 function normalizeUpdatedAt(updatedAt: number | null | undefined): number | null {
   return typeof updatedAt === "number" && Number.isFinite(updatedAt) && updatedAt > 0
     ? updatedAt
     : null;
+}
+
+function normalizeSessionStatus(status: string | null | undefined): string | undefined {
+  return typeof status === "string" && status.trim()
+    ? status.trim().toLowerCase()
+    : undefined;
+}
+
+function isTerminalSession(session: GatewaySession): boolean {
+  if (session.endedAt) return true;
+  return session.status === "done" || session.status === "failed" || session.status === "aborted";
 }

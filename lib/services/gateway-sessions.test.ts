@@ -1,5 +1,12 @@
-import { describe, it, expect } from "vitest";
-import { shouldFilterSession } from "./gateway-sessions.js";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { fetchGatewaySessions, isSessionAlive, shouldFilterSession, type SessionLookup } from "./gateway-sessions.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("shouldFilterSession", () => {
   it("filters sessions older than gateway start in normal operation", () => {
@@ -36,5 +43,77 @@ describe("shouldFilterSession", () => {
   it("does not filter when updatedAt is null", () => {
     const gatewayUptimeMs = 60 * 60 * 1000;
     expect(shouldFilterSession(null, gatewayUptimeMs)).toBe(false);
+  });
+});
+
+describe("isSessionAlive", () => {
+  it("treats sessions with terminal status as dead", () => {
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-senior-ada",
+        {
+          key: "agent:main:subagent:test-project-developer-senior-ada",
+          updatedAt: Date.now(),
+          percentUsed: 10,
+          status: "done",
+          endedAt: Date.now(),
+        },
+      ],
+    ]);
+
+    expect(isSessionAlive("agent:main:subagent:test-project-developer-senior-ada", sessions)).toBe(false);
+  });
+
+  it("treats sessions without terminal markers as alive", () => {
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-senior-ada",
+        {
+          key: "agent:main:subagent:test-project-developer-senior-ada",
+          updatedAt: Date.now(),
+          percentUsed: 10,
+          status: "running",
+        },
+      ],
+    ]);
+
+    expect(isSessionAlive("agent:main:subagent:test-project-developer-senior-ada", sessions)).toBe(true);
+  });
+
+  it("preserves terminal metadata when reading sessions from disk fallback", async () => {
+    const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-gateway-sessions-"));
+    vi.stubEnv("HOME", tempHome);
+    vi.stubEnv("USERPROFILE", tempHome);
+
+    const sessionsDir = path.join(tempHome, ".openclaw", "agents", "main", "sessions");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    await fs.writeFile(
+      path.join(sessionsDir, "sessions.json"),
+      JSON.stringify({
+        "agent:main:subagent:test-project-developer-senior-ada": {
+          updatedAt: Date.now(),
+          percentUsed: 10,
+          status: "done",
+          endedAt: Date.now() - 1_000,
+        },
+      }),
+      "utf-8",
+    );
+
+    try {
+      const sessions = await fetchGatewaySessions(
+        1,
+        async () => {
+          throw new Error("gateway unavailable");
+        },
+      );
+
+      const session = sessions?.get("agent:main:subagent:test-project-developer-senior-ada");
+      expect(session?.status).toBe("done");
+      expect(session?.endedAt).toEqual(expect.any(Number));
+      expect(isSessionAlive("agent:main:subagent:test-project-developer-senior-ada", sessions ?? null)).toBe(false);
+    } finally {
+      await fs.rm(tempHome, { recursive: true, force: true });
+    }
   });
 });

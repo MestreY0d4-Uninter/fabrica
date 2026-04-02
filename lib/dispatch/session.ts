@@ -5,7 +5,7 @@ import type { PluginRuntime } from "openclaw/plugin-sdk";
 import type { RunCommand } from "../context.js";
 import type { EffortLevel } from "../roles/types.js";
 import { log as auditLog } from "../audit.js";
-import { fetchGatewaySessions } from "../services/gateway-sessions.js";
+import { fetchGatewaySessions, isSessionAlive } from "../services/gateway-sessions.js";
 import { bindDispatchRunIdBySessionKey, recordIssueLifecycle } from "../projects/index.js";
 
 const GATEWAY_SESSION_LABEL_MAX = 64;
@@ -44,6 +44,7 @@ export async function shouldClearSession(
 
     const session = sessions.get(sessionKey);
     if (!session) return false; // Session not found — will be spawned fresh anyway
+    if (!isSessionAlive(sessionKey, sessions)) return false;
 
     const ratio = session.percentUsed / 100;
     if (ratio > timeouts.sessionContextBudget) {
@@ -176,7 +177,7 @@ export async function ensureSessionReady(
   for (let attempt = 0; attempt < confirmAttempts; attempt++) {
     const sessions = await fetchGatewaySessions(undefined, runCommand).catch(() => null);
     if (sessions === null) return;
-    if (sessions.has(sessionKey)) return;
+    if (isSessionAlive(sessionKey, sessions)) return;
     if (attempt < confirmAttempts - 1) {
       await sleep(confirmDelayMs);
     }

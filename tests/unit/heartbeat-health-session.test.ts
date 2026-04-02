@@ -173,6 +173,109 @@ describe("checkWorkerHealth", () => {
     );
   });
 
+  it("requeues an active issue when the session exists but is already terminal", async () => {
+    h = await createTestHarness({
+      workers: {
+        developer: {
+          active: true,
+          issueId: "42",
+          sessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+          level: "senior",
+          startTime: new Date(Date.now() - 20 * 60_000).toISOString(),
+          previousLabel: "To Improve",
+        },
+      },
+    });
+    h.provider.seedIssue({ iid: 42, title: "Recover completed session", labels: ["Doing"] });
+
+    const fixes = await checkWorkerHealth({
+      workspaceDir: h.workspaceDir,
+      projectSlug: h.project.slug,
+      project: h.project,
+      role: "developer",
+      autoFix: true,
+      provider: h.provider,
+      sessions: new Map([
+        [
+          "agent:main:subagent:test-project-developer-senior-ada",
+          {
+            key: "agent:main:subagent:test-project-developer-senior-ada",
+            updatedAt: Date.now() - 60_000,
+            percentUsed: 35,
+            status: "done",
+            endedAt: Date.now() - 30_000,
+          },
+        ],
+      ]),
+      staleWorkerHours: 999,
+    });
+
+    expect(fixes).toHaveLength(1);
+    expect(fixes[0]?.issue.type).toBe("session_dead");
+    expect(fixes[0]?.fixed).toBe(true);
+
+    const transitions = h.provider.callsTo("transitionLabel");
+    expect(transitions).toHaveLength(1);
+    expect(transitions[0]?.args).toEqual({
+      issueId: 42,
+      from: "Doing",
+      to: "To Improve",
+    });
+  });
+
+  it("requeues an active issue when the session record exists but is already terminal", async () => {
+    h = await createTestHarness({
+      workers: {
+        developer: {
+          active: true,
+          issueId: "42",
+          sessionKey: "agent:main:subagent:test-project-developer-senior-ada",
+          level: "senior",
+          startTime: new Date(Date.now() - 20 * 60_000).toISOString(),
+          previousLabel: "To Improve",
+        },
+      },
+    });
+    h.provider.seedIssue({ iid: 42, title: "Recover completed session", labels: ["Doing"] });
+
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-senior-ada",
+        {
+          key: "agent:main:subagent:test-project-developer-senior-ada",
+          updatedAt: Date.now() - 60_000,
+          percentUsed: 15,
+          status: "done",
+          endedAt: Date.now() - 30_000,
+        },
+      ],
+    ]);
+
+    const fixes = await checkWorkerHealth({
+      workspaceDir: h.workspaceDir,
+      projectSlug: h.project.slug,
+      project: h.project,
+      role: "developer",
+      autoFix: true,
+      provider: h.provider,
+      sessions,
+      staleWorkerHours: 999,
+    });
+
+    expect(fixes).toHaveLength(1);
+    expect(fixes[0]?.issue.type).toBe("session_dead");
+    expect(fixes[0]?.fixed).toBe(true);
+
+    const issue = await h.provider.getIssue(42);
+    expect(issue.labels).toContain("To Improve");
+    expect(issue.labels).not.toContain("Doing");
+
+    const data = await h.readProjects();
+    const slot = data.projects[h.project.slug]!.workers.developer.levels.senior?.[0];
+    expect(slot?.active).toBe(false);
+    expect(slot?.issueId).toBeNull();
+  });
+
   it("respects healthGracePeriodMs when deciding whether a missing session is dead", async () => {
     h = await createTestHarness({
       workers: {
