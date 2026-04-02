@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.14 - 2026-04-01
+
+- Made `agent_end` authoritative for reviewer completion as well, so reviewer sessions no longer depend on delayed `subagent_ended` or reviewer polling to advance the FSM.
+- Added session-history fallback for developer/tester/architect lifecycle completion when `agent_end` arrives without the final assistant result line.
+- Hardened Telegram bootstrap ownership so stale attempts stop before stamping `project_registered` data or replaying kickoff, `projectTick`, or completion DM side effects onto a newer attempt.
+- Added regression coverage for reviewer `agent_end` routing, worker lifecycle session-history fallback, and successful bootstrap owner-loss races.
+
 ## 0.2.13 - 2026-03-31
 
 - Disabled automatic pretty logging on TTY so the plugin no longer depends on `pino-pretty` during load.
