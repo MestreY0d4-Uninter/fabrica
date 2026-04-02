@@ -20,6 +20,8 @@
  * Session state notes:
  *   - gateway status `sessions.recent` is capped at 10 entries. We avoid this cap by
  *     reading session keys directly from the session files listed in `sessions.paths`.
+ *   - A session is only considered alive if its registry entry still points at a
+ *     readable session file; missing files are treated as dead evidence.
  *   - Grace period: workers activated within the last GRACE_PERIOD_MS are never
  *     considered session-dead (they may not appear in sessions yet).
  *   - abortedLastRun: indicates session hit context limit (#287, #290) — triggers immediate healing.
@@ -304,6 +306,9 @@ export async function checkWorkerHealth(opts: {
       // Grace period: skip session liveness checks for recently-started workers
       const workerStartTime = slot.startTime ? new Date(slot.startTime).getTime() : null;
       const withinGracePeriod = workerStartTime !== null && (Date.now() - workerStartTime) < healthGracePeriodMs;
+      const sessionAlive = slot.active && sessionKey && sessions
+        ? await isSessionAlive(sessionKey, sessions)
+        : false;
 
       // Parse issueId
       const issueIdNum = slot.issueId ? Number(slot.issueId) : null;
@@ -445,7 +450,7 @@ export async function checkWorkerHealth(opts: {
       }
 
       // Case 1: Active with correct label but session is dead/missing
-      if (slot.active && sessionKey && sessions && !withinGracePeriod && !isSessionAlive(sessionKey, sessions)) {
+      if (slot.active && sessionKey && sessions && !withinGracePeriod && !sessionAlive) {
         const fix: HealthFix = {
           issue: {
             type: "session_dead",
@@ -512,7 +517,7 @@ export async function checkWorkerHealth(opts: {
       }
 
       // Case 1c: Active with correct label but session hit context limit (abortedLastRun)
-      if (slot.active && sessionKey && sessions && isSessionAlive(sessionKey, sessions)) {
+      if (slot.active && sessionKey && sessions && sessionAlive) {
         const session = sessions.get(sessionKey);
         if (session?.abortedLastRun) {
           const fix: HealthFix = {
@@ -561,7 +566,7 @@ export async function checkWorkerHealth(opts: {
       }
 
       // Case 1d: session exhausted (high context usage without abort or completion)
-      if (slot.active && sessionKey && sessions && isSessionAlive(sessionKey, sessions)) {
+      if (slot.active && sessionKey && sessions && sessionAlive) {
         const session = sessions.get(sessionKey);
         const normalizedSession = session
           ? { ...session, percentUsed: (session.percentUsed ?? 0) / 100 }
@@ -630,7 +635,7 @@ export async function checkWorkerHealth(opts: {
       }
 
       // Case 3: Active with correct label and alive session — check for staleness
-      if (slot.active && slot.startTime && sessionKey && sessions && isSessionAlive(sessionKey, sessions)) {
+      if (slot.active && slot.startTime && sessionKey && sessions && sessionAlive) {
         const hours = (Date.now() - new Date(slot.startTime).getTime()) / 3_600_000;
         if (hours > staleWorkerHours) {
           const fix: HealthFix = {
