@@ -107,4 +107,66 @@ describe("executeCompletion notifications", () => {
       );
     }
   });
+
+  it("threads dispatch identity into workerComplete notifications", async () => {
+    const { executeCompletion } = await import("../../lib/services/pipeline.js");
+    const runCommand = vi.fn();
+    const provider = {
+      transitionLabel: vi.fn().mockResolvedValue(undefined),
+      getIssue: vi.fn().mockResolvedValue({
+        iid: 7,
+        title: "todo-summary-cli",
+        web_url: "https://example.com/issues/7",
+        labels: ["To Review", "review:agent"],
+        state: "opened",
+      }),
+      getPrStatus: vi.fn().mockResolvedValue({}),
+    };
+
+    mockLoadProjectBySlug.mockResolvedValue({
+      slug: "demo",
+      name: "todo-summary",
+      repo: "org/repo",
+      channels: [{ channel: "telegram", channelId: "ops-room", events: ["*"] }],
+      workers: {
+        developer: {
+          levels: {
+            medior: [{ name: "Brittne", dispatchCycleId: "cycle-a", dispatchRunId: "run-a" }],
+          },
+        },
+      },
+      issueRuntime: {
+        "7": {
+          lastDispatchCycleId: "cycle-a",
+          dispatchRunId: "run-a",
+        },
+      },
+    });
+
+    await executeCompletion({
+      workspaceDir: "/tmp/ws",
+      projectSlug: "demo",
+      role: "developer",
+      result: "done",
+      issueId: 7,
+      provider: provider as never,
+      repoPath: "/tmp/org-repo",
+      projectName: "todo-summary",
+      channels: [{ channel: "telegram", channelId: "ops-room", events: ["*"] }] as never,
+      runCommand: runCommand as never,
+      level: "medior",
+      slotIndex: 0,
+    });
+
+    expect(mockNotify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "workerComplete",
+        dispatchCycleId: "cycle-a",
+        dispatchRunId: "run-a",
+      }),
+      expect.objectContaining({
+        runCommand,
+      }),
+    );
+  });
 });

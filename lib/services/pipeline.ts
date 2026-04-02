@@ -443,6 +443,8 @@ export async function executeCompletion(opts: {
       nextState,
       prUrl,
       createdTasks,
+      dispatchCycleId: issueRuntime?.lastDispatchCycleId ?? null,
+      dispatchRunId: issueRuntime?.dispatchRunId ?? null,
     },
     {
       workspaceDir,
@@ -513,6 +515,8 @@ export async function executeCompletion(opts: {
           issueTitle: updated.title,
           routing,
           prUrl,
+          dispatchCycleId: issueRuntime?.lastDispatchCycleId ?? null,
+          dispatchRunId: issueRuntime?.dispatchRunId ?? null,
         },
         {
           workspaceDir,

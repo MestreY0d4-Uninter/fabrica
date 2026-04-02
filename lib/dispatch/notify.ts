@@ -7,6 +7,8 @@
  * - workerStart: Worker spawned/resumed for a task (→ project group)
  * - workerComplete: Worker completed task (→ project group)
  * - reviewNeeded: Issue needs review — human or agent (→ project group)
+ * - reviewRejected: Reviewer rejected the PR/issue (→ project group)
+ * - reviewApproved: Reviewer approved the PR/issue (→ project group)
  * - prMerged: PR/MR was merged into the base branch (→ project group)
  */
 import { log as auditLog } from "../audit.js";
@@ -57,6 +59,8 @@ export type NotifyEvent =
       nextState?: string;
       prUrl?: string;
       createdTasks?: Array<{ id: number; title: string; url: string }>;
+      dispatchCycleId?: string | null;
+      dispatchRunId?: string | null;
     }
   | {
       type: "reviewNeeded";
@@ -65,6 +69,25 @@ export type NotifyEvent =
       issueUrl: string;
       issueTitle: string;
       routing: "human" | "agent";
+      prUrl?: string;
+      dispatchCycleId?: string | null;
+      dispatchRunId?: string | null;
+    }
+  | {
+      type: "reviewRejected";
+      project: string;
+      issueId: number;
+      issueUrl: string;
+      issueTitle: string;
+      prUrl?: string;
+      summary?: string;
+    }
+  | {
+      type: "reviewApproved";
+      project: string;
+      issueId: number;
+      issueUrl: string;
+      issueTitle: string;
       prUrl?: string;
     }
   | {
@@ -183,7 +206,7 @@ function prLink(url: string): string {
 /**
  * Build a human-readable message for a notification event.
  */
-function buildMessage(event: NotifyEvent): string {
+export function buildMessage(event: NotifyEvent): string {
   switch (event.type) {
     case "workerStart": {
       const action = event.sessionAction === "spawn" ? "🚀 Started" : "▶️ Resumed";
@@ -249,6 +272,23 @@ function buildMessage(event: NotifyEvent): string {
       let msg = `${icon} ${who} for #${event.issueId}: ${event.issueTitle}`;
       if (event.prUrl) msg += `\n🔗 ${prLink(event.prUrl)}`;
       msg += `\n📋 [Issue #${event.issueId}](${event.issueUrl})`;
+      return msg;
+    }
+
+    case "reviewRejected": {
+      let msg = `❌ Review rejected for #${event.issueId}: ${event.issueTitle}`;
+      if (event.summary) msg += `\n${event.summary}`;
+      if (event.prUrl) msg += `\n🔗 ${prLink(event.prUrl)}`;
+      msg += `\n📋 [Issue #${event.issueId}](${event.issueUrl})`;
+      msg += `\n→ Moving to To Improve for developer re-dispatch`;
+      return msg;
+    }
+
+    case "reviewApproved": {
+      let msg = `✅ Review approved for #${event.issueId}: ${event.issueTitle}`;
+      if (event.prUrl) msg += `\n🔗 ${prLink(event.prUrl)}`;
+      msg += `\n📋 [Issue #${event.issueId}](${event.issueUrl})`;
+      msg += `\n→ Moving to testing or merge flow`;
       return msg;
     }
 
@@ -585,10 +625,16 @@ export async function notify(
   let notifyKey: string | null = null;
   if (!opts.skipOutboxWrite) {
     // Idempotency: write intent to outbox before sending; skip if duplicate
+    const dispatchIdentity = {
+      dispatchCycleId: (event as { dispatchCycleId?: string | null }).dispatchCycleId ?? null,
+      dispatchRunId: (event as { dispatchRunId?: string | null }).dispatchRunId ?? null,
+      result: (event as { result?: string | null }).result ?? null,
+    };
     notifyKey = computeNotifyKey(
       (event as any).project ?? "global",
       (event as any).issueId ?? 0,
       event.type,
+      dispatchIdentity,
     );
     const isNew = await writeIntent(opts.workspaceDir, notifyKey, event as Record<string, unknown>, {
       channelId: target.channelId,

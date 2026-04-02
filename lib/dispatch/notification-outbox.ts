@@ -65,10 +65,20 @@ export function computeNotifyKey(
   projectSlug: string,
   issueId: number,
   eventType: string,
-  roundedTs?: number,
+  identity: {
+    dispatchCycleId?: string | null;
+    dispatchRunId?: string | null;
+    result?: string | null;
+  } = {},
 ): string {
-  const ts = roundedTs ?? Math.floor(Date.now() / 60_000); // 1-min bucket
-  const input = `${projectSlug}:${issueId}:${eventType}:${ts}`;
+  const input = JSON.stringify({
+    projectSlug,
+    issueId,
+    eventType,
+    dispatchCycleId: identity.dispatchCycleId ?? null,
+    dispatchRunId: identity.dispatchRunId ?? null,
+    result: identity.result ?? null,
+  });
   return createHash("sha256").update(input).digest("hex").slice(0, 16);
 }
 
