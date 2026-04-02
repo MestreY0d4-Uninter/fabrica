@@ -35,7 +35,7 @@ type WorkerObservation = {
   result: WorkerResult | null;
   activityObserved: boolean;
   executionContractViolation?: {
-    reason: "meta_skill" | "nested_coding_agent";
+    reason: "nested_coding_agent";
     evidence: string;
   };
 };
@@ -217,43 +217,39 @@ function hasObservableContent(content: unknown): boolean {
 }
 
 function detectExecutionContractViolation(messages: unknown[]): {
-  reason: "meta_skill" | "nested_coding_agent";
+  reason: "nested_coding_agent";
   evidence: string;
 } | null {
   const evidenceEntries = collectWorkerTranscriptEvidence(messages);
   const assistantEntries = evidenceEntries.filter((entry) => entry.role === "assistant");
   const commandEntries = evidenceEntries.filter((entry) => entry.kind === "command");
+  const nestedCommand = commandEntries
+    .map((entry) => matchNestedCommand(entry.text))
+    .find((match): match is string => Boolean(match));
 
   for (const entry of assistantEntries) {
-    const explicitDelegation = matchPositiveExplicitDelegation(entry.text);
+    const codingAgentUsage = matchStrongCodingAgentUsage(entry.text);
+    if (codingAgentUsage && nestedCommand) {
+      return {
+        reason: "nested_coding_agent",
+        evidence: `${codingAgentUsage} | ${nestedCommand}`.slice(0, 160),
+      };
+    }
+
+    if (codingAgentUsage) {
+      return {
+        reason: "nested_coding_agent",
+        evidence: codingAgentUsage,
+      };
+    }
+
+    const explicitDelegation = matchStrongDelegation(entry.text);
     if (explicitDelegation) {
       return {
         reason: "nested_coding_agent",
         evidence: explicitDelegation,
       };
     }
-
-    const metaSkillUsage = matchPositiveMetaSkillUsage(entry.text);
-    if (metaSkillUsage) {
-      return {
-        reason: "meta_skill",
-        evidence: metaSkillUsage,
-      };
-    }
-  }
-
-  const codingAgentIntent = assistantEntries
-    .map((entry) => matchCodingAgentIntent(entry.text))
-    .find((match): match is string => Boolean(match));
-  const nestedCommand = commandEntries
-    .map((entry) => matchNestedCommand(entry.text))
-    .find((match): match is string => Boolean(match));
-
-  if (codingAgentIntent && nestedCommand) {
-    return {
-      reason: "nested_coding_agent",
-      evidence: `${codingAgentIntent} | ${nestedCommand}`.slice(0, 160),
-    };
   }
 
   return null;
@@ -371,65 +367,18 @@ function collectContentEvidence(
   }
 }
 
-function matchPositiveExplicitDelegation(text: string): string | null {
+function matchStrongCodingAgentUsage(text: string): string | null {
   const normalized = text.toLowerCase();
   return findAcceptedMatch(normalized, [
-    {
-      pattern: /\b(?:i(?:'ll| will)?|let me|going to|should|need to)\s+(?:spawn|delegate|delegating|launch|launching|hand off|handoff)\b[\s\S]{0,80}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b[\s\S]{0,80}\b(?:task|work|issue|implement|handle|complete|finish)\b/g,
-      rejectOnConcession: true,
-    },
-    {
-      pattern: /\b(?:i(?:'ve| have)|i(?:'m| am)|i)\s+(?:spawned|delegated|launched|handed off)\b[\s\S]{0,80}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b[\s\S]{0,80}\b(?:task|work|issue|implement|handle|complete|finish)\b/g,
-      rejectOnConcession: false,
-    },
-    {
-      pattern: /\b(?:i(?:'ll| will)?|let me|going to|should|need to)\s+(?:delegate|hand off|handoff)\b[\s\S]{0,40}\b(?:task|work|issue)\b[\s\S]{0,40}\bto\b[\s\S]{0,20}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b/g,
-      rejectOnConcession: true,
-    },
-    {
-      pattern: /\b(?:i(?:'ve| have)|i(?:'m| am)|i)\s+(?:delegated|handed off)\b[\s\S]{0,40}\b(?:task|work|issue)\b[\s\S]{0,40}\bto\b[\s\S]{0,20}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b/g,
-      rejectOnConcession: false,
-    },
-    {
-      pattern: /\b(?:i(?:'ve| have)|i(?:'m| am)|i)\s+(?:use|used|using)\b[\s\S]{0,20}\b(?:coding agent|coding-agent|subagent)\b[\s\S]{0,80}\b(?:task|work|issue|implement|handle|complete|finish)\b/g,
-      rejectOnConcession: false,
-    },
+    /\b(?:i(?:'ll| will)?|let me|going to|need to|can|i(?:'ve| have)|i(?:'m| am)|i)\s+(?:use|used|using)\s+coding-agent\b[\s\S]{0,80}\b(?:task|work|issue|ticket|handle|complete|finish|implement|fix|do the work|do this)\b/g,
   ]);
 }
 
-function matchPositiveMetaSkillUsage(text: string): string | null {
+function matchStrongDelegation(text: string): string | null {
   const normalized = text.toLowerCase();
   return findAcceptedMatch(normalized, [
-    {
-      pattern: /\b(?:i(?:'ll| will)?|let me|going to|should|need to|can)\s+(?:use|load|invoke|follow|read)\s+brainstorming\b/g,
-      rejectOnConcession: true,
-    },
-    {
-      pattern: /\b(?:i(?:'ll| will)?|let me|going to|should|need to|can)\s+(?:use|load|invoke|follow|read)\s+writing-plans\b/g,
-      rejectOnConcession: true,
-    },
-    {
-      pattern: /\b(?:i(?:'ve| have)|i(?:'m| am)|i)\s+(?:use|used|using|load|loaded|loading|invoke|invoked|invoking|follow|followed|following|read|reading)\s+brainstorming\b/g,
-      rejectOnConcession: false,
-    },
-    {
-      pattern: /\b(?:i(?:'ve| have)|i(?:'m| am)|i)\s+(?:use|used|using|load|loaded|loading|invoke|invoked|invoking|follow|followed|following|read|reading)\s+writing-plans\b/g,
-      rejectOnConcession: false,
-    },
-  ]);
-}
-
-function matchCodingAgentIntent(text: string): string | null {
-  const normalized = text.toLowerCase();
-  return findAcceptedMatch(normalized, [
-    {
-      pattern: /\b(?:i(?:'ll| will)?|let me|going to|should|need to)\s+(?:use|load|invoke|follow|read)\b[\s\S]{0,80}\bcoding-agent\b/g,
-      rejectOnConcession: true,
-    },
-    {
-      pattern: /\b(?:i(?:'ve| have)|i(?:'m| am)|i)\s+(?:use|used|using|load|loaded|loading|invoke|invoked|invoking|follow|followed|following|read|reading)\b[\s\S]{0,80}\bcoding-agent\b/g,
-      rejectOnConcession: false,
-    },
+    /\b(?:i(?:'ll| will)?|let me|going to|need to|can|i(?:'ve| have)|i(?:'m| am)|i)\s+(?:spawn|spawned|delegate|delegated|launch|launched|hand off|handed off)\b[\s\S]{0,80}\b(?:coding agent|coding-agent|codex|subagent|another agent|another coding agent|child agent)\b[\s\S]{0,80}\b(?:task|work|issue|ticket|handle|complete|finish|implement|fix|do the work|do this)\b/g,
+    /\b(?:i(?:'ll| will)?|let me|going to|need to|can|i(?:'ve| have)|i(?:'m| am)|i)\s+(?:delegate|delegated|hand off|handed off)\b[\s\S]{0,40}\b(?:task|work|issue|ticket)\b[\s\S]{0,40}\bto\b[\s\S]{0,20}\b(?:coding agent|coding-agent|codex|subagent|another agent|another coding agent|child agent)\b/g,
   ]);
 }
 
@@ -441,15 +390,14 @@ function matchNestedCommand(text: string): string | null {
 
 function findAcceptedMatch(
   normalized: string,
-  patterns: Array<{ pattern: RegExp; rejectOnConcession: boolean }>,
+  patterns: RegExp[],
 ): string | null {
-  for (const { pattern, rejectOnConcession } of patterns) {
+  for (const pattern of patterns) {
     for (const match of normalized.matchAll(pattern)) {
       const matchedText = match[0];
       if (!matchedText) continue;
       const end = (match.index ?? 0) + matchedText.length;
-      if (hasImmediateActRetraction(normalized, matchedText, end)) continue;
-      if (rejectOnConcession && hasImmediatePolicyRejection(normalized, end)) continue;
+      if (hasImmediateRetraction(normalized, end)) continue;
       return matchedText;
     }
   }
@@ -457,19 +405,9 @@ function findAcceptedMatch(
   return null;
 }
 
-function hasImmediateActRetraction(normalized: string, matchedText: string, matchEnd: number): boolean {
-  const trailingClause = normalized.slice(matchEnd, matchEnd + 120);
-  return /\b(?:but|however|though|except)\b[\s\S]{0,80}\b(?:didn't actually|did not actually|never)\b[\s\S]{0,20}\b(?:do it|did|do so|use it|use that|delegate it|launch it|spawn it)\b/.test(trailingClause)
-    || /\b(?:but|however|though|except)\b[\s\S]{0,80}\b(?:didn't actually|did not actually|never)\b[\s\S]{0,20}\b(?:use|load|invoke|follow|read)\s+(?:brainstorming|writing-plans)\b/.test(trailingClause)
-    || /\b(?:but|however|though|except)\b[\s\S]{0,80}\b(?:didn't actually|did not actually|never)\b[\s\S]{0,20}\bdelegate this issue to codex\b/.test(trailingClause)
-    || /\b(?:but|however|though|except)\b[\s\S]{0,80}\b(?:didn't actually|did not actually|never)\b[\s\S]{0,20}\b(?:delegate|hand off|handoff)\b[\s\S]{0,40}\b(?:task|work|issue)\b[\s\S]{0,40}\bto\b[\s\S]{0,20}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b/.test(trailingClause)
-    || /\b(?:didn't actually|did not actually|never)\b[\s\S]{0,80}\b(?:use|load|invoke|follow|read)\s+(?:brainstorming|writing-plans)\b/.test(matchedText)
-    || /\b(?:didn't actually|did not actually|never)\b[\s\S]{0,80}\bdelegate this issue\b/.test(matchedText);
-}
-
-function hasImmediatePolicyRejection(normalized: string, matchEnd: number): boolean {
-  const trailingClause = normalized.slice(matchEnd, matchEnd + 120);
-  return /\b(?:but|however|though|except)\b[\s\S]{0,80}\b(?:forbid|forbids|forbidden|can't|cannot|can not|won't|will not|must not|should not|do not|don't|did not|didn't|never|stay|stayed)\b/.test(trailingClause);
+function hasImmediateRetraction(normalized: string, matchEnd: number): boolean {
+  const trailingClause = normalized.slice(matchEnd, matchEnd + 160);
+  return /\b(?:but|however|though|except)\b[\s\S]{0,120}\b(?:didn't actually|did not actually|never|didn't|did not)\b/.test(trailingClause);
 }
 
 export async function resolveWorkerSessionContext(

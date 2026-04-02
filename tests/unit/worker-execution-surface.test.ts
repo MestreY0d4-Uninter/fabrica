@@ -108,19 +108,14 @@ describe("worker execution surface", () => {
     mockAuditLog.mockResolvedValue(undefined);
   });
 
-  it("classifies meta-skills in assistant transcript as invalid execution paths", async () => {
+  it("classifies explicit coding-agent task confessions as invalid execution paths", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 
     const result = await handleWorkerAgentEnd({
       sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
       messages: [{
         role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "I should use brainstorming before changing behavior.\nThen I can load writing-plans and continue.",
-          },
-        ],
+        content: [{ type: "text", text: "I used coding-agent to handle this task." }],
       }],
       workspaceDir: "/tmp/ws",
       runCommand: vi.fn(),
@@ -140,158 +135,30 @@ describe("worker execution surface", () => {
       "worker_completion_inconclusive",
       expect.objectContaining({
         reason: "invalid_execution_path",
-        violationReason: "meta_skill",
-        evidence: expect.stringContaining("brainstorming"),
+        violationReason: "nested_coding_agent",
+        evidence: expect.stringContaining("used coding-agent to handle this task"),
       }),
     );
   });
 
-  it("classifies past-tense meta-skill admissions as invalid execution paths", async () => {
+  it("classifies coding-agent intent plus codex exec full-auto transcript evidence as invalid execution paths", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 
     const result = await handleWorkerAgentEnd({
       sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [{
-        role: "assistant",
-        content: [
-          {
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "I will use coding-agent for this issue." }],
+        },
+        {
+          role: "toolResult",
+          content: [{
             type: "text",
-            text: "I used brainstorming before editing the worker completion logic.",
-          },
-        ],
-      }],
-      workspaceDir: "/tmp/ws",
-      runCommand: vi.fn(),
-    });
-
-    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
-    expect(mockAuditLog).toHaveBeenCalledWith(
-      "/tmp/ws",
-      "worker_completion_inconclusive",
-      expect.objectContaining({
-        reason: "invalid_execution_path",
-        violationReason: "meta_skill",
-        evidence: expect.stringContaining("used brainstorming"),
-      }),
-    );
-  });
-
-  it("keeps admitted meta-skill violations invalid even with a trailing disclaimer", async () => {
-    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
-
-    const result = await handleWorkerAgentEnd({
-      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [{
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "I used brainstorming, but the prompt forbids it.",
-          },
-        ],
-      }],
-      workspaceDir: "/tmp/ws",
-      runCommand: vi.fn(),
-    });
-
-    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
-    expect(mockAuditLog).toHaveBeenCalledWith(
-      "/tmp/ws",
-      "worker_completion_inconclusive",
-      expect.objectContaining({
-        reason: "invalid_execution_path",
-        violationReason: "meta_skill",
-        evidence: expect.stringContaining("used brainstorming"),
-      }),
-    );
-  });
-
-  it("does not flag admitted meta-skill wording when the sentence immediately retracts the act", async () => {
-    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
-
-    const result = await handleWorkerAgentEnd({
-      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [{
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "I used brainstorming, but didn't actually do it.",
-          },
-        ],
-      }],
-      workspaceDir: "/tmp/ws",
-      runCommand: vi.fn(),
-    });
-
-    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
-    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
-      "/tmp/ws",
-      "demo",
-      7,
-      expect.objectContaining({
-        inconclusiveCompletionReason: "missing_result_line",
-      }),
-    );
-    expect(mockAuditLog).not.toHaveBeenCalledWith(
-      "/tmp/ws",
-      "worker_completion_inconclusive",
-      expect.objectContaining({
-        reason: "invalid_execution_path",
-      }),
-    );
-  });
-
-  it("does not flag repeated-object meta-skill retractions as invalid execution paths", async () => {
-    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
-
-    const result = await handleWorkerAgentEnd({
-      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [{
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "I used brainstorming, but I didn't actually use brainstorming.",
-          },
-        ],
-      }],
-      workspaceDir: "/tmp/ws",
-      runCommand: vi.fn(),
-    });
-
-    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
-    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
-      "/tmp/ws",
-      "demo",
-      7,
-      expect.objectContaining({
-        inconclusiveCompletionReason: "missing_result_line",
-      }),
-    );
-    expect(mockAuditLog).not.toHaveBeenCalledWith(
-      "/tmp/ws",
-      "worker_completion_inconclusive",
-      expect.objectContaining({
-        reason: "invalid_execution_path",
-      }),
-    );
-  });
-
-  it("classifies explicit nested delegation language as an invalid execution path", async () => {
-    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
-
-    const result = await handleWorkerAgentEnd({
-      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [{
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "I'll spawn a coding agent to handle this task and wait for it to finish.",
-          },
-        ],
-      }],
+            text: "bash pty:true workdir:~/project background:true command:\"codex exec --full-auto 'Fix issue #7'\"",
+          }],
+        },
+      ],
       workspaceDir: "/tmp/ws",
       runCommand: vi.fn(),
     });
@@ -303,71 +170,19 @@ describe("worker execution surface", () => {
       expect.objectContaining({
         reason: "invalid_execution_path",
         violationReason: "nested_coding_agent",
-        evidence: expect.stringContaining("spawn a coding agent"),
+        evidence: expect.stringContaining("codex exec --full-auto"),
       }),
     );
   });
 
-  it("classifies past-tense nested delegation admissions as invalid execution paths", async () => {
-    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
-
-    const usedCodingAgent = await handleWorkerAgentEnd({
-      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [{
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "I used coding-agent to handle this task.",
-          },
-        ],
-      }],
-      workspaceDir: "/tmp/ws",
-      runCommand: vi.fn(),
-    });
-
-    expect(usedCodingAgent).toMatchObject({ applied: false, reason: "invalid_execution_path" });
-
-    const delegatedToCodex = await handleWorkerAgentEnd({
-      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [{
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "I delegated this issue to Codex and waited for it to finish.",
-          },
-        ],
-      }],
-      workspaceDir: "/tmp/ws",
-      runCommand: vi.fn(),
-    });
-
-    expect(delegatedToCodex).toMatchObject({ applied: false, reason: "invalid_execution_path" });
-    expect(mockAuditLog).toHaveBeenCalledWith(
-      "/tmp/ws",
-      "worker_completion_inconclusive",
-      expect.objectContaining({
-        reason: "invalid_execution_path",
-        violationReason: "nested_coding_agent",
-        evidence: expect.stringMatching(/used coding-agent|delegated this issue to codex/),
-      }),
-    );
-  });
-
-  it("keeps admitted nested delegation violations invalid even with a trailing disclaimer", async () => {
+  it("classifies explicit delegation to Codex as an invalid execution path", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 
     const result = await handleWorkerAgentEnd({
       sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
       messages: [{
         role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "I delegated this issue to Codex, but the prompt forbids it.",
-          },
-        ],
+        content: [{ type: "text", text: "I delegated this issue to Codex to do the work." }],
       }],
       workspaceDir: "/tmp/ws",
       runCommand: vi.fn(),
@@ -385,19 +200,51 @@ describe("worker execution surface", () => {
     );
   });
 
-  it("does not flag admitted nested delegation wording when the sentence immediately retracts the act", async () => {
+  it("keeps canonical result precedence over strong-evidence transcript matches", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const provider = {
+      getIssue: vi.fn().mockResolvedValue({ labels: ["Doing"] }),
+      transitionLabel: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [{
+          type: "text",
+          text: "Work result: DONE\nI used coding-agent to handle this task.",
+        }],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+      providerOverride: provider as never,
+      validateDeveloperDone: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    expect(result).toMatchObject({ applied: true });
+    expect(mockExecuteCompletion).toHaveBeenCalledOnce();
+    expect(mockAuditLog).not.toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
+      }),
+    );
+  });
+
+  it("keeps ambiguous brainstorming mentions on the missing-result path", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 
     const result = await handleWorkerAgentEnd({
       sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
       messages: [{
         role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "I delegated this issue to Codex, but I never did.",
-          },
-        ],
+        content: [{
+          type: "text",
+          text: "I should use brainstorming before changing behavior.",
+        }],
       }],
       workspaceDir: "/tmp/ws",
       runCommand: vi.fn(),
@@ -421,325 +268,36 @@ describe("worker execution surface", () => {
     );
   });
 
-  it("does not flag repeated-object nested delegation retractions as invalid execution paths", async () => {
+  it("keeps policy text and grep-style command output on the missing-result path", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 
     const result = await handleWorkerAgentEnd({
       sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [{
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "I delegated this issue to Codex, but I didn't actually delegate this issue to Codex.",
-          },
-        ],
-      }],
-      workspaceDir: "/tmp/ws",
-      runCommand: vi.fn(),
-    });
-
-    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
-    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
-      "/tmp/ws",
-      "demo",
-      7,
-      expect.objectContaining({
-        inconclusiveCompletionReason: "missing_result_line",
-      }),
-    );
-    expect(mockAuditLog).not.toHaveBeenCalledWith(
-      "/tmp/ws",
-      "worker_completion_inconclusive",
-      expect.objectContaining({
-        reason: "invalid_execution_path",
-      }),
-    );
-  });
-
-  it("does not flag benign codex self-reference when the work stayed direct", async () => {
-    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
-
-    const result = await handleWorkerAgentEnd({
-      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [{
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "I used Codex to inspect this issue and then edited the files directly.",
-          },
-        ],
-      }],
-      workspaceDir: "/tmp/ws",
-      runCommand: vi.fn(),
-    });
-
-    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
-    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
-      "/tmp/ws",
-      "demo",
-      7,
-      expect.objectContaining({
-        inconclusiveCompletionReason: "missing_result_line",
-      }),
-    );
-    expect(mockAuditLog).not.toHaveBeenCalledWith(
-      "/tmp/ws",
-      "worker_completion_inconclusive",
-      expect.objectContaining({
-        reason: "invalid_execution_path",
-      }),
-    );
-  });
-
-  it("does not flag in-progress delegation intent when policy rejection follows immediately", async () => {
-    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
-
-    const delegatingResult = await handleWorkerAgentEnd({
-      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [{
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "I'm delegating this issue to Codex, but the prompt forbids it.",
-          },
-        ],
-      }],
-      workspaceDir: "/tmp/ws",
-      runCommand: vi.fn(),
-    });
-
-    expect(delegatingResult).toMatchObject({ applied: false, reason: "inconclusive_completion" });
-
-    const launchingResult = await handleWorkerAgentEnd({
-      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [{
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "I am launching a coding agent to handle this task, but the prompt forbids it.",
-          },
-        ],
-      }],
-      workspaceDir: "/tmp/ws",
-      runCommand: vi.fn(),
-    });
-
-    expect(launchingResult).toMatchObject({ applied: false, reason: "inconclusive_completion" });
-    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
-      "/tmp/ws",
-      "demo",
-      7,
-      expect.objectContaining({
-        inconclusiveCompletionReason: "missing_result_line",
-      }),
-    );
-    expect(mockAuditLog).not.toHaveBeenCalledWith(
-      "/tmp/ws",
-      "worker_completion_inconclusive",
-      expect.objectContaining({
-        reason: "invalid_execution_path",
-      }),
-    );
-  });
-
-  it("detects grounded coding-agent transcript evidence from session history", async () => {
-    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
-
-    const result = await handleWorkerAgentEnd({
-      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [],
-      workspaceDir: "/tmp/ws",
-      runCommand: vi.fn(),
-      runtime: {
-        subagent: {
-          getSessionMessages: vi.fn().mockResolvedValue({
-            messages: [
-              {
-                role: "assistant",
-                content: [
-                  {
-                    type: "thinking",
-                    thinking: "I need to read exactly one skill that focuses on coding-agent to get this right.",
-                  },
-                ],
-              },
-              {
-                role: "toolResult",
-                content: [
-                  {
-                    type: "text",
-                    text: "bash pty:true workdir:~/project background:true command:\"codex exec --full-auto 'Build a snake game'\"",
-                  },
-                ],
-              },
-            ],
-          }),
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Still inspecting the transcript." }],
         },
-      } as never,
-    });
-
-    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
-    expect(mockAuditLog).toHaveBeenCalledWith(
-      "/tmp/ws",
-      "worker_completion_inconclusive",
-      expect.objectContaining({
-        reason: "invalid_execution_path",
-        violationReason: "nested_coding_agent",
-        evidence: expect.stringMatching(/coding-agent|codex exec --full-auto/),
-      }),
-    );
-  });
-
-  it("does not flag concessive meta-skill wording that rejects the action right after mentioning it", async () => {
-    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
-
-    const result = await handleWorkerAgentEnd({
-      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [{
-        role: "assistant",
-        content: [
-          {
+        {
+          role: "toolResult",
+          content: [{
             type: "text",
-            text: "I should use brainstorming, but the prompt forbids it.",
-          },
-        ],
-      }],
-      workspaceDir: "/tmp/ws",
-      runCommand: vi.fn(),
-    });
-
-    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
-    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
-      "/tmp/ws",
-      "demo",
-      7,
-      expect.objectContaining({
-        inconclusiveCompletionReason: "missing_result_line",
-      }),
-    );
-    expect(mockAuditLog).not.toHaveBeenCalledWith(
-      "/tmp/ws",
-      "worker_completion_inconclusive",
-      expect.objectContaining({
-        reason: "invalid_execution_path",
-      }),
-    );
-  });
-
-  it("does not flag negated meta-skill wording as an execution-contract violation", async () => {
-    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
-
-    const result = await handleWorkerAgentEnd({
-      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [{
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "I will not use brainstorming. The worker prompt explicitly forbids it.",
-          },
-        ],
-      }],
-      workspaceDir: "/tmp/ws",
-      runCommand: vi.fn(),
-    });
-
-    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
-    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
-      "/tmp/ws",
-      "demo",
-      7,
-      expect.objectContaining({
-        inconclusiveCompletionReason: "missing_result_line",
-      }),
-    );
-    expect(mockAuditLog).not.toHaveBeenCalledWith(
-      "/tmp/ws",
-      "worker_completion_inconclusive",
-      expect.objectContaining({
-        reason: "invalid_execution_path",
-      }),
-    );
-  });
-
-  it("does not flag policy text that merely says coding-agent is forbidden", async () => {
-    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
-
-    const result = await handleWorkerAgentEnd({
-      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [{
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "The prompt forbids coding-agent and writing-plans, so I stayed in this worktree.",
-          },
-        ],
-      }],
-      workspaceDir: "/tmp/ws",
-      runCommand: vi.fn(),
-    });
-
-    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
-    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
-      "/tmp/ws",
-      "demo",
-      7,
-      expect.objectContaining({
-        inconclusiveCompletionReason: "missing_result_line",
-      }),
-    );
-  });
-
-  it("does not flag tool output that only quotes forbidden terms without action intent", async () => {
-    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
-
-    const result = await handleWorkerAgentEnd({
-      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
-      messages: [],
-      workspaceDir: "/tmp/ws",
-      runCommand: vi.fn(),
-      runtime: {
-        subagent: {
-          getSessionMessages: vi.fn().mockResolvedValue({
-            messages: [
-              {
-                role: "toolResult",
-                content: [
-                  {
-                    type: "text",
-                    text: "Do not use planning or meta-skills such as brainstorming, writing-plans, or coding-agent.",
-                  },
-                ],
-              },
-              {
-                role: "assistant",
-                content: [
-                  {
-                    type: "text",
-                    text: "I followed that instruction and edited the code directly.",
-                  },
-                ],
-              },
-            ],
-          }),
+            text: "rg -n 'coding-agent|codex exec --full-auto' /tmp/session.jsonl",
+          }],
         },
-      } as never,
+        {
+          role: "toolResult",
+          content: [{
+            type: "text",
+            text: "description: use coding-agent for larger tasks\nbash pty:true command:\"codex exec --full-auto 'Build a snake game'\"",
+          }],
+        },
+      ],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
     });
 
     expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
-    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
-      "/tmp/ws",
-      "demo",
-      7,
-      expect.objectContaining({
-        inconclusiveCompletionReason: "missing_result_line",
-      }),
-    );
     expect(mockAuditLog).not.toHaveBeenCalledWith(
       "/tmp/ws",
       "worker_completion_inconclusive",
@@ -749,40 +307,23 @@ describe("worker execution surface", () => {
     );
   });
 
-  it("leaves ordinary direct-execution text on the existing missing-result path", async () => {
+  it("keeps self-retractions on the missing-result path", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 
     const result = await handleWorkerAgentEnd({
       sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
       messages: [{
         role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "I inspected the repo, updated the worker completion path directly, and ran focused tests.",
-          },
-        ],
+        content: [{
+          type: "text",
+          text: "I delegated this issue to Codex, but I didn't actually do it.",
+        }],
       }],
       workspaceDir: "/tmp/ws",
       runCommand: vi.fn(),
     });
 
     expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
-    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
-      "/tmp/ws",
-      "demo",
-      7,
-      expect.objectContaining({
-        inconclusiveCompletionReason: "missing_result_line",
-      }),
-    );
-    expect(mockAuditLog).toHaveBeenCalledWith(
-      "/tmp/ws",
-      "worker_completion_inconclusive",
-      expect.objectContaining({
-        reason: "missing_result_line",
-      }),
-    );
     expect(mockAuditLog).not.toHaveBeenCalledWith(
       "/tmp/ws",
       "worker_completion_inconclusive",
