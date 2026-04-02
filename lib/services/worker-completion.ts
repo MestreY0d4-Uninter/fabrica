@@ -373,39 +373,52 @@ function collectContentEvidence(
 
 function matchPositiveExplicitDelegation(text: string): string | null {
   const normalized = text.toLowerCase();
-  const match = normalized.match(
-    /\b(?:i(?:'ll| will)?|let me|going to|should|need to)\s+(?:spawn|delegate|delegating|launch|launching|hand off|handoff)\b[\s\S]{0,80}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b[\s\S]{0,80}\b(?:task|work|issue|implement|handle|complete|finish)\b/,
-  );
-
-  return match ? match[0] : null;
+  return findAcceptedMatch(normalized, [
+    /\b(?:i|i(?:'ll| will)?|let me|going to|should|need to)\s+(?:spawn|delegate|delegated|delegating|launch|launched|launching|hand off|handed off|handoff)\b[\s\S]{0,80}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b[\s\S]{0,80}\b(?:task|work|issue|implement|handle|complete|finish)\b/g,
+    /\b(?:i|i(?:'ll| will)?|let me|going to|should|need to)\s+(?:delegate|delegated|delegating|hand off|handed off|handoff)\b[\s\S]{0,40}\b(?:task|work|issue)\b[\s\S]{0,40}\bto\b[\s\S]{0,20}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b/g,
+    /\b(?:i|i(?:'m| am)|i(?:'ve| have)|i(?:'d| would)|i(?:'ll| will)?)\s+(?:use|used|using)\b[\s\S]{0,20}\b(?:coding agent|coding-agent|codex|subagent)\b[\s\S]{0,80}\b(?:task|work|issue|implement|handle|complete|finish)\b/g,
+  ]);
 }
 
 function matchPositiveMetaSkillUsage(text: string): string | null {
   const normalized = text.toLowerCase();
-  const patterns = [
-    /\b(?:i(?:'ll| will)?|let me|going to|should|need to|can)\s+(?:use|load|invoke|follow|read)\s+brainstorming\b/,
-    /\b(?:i(?:'ll| will)?|let me|going to|should|need to|can)\s+(?:use|load|invoke|follow|read)\s+writing-plans\b/,
-  ];
-
-  for (const pattern of patterns) {
-    const match = normalized.match(pattern);
-    if (match) return match[0];
-  }
-
-  return null;
+  return findAcceptedMatch(normalized, [
+    /\b(?:i|i(?:'m| am)|i(?:'ve| have)|i(?:'d| would)|i(?:'ll| will)?|let me|going to|should|need to|can)\s+(?:use|used|using|load|loaded|loading|invoke|invoked|invoking|follow|followed|following|read|reading)\s+brainstorming\b/g,
+    /\b(?:i|i(?:'m| am)|i(?:'ve| have)|i(?:'d| would)|i(?:'ll| will)?|let me|going to|should|need to|can)\s+(?:use|used|using|load|loaded|loading|invoke|invoked|invoking|follow|followed|following|read|reading)\s+writing-plans\b/g,
+  ]);
 }
 
 function matchCodingAgentIntent(text: string): string | null {
   const normalized = text.toLowerCase();
-  const pattern = /\b(?:i(?:'ll| will)?|let me|going to|should|need to)\s+(?:use|load|invoke|follow|read)\b[\s\S]{0,40}\bcoding-agent\b/;
-  const match = normalized.match(pattern);
-  return match ? match[0] : null;
+  return findAcceptedMatch(normalized, [
+    /\b(?:i|i(?:'m| am)|i(?:'ve| have)|i(?:'d| would)|i(?:'ll| will)?|let me|going to|should|need to)\s+(?:use|used|using|load|loaded|loading|invoke|invoked|invoking|follow|followed|following|read|reading)\b[\s\S]{0,80}\bcoding-agent\b/g,
+  ]);
 }
 
 function matchNestedCommand(text: string): string | null {
   const normalized = text.toLowerCase();
   const match = normalized.match(/\bcodex exec --full-auto\b/);
   return match ? match[0] : null;
+}
+
+function findAcceptedMatch(normalized: string, patterns: RegExp[]): string | null {
+  for (const pattern of patterns) {
+    for (const match of normalized.matchAll(pattern)) {
+      const matchedText = match[0];
+      if (!matchedText) continue;
+      const start = match.index ?? 0;
+      const end = start + matchedText.length;
+      if (hasImmediateRejection(normalized, end)) continue;
+      return matchedText;
+    }
+  }
+
+  return null;
+}
+
+function hasImmediateRejection(normalized: string, matchEnd: number): boolean {
+  const trailingClause = normalized.slice(matchEnd, matchEnd + 120);
+  return /\b(?:but|however|though|except)\b[\s\S]{0,80}\b(?:forbid|forbids|forbidden|can't|cannot|can not|won't|will not|must not|should not|do not|don't|did not|didn't|never|stay|stayed)\b/.test(trailingClause);
 }
 
 export async function resolveWorkerSessionContext(

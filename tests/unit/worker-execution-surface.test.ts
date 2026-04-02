@@ -146,6 +146,36 @@ describe("worker execution surface", () => {
     );
   });
 
+  it("classifies past-tense meta-skill admissions as invalid execution paths", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "I used brainstorming before editing the worker completion logic.",
+          },
+        ],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
+        violationReason: "meta_skill",
+        evidence: expect.stringContaining("used brainstorming"),
+      }),
+    );
+  });
+
   it("classifies explicit nested delegation language as an invalid execution path", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 
@@ -172,6 +202,53 @@ describe("worker execution surface", () => {
         reason: "invalid_execution_path",
         violationReason: "nested_coding_agent",
         evidence: expect.stringContaining("spawn a coding agent"),
+      }),
+    );
+  });
+
+  it("classifies past-tense nested delegation admissions as invalid execution paths", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const usedCodingAgent = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "I used coding-agent to handle this task.",
+          },
+        ],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(usedCodingAgent).toMatchObject({ applied: false, reason: "invalid_execution_path" });
+
+    const delegatedToCodex = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "I delegated this issue to Codex and waited for it to finish.",
+          },
+        ],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(delegatedToCodex).toMatchObject({ applied: false, reason: "invalid_execution_path" });
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
+        violationReason: "nested_coding_agent",
+        evidence: expect.stringMatching(/used coding-agent|delegated this issue to codex/),
       }),
     );
   });
@@ -220,6 +297,42 @@ describe("worker execution surface", () => {
         reason: "invalid_execution_path",
         violationReason: "nested_coding_agent",
         evidence: expect.stringMatching(/coding-agent|codex exec --full-auto/),
+      }),
+    );
+  });
+
+  it("does not flag concessive meta-skill wording that rejects the action right after mentioning it", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "I should use brainstorming, but the prompt forbids it.",
+          },
+        ],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
+    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "demo",
+      7,
+      expect.objectContaining({
+        inconclusiveCompletionReason: "missing_result_line",
+      }),
+    );
+    expect(mockAuditLog).not.toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
       }),
     );
   });
