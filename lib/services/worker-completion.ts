@@ -448,7 +448,8 @@ function findAcceptedMatch(
       const matchedText = match[0];
       if (!matchedText) continue;
       const end = (match.index ?? 0) + matchedText.length;
-      if (rejectOnConcession && hasImmediateRejection(normalized, end)) continue;
+      if (hasImmediateActRetraction(normalized, end)) continue;
+      if (rejectOnConcession && hasImmediatePolicyRejection(normalized, end)) continue;
       return matchedText;
     }
   }
@@ -456,7 +457,12 @@ function findAcceptedMatch(
   return null;
 }
 
-function hasImmediateRejection(normalized: string, matchEnd: number): boolean {
+function hasImmediateActRetraction(normalized: string, matchEnd: number): boolean {
+  const trailingClause = normalized.slice(matchEnd, matchEnd + 120);
+  return /\b(?:but|however|though|except)\b[\s\S]{0,80}\b(?:didn't actually|did not actually|never)\b[\s\S]{0,20}\b(?:do it|did|do so|use it|use that|delegate it|launch it|spawn it)\b/.test(trailingClause);
+}
+
+function hasImmediatePolicyRejection(normalized: string, matchEnd: number): boolean {
   const trailingClause = normalized.slice(matchEnd, matchEnd + 120);
   return /\b(?:but|however|though|except)\b[\s\S]{0,80}\b(?:forbid|forbids|forbidden|can't|cannot|can not|won't|will not|must not|should not|do not|don't|did not|didn't|never|stay|stayed)\b/.test(trailingClause);
 }
