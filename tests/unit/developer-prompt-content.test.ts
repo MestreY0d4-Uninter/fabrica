@@ -120,9 +120,12 @@ describe("developer prompt anti-pattern checklist", () => {
     const branchWorkflow = getSection(testerContent, "### 1. Open the PR branch in its dedicated worktree");
 
     expect(branchWorkflow).toContain("dedicated worktree");
-    expect(branchWorkflow).toContain("git worktree add");
+    expect(branchWorkflow).toMatch(/git -C "\$REPO_ROOT" remote get-url origin/);
+    expect(branchWorkflow).toMatch(/git -C "\$REPO_ROOT" worktree add/);
     expect(branchWorkflow).toMatch(/git -C "\$REPO_ROOT" fetch origin/);
     expect(branchWorkflow).toContain("cd \"$WORKTREE\"");
+    expect(branchWorkflow).toMatch(/git -C "\$REPO_ROOT" checkout main/);
+    expect(branchWorkflow).toMatch(/git -C "\$REPO_ROOT" pull origin main/);
     expect(branchWorkflow).toMatch(/do not use the main checkout/i);
     expect(branchWorkflow).not.toContain("git checkout \"$PR_BRANCH\"");
   });

@@ -32,7 +32,7 @@ git -C "$REPO_ROOT" fetch origin
 
 # Find the PR for this issue by branch naming convention
 ISSUE_NUM=<issue number from task message>
-REMOTE_URL="$(git remote get-url origin)"
+REMOTE_URL="$(git -C "$REPO_ROOT" remote get-url origin)"
 PR_BRANCH=$(gh pr list --repo "$REMOTE_URL" --state open --json headRefName --jq "[.[] | select(.headRefName | test(\"/(${ISSUE_NUM})-\"))][0].headRefName" 2>/dev/null)
 
 if [[ -n "$PR_BRANCH" && "$PR_BRANCH" != "null" ]]; then
@@ -42,14 +42,14 @@ if [[ -n "$PR_BRANCH" && "$PR_BRANCH" != "null" ]]; then
     cd "$WORKTREE"
   else
     # Open PR exists with matching branch — create the dedicated worktree
-    git worktree add "$WORKTREE" "origin/$PR_BRANCH"
+    git -C "$REPO_ROOT" worktree add "$WORKTREE" "origin/$PR_BRANCH"
     cd "$WORKTREE"
   fi
   echo "Testing PR branch in dedicated worktree: $WORKTREE"
 else
   # No open PR for this issue — test on main (post-merge scenario)
   cd "$REPO_ROOT"
-  git checkout main && git pull origin main
+  git -C "$REPO_ROOT" checkout main && git -C "$REPO_ROOT" pull origin main
   echo "Testing main branch (PR already merged)"
 fi
 ```
