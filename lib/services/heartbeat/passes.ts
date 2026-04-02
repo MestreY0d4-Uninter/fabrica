@@ -30,6 +30,7 @@ import {
   handleReviewerAgentEnd,
   resolveReviewerDecisionTransition,
 } from "../reviewer-completion.js";
+import { wakeHeartbeat } from "./wake-bridge.js";
 
 // ---------------------------------------------------------------------------
 // Passes
@@ -567,6 +568,10 @@ export async function performReviewerPollPass(
         from: activeLabel,
         to: transition.targetLabel,
       }).catch(() => {});
+
+      if (reviewResult === "reject") {
+        wakeHeartbeat("reviewer_reject_retriage").catch(() => {});
+      }
 
       transitions++;
     }

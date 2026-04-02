@@ -10,6 +10,7 @@ const {
   mockResilientLabelTransition,
   mockNotify,
   mockGetNotificationConfig,
+  mockWakeHeartbeat,
 } = vi.hoisted(() => ({
   mockAuditLog: vi.fn(),
   mockReadProjects: vi.fn(),
@@ -19,6 +20,7 @@ const {
   mockResilientLabelTransition: vi.fn(),
   mockNotify: vi.fn(),
   mockGetNotificationConfig: vi.fn(),
+  mockWakeHeartbeat: vi.fn(),
 }));
 
 vi.mock("../../lib/audit.js", () => ({
@@ -47,6 +49,10 @@ vi.mock("../../lib/workflow/labels.js", () => ({
 vi.mock("../../lib/dispatch/notify.js", () => ({
   notify: mockNotify,
   getNotificationConfig: mockGetNotificationConfig,
+}));
+
+vi.mock("../../lib/services/heartbeat/wake-bridge.js", () => ({
+  wakeHeartbeat: mockWakeHeartbeat,
 }));
 
 import {
@@ -118,6 +124,7 @@ describe("reviewer-completion", () => {
     mockGetNotificationConfig.mockImplementation((cfg?: { notifications?: Record<string, unknown> }) => (
       (cfg?.notifications as Record<string, unknown>) ?? {}
     ));
+    mockWakeHeartbeat.mockResolvedValue(undefined);
   });
 
   it("maps approve to the reviewing APPROVE transition", () => {
@@ -246,5 +253,6 @@ describe("reviewer-completion", () => {
         reviewRejected: true,
       },
     });
+    expect(mockWakeHeartbeat).toHaveBeenCalledWith("reviewer_reject_retriage");
   });
 });

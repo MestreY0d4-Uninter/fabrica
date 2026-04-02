@@ -7,12 +7,14 @@ const {
   mockReadProjects,
   mockResilientLabelTransition,
   mockAuditLog,
+  mockWakeHeartbeat,
 } = vi.hoisted(() => ({
   mockHandleReviewerAgentEnd: vi.fn(),
   mockDeactivateWorker: vi.fn(),
   mockReadProjects: vi.fn(),
   mockResilientLabelTransition: vi.fn(),
   mockAuditLog: vi.fn(),
+  mockWakeHeartbeat: vi.fn(),
 }));
 
 vi.mock("../../lib/services/reviewer-completion.js", async () => {
@@ -44,6 +46,10 @@ vi.mock("../../lib/audit.js", () => ({
   log: mockAuditLog,
 }));
 
+vi.mock("../../lib/services/heartbeat/wake-bridge.js", () => ({
+  wakeHeartbeat: mockWakeHeartbeat,
+}));
+
 describe("performReviewerPollPass", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -51,6 +57,7 @@ describe("performReviewerPollPass", () => {
     mockDeactivateWorker.mockResolvedValue(undefined);
     mockReadProjects.mockRejectedValue(new Error("not configured"));
     mockResilientLabelTransition.mockResolvedValue(undefined);
+    mockWakeHeartbeat.mockResolvedValue(undefined);
   });
 
   it("reuses the shared reviewer completion handler and reviewing APPROVE semantics", async () => {
@@ -162,6 +169,47 @@ describe("performReviewerPollPass", () => {
         from: "Reviewing",
       }),
     );
+  });
+
+  it("requests a follow-up pickup tick when reviewer poll rejects", async () => {
+    mockHandleReviewerAgentEnd.mockResolvedValue("reject");
+
+    const { performReviewerPollPass } = await import("../../lib/services/heartbeat/passes.js");
+
+    const provider = {
+      getIssue: vi.fn().mockResolvedValue({ iid: 42, labels: ["Reviewing"] }),
+    };
+
+    const project = {
+      name: "demo",
+      workers: {
+        reviewer: {
+          levels: {
+            junior: [
+              {
+                active: true,
+                issueId: "42",
+                sessionKey: "agent:main:subagent:demo-reviewer-junior-ada",
+                startTime: new Date(Date.now() - 5 * 60_000).toISOString(),
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const transitions = await performReviewerPollPass(
+      "/tmp/workspace",
+      "demo",
+      project as any,
+      provider as any,
+      { workflow: DEFAULT_WORKFLOW } as any,
+      {} as any,
+    );
+
+    expect(transitions).toBe(1);
+    expect(mockResilientLabelTransition).toHaveBeenCalledWith(provider, 42, "Reviewing", "To Improve");
+    expect(mockWakeHeartbeat).toHaveBeenCalledWith("reviewer_reject_retriage");
   });
 
   it("does not let provider review polling override an active reviewer session", async () => {

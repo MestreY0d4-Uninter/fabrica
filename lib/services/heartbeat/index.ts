@@ -26,6 +26,7 @@ import { raceWithTimeout } from "../../utils/async.js";
 export { raceWithTimeout } from "../../utils/async.js";
 import { loadConfig } from "../../config/index.js";
 import { recoverDueTelegramBootstrapSessions } from "../../dispatch/telegram-bootstrap-hook.js";
+import { log as auditLog } from "../../audit.js";
 
 export { HEARTBEAT_DEFAULTS };
 import { tick, type TickMode } from "./tick-runner.js";
@@ -70,6 +71,17 @@ function listBootstrapRecoveryWorkspaces(config: {
 
 export { listBootstrapRecoveryWorkspaces as _testListBootstrapRecoveryWorkspaces };
 
+async function auditHeartbeatEvent(
+  workspaceDirs: string[],
+  event: string,
+  details: Record<string, unknown>,
+): Promise<void> {
+  const uniqueWorkspaces = [...new Set(workspaceDirs.filter((workspace): workspace is string => Boolean(workspace)))];
+  for (const workspaceDir of uniqueWorkspaces) {
+    await auditLog(workspaceDir, event, details).catch(() => {});
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -84,6 +96,12 @@ export function registerHeartbeatService(api: OpenClawPluginApi, pluginCtx: Plug
     start: async (svcCtx: ServiceContext) => {
       const { intervalSeconds } = resolveHeartbeatConfig(pluginCtx.pluginConfig);
       const intervalMs = intervalSeconds * 1000;
+      const heartbeatWorkspaces = listBootstrapRecoveryWorkspaces(pluginCtx.config);
+
+      await auditHeartbeatEvent(heartbeatWorkspaces, "heartbeat_service_started", {
+        intervalSeconds,
+        intervalMs,
+      });
 
       // Warm-up: run full tick immediately on start.
       setTimeout(() => runHeartbeatTick(pluginCtx, svcCtx.logger, "full"), 2_000);
@@ -123,6 +141,8 @@ export function registerHeartbeatService(api: OpenClawPluginApi, pluginCtx: Plug
         sharedIntervalId = null;
         svcCtx.logger.info("work_heartbeat service stopped");
       }
+      const heartbeatWorkspaces = listBootstrapRecoveryWorkspaces(pluginCtx.config);
+      await auditHeartbeatEvent(heartbeatWorkspaces, "heartbeat_service_stopped", {}).catch(() => {});
     },
   });
 }
@@ -175,9 +195,11 @@ async function runHeartbeatTick(
   _anyTickRunning = true;
   _tickRunning[mode] = true;
   let timedOut = false;
+  let auditWorkspaces: string[] = [];
   try {
     const recoveryWorkspaces = listBootstrapRecoveryWorkspaces(ctx.config);
     const workspace = discoverAgents(ctx.config)[0]?.workspace ?? recoveryWorkspaces[0];
+    auditWorkspaces = [...new Set([...recoveryWorkspaces, workspace].filter((entry): entry is string => Boolean(entry)))];
     const resolvedWorkspaceConfig = workspace
       ? await loadConfig(workspace).catch(() => null)
       : null;
@@ -245,17 +267,32 @@ async function runHeartbeatTick(
       _ticksTimedOut++;
       timedOut = true;
       logger.warn(`work_heartbeat ${mode} tick timed out after ${tickTimeoutMs}ms (total timeouts: ${_ticksTimedOut})`);
+      void auditHeartbeatEvent(auditWorkspaces, "heartbeat_tick_timeout", {
+        mode,
+        tickTimeoutMs,
+        totalTimeouts: _ticksTimedOut,
+      });
       // Do NOT release mutex here — the tick promise is still running.
       // Release it when the promise settles (see .finally() below).
       // tickPromise is always defined (deferred pattern) — no guard needed.
       const hardTimeout = setTimeout(() => {
         logger.error("tick_mutex: hard timeout — forcing mutex release");
+        void auditHeartbeatEvent(auditWorkspaces, "heartbeat_tick_hard_timeout", {
+          mode,
+          hardTimeoutMs: HARD_TICK_TIMEOUT_MS,
+          tickTimeoutMs,
+        });
         _tickRunning[mode] = false;
         _anyTickRunning = false;
       }, HARD_TICK_TIMEOUT_MS);
 
       tickPromise.finally(() => {
         clearTimeout(hardTimeout);
+        void auditHeartbeatEvent(auditWorkspaces, "heartbeat_tick_timeout_recovered", {
+          mode,
+          tickTimeoutMs,
+          totalTimeouts: _ticksTimedOut,
+        });
         _tickRunning[mode] = false;
         _anyTickRunning = false;
       });
@@ -263,6 +300,10 @@ async function runHeartbeatTick(
     void raceResult;
   } catch (err) {
     logger.error(`work_heartbeat ${mode} tick failed: ${err}`);
+    await auditHeartbeatEvent(auditWorkspaces, "heartbeat_tick_failed", {
+      mode,
+      error: err instanceof Error ? err.message : String(err),
+    }).catch(() => {});
   } finally {
     // Only release the mutex here for the non-timeout path.
     // The timeout path attaches a .finally() to tickPromise instead.

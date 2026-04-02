@@ -7,6 +7,7 @@ import { findStateByLabel, getActiveLabel, getRevertLabel, type WorkflowConfig, 
 import type { RunCommand } from "../context.js";
 import { getNotificationConfig, notify } from "../dispatch/notify.js";
 import { parseFabricaSessionKey } from "../dispatch/bootstrap-hook.js";
+import { wakeHeartbeat } from "./heartbeat/wake-bridge.js";
 import {
   extractReviewerDecisionFromMessages,
   extractReviewerRationaleFromMessages,
@@ -127,6 +128,10 @@ export async function handleReviewerAgentEnd(opts: {
           runCommand: opts.runCommand,
         },
       ).catch(() => {});
+
+      if (decision === "reject") {
+        wakeHeartbeat("reviewer_reject_retriage").catch(() => {});
+      }
     }
     return decision;
   }
