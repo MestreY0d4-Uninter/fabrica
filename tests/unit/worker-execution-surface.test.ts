@@ -176,6 +176,36 @@ describe("worker execution surface", () => {
     );
   });
 
+  it("keeps admitted meta-skill violations invalid even with a trailing disclaimer", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "I used brainstorming, but the prompt forbids it.",
+          },
+        ],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
+        violationReason: "meta_skill",
+        evidence: expect.stringContaining("used brainstorming"),
+      }),
+    );
+  });
+
   it("classifies explicit nested delegation language as an invalid execution path", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 
@@ -249,6 +279,72 @@ describe("worker execution surface", () => {
         reason: "invalid_execution_path",
         violationReason: "nested_coding_agent",
         evidence: expect.stringMatching(/used coding-agent|delegated this issue to codex/),
+      }),
+    );
+  });
+
+  it("keeps admitted nested delegation violations invalid even with a trailing disclaimer", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "I delegated this issue to Codex, but the prompt forbids it.",
+          },
+        ],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
+        violationReason: "nested_coding_agent",
+        evidence: expect.stringContaining("delegated this issue to codex"),
+      }),
+    );
+  });
+
+  it("does not flag benign codex self-reference when the work stayed direct", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "I used Codex to inspect this issue and then edited the files directly.",
+          },
+        ],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
+    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "demo",
+      7,
+      expect.objectContaining({
+        inconclusiveCompletionReason: "missing_result_line",
+      }),
+    );
+    expect(mockAuditLog).not.toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_completion_inconclusive",
+      expect.objectContaining({
+        reason: "invalid_execution_path",
       }),
     );
   });

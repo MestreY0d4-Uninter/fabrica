@@ -374,24 +374,62 @@ function collectContentEvidence(
 function matchPositiveExplicitDelegation(text: string): string | null {
   const normalized = text.toLowerCase();
   return findAcceptedMatch(normalized, [
-    /\b(?:i|i(?:'ll| will)?|let me|going to|should|need to)\s+(?:spawn|delegate|delegated|delegating|launch|launched|launching|hand off|handed off|handoff)\b[\s\S]{0,80}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b[\s\S]{0,80}\b(?:task|work|issue|implement|handle|complete|finish)\b/g,
-    /\b(?:i|i(?:'ll| will)?|let me|going to|should|need to)\s+(?:delegate|delegated|delegating|hand off|handed off|handoff)\b[\s\S]{0,40}\b(?:task|work|issue)\b[\s\S]{0,40}\bto\b[\s\S]{0,20}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b/g,
-    /\b(?:i|i(?:'m| am)|i(?:'ve| have)|i(?:'d| would)|i(?:'ll| will)?)\s+(?:use|used|using)\b[\s\S]{0,20}\b(?:coding agent|coding-agent|codex|subagent)\b[\s\S]{0,80}\b(?:task|work|issue|implement|handle|complete|finish)\b/g,
+    {
+      pattern: /\b(?:i(?:'ll| will)?|let me|going to|should|need to)\s+(?:spawn|delegate|delegating|launch|launching|hand off|handoff)\b[\s\S]{0,80}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b[\s\S]{0,80}\b(?:task|work|issue|implement|handle|complete|finish)\b/g,
+      rejectOnConcession: true,
+    },
+    {
+      pattern: /\b(?:i(?:'ve| have)|i(?:'m| am)|i)\s+(?:spawned|delegated|launched|handed off)\b[\s\S]{0,80}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b[\s\S]{0,80}\b(?:task|work|issue|implement|handle|complete|finish)\b/g,
+      rejectOnConcession: false,
+    },
+    {
+      pattern: /\b(?:i(?:'ll| will)?|let me|going to|should|need to)\s+(?:delegate|hand off|handoff)\b[\s\S]{0,40}\b(?:task|work|issue)\b[\s\S]{0,40}\bto\b[\s\S]{0,20}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b/g,
+      rejectOnConcession: true,
+    },
+    {
+      pattern: /\b(?:i(?:'ve| have)|i(?:'m| am)|i)\s+(?:delegated|handed off)\b[\s\S]{0,40}\b(?:task|work|issue)\b[\s\S]{0,40}\bto\b[\s\S]{0,20}\b(?:coding agent|coding-agent|codex|subagent|another agent|child agent)\b/g,
+      rejectOnConcession: false,
+    },
+    {
+      pattern: /\b(?:i(?:'ve| have)|i(?:'m| am)|i)\s+(?:use|used|using)\b[\s\S]{0,20}\b(?:coding agent|coding-agent|subagent)\b[\s\S]{0,80}\b(?:task|work|issue|implement|handle|complete|finish)\b/g,
+      rejectOnConcession: false,
+    },
   ]);
 }
 
 function matchPositiveMetaSkillUsage(text: string): string | null {
   const normalized = text.toLowerCase();
   return findAcceptedMatch(normalized, [
-    /\b(?:i|i(?:'m| am)|i(?:'ve| have)|i(?:'d| would)|i(?:'ll| will)?|let me|going to|should|need to|can)\s+(?:use|used|using|load|loaded|loading|invoke|invoked|invoking|follow|followed|following|read|reading)\s+brainstorming\b/g,
-    /\b(?:i|i(?:'m| am)|i(?:'ve| have)|i(?:'d| would)|i(?:'ll| will)?|let me|going to|should|need to|can)\s+(?:use|used|using|load|loaded|loading|invoke|invoked|invoking|follow|followed|following|read|reading)\s+writing-plans\b/g,
+    {
+      pattern: /\b(?:i(?:'ll| will)?|let me|going to|should|need to|can)\s+(?:use|load|invoke|follow|read)\s+brainstorming\b/g,
+      rejectOnConcession: true,
+    },
+    {
+      pattern: /\b(?:i(?:'ll| will)?|let me|going to|should|need to|can)\s+(?:use|load|invoke|follow|read)\s+writing-plans\b/g,
+      rejectOnConcession: true,
+    },
+    {
+      pattern: /\b(?:i(?:'ve| have)|i(?:'m| am)|i)\s+(?:use|used|using|load|loaded|loading|invoke|invoked|invoking|follow|followed|following|read|reading)\s+brainstorming\b/g,
+      rejectOnConcession: false,
+    },
+    {
+      pattern: /\b(?:i(?:'ve| have)|i(?:'m| am)|i)\s+(?:use|used|using|load|loaded|loading|invoke|invoked|invoking|follow|followed|following|read|reading)\s+writing-plans\b/g,
+      rejectOnConcession: false,
+    },
   ]);
 }
 
 function matchCodingAgentIntent(text: string): string | null {
   const normalized = text.toLowerCase();
   return findAcceptedMatch(normalized, [
-    /\b(?:i|i(?:'m| am)|i(?:'ve| have)|i(?:'d| would)|i(?:'ll| will)?|let me|going to|should|need to)\s+(?:use|used|using|load|loaded|loading|invoke|invoked|invoking|follow|followed|following|read|reading)\b[\s\S]{0,80}\bcoding-agent\b/g,
+    {
+      pattern: /\b(?:i(?:'ll| will)?|let me|going to|should|need to)\s+(?:use|load|invoke|follow|read)\b[\s\S]{0,80}\bcoding-agent\b/g,
+      rejectOnConcession: true,
+    },
+    {
+      pattern: /\b(?:i(?:'ve| have)|i(?:'m| am)|i)\s+(?:use|used|using|load|loaded|loading|invoke|invoked|invoking|follow|followed|following|read|reading)\b[\s\S]{0,80}\bcoding-agent\b/g,
+      rejectOnConcession: false,
+    },
   ]);
 }
 
@@ -401,14 +439,16 @@ function matchNestedCommand(text: string): string | null {
   return match ? match[0] : null;
 }
 
-function findAcceptedMatch(normalized: string, patterns: RegExp[]): string | null {
-  for (const pattern of patterns) {
+function findAcceptedMatch(
+  normalized: string,
+  patterns: Array<{ pattern: RegExp; rejectOnConcession: boolean }>,
+): string | null {
+  for (const { pattern, rejectOnConcession } of patterns) {
     for (const match of normalized.matchAll(pattern)) {
       const matchedText = match[0];
       if (!matchedText) continue;
-      const start = match.index ?? 0;
-      const end = start + matchedText.length;
-      if (hasImmediateRejection(normalized, end)) continue;
+      const end = (match.index ?? 0) + matchedText.length;
+      if (rejectOnConcession && hasImmediateRejection(normalized, end)) continue;
       return matchedText;
     }
   }
