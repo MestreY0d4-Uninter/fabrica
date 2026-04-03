@@ -95,6 +95,40 @@ Behavior:
 
 This turns "late classify result" from an error into a supported normal case.
 
+#### Reconciliation trigger and owner
+
+Reconciliation is owned by the existing bootstrap recovery flow, not by a new subsystem.
+
+That means:
+
+- the same recovery path that already resumes `bootstrapping` and `dispatching` attempts becomes responsible for checking classify-completion state
+- no separate feature, daemon, or agent is introduced
+- the intake hook may opportunistically reconcile an already-finished classify result, but it is not the sole owner of that responsibility
+
+Primary trigger:
+
+- bootstrap recovery/heartbeat pass sees a session in `pending_classify` or `classifying`
+- if the session is due for reconciliation, it checks whether the classify run has already produced a usable result
+- if yes, it advances the same attempt
+- if not, it leaves the attempt active until TTL or retry policy says otherwise
+
+Secondary trigger:
+
+- a subsequent DM in the same conversation may also cause the intake path to refresh or reconcile the same attempt instead of starting from scratch
+
+#### Late-result delivery path
+
+Late classify results are not delivered by a new callback channel.
+
+Instead, reconciliation reads the existing classify session output through the current subagent/session facilities already used by the plugin:
+
+- the bootstrap session stores enough classify-run identity to re-check the classify session
+- recovery uses that identity to inspect the eventual result
+- if the result is valid for the same bootstrap attempt, it is merged into that attempt
+- if the result belongs to an older or superseded attempt, it is ignored as stale
+
+This keeps the design within the current architecture while making late results first-class.
+
 ### 4. Explicit handoff outcomes
 
 The transition from classification to bootstrap resume must stop being silent.
@@ -107,6 +141,14 @@ Any handoff attempt must end in one of these explicit results:
 - `failed_to_start`
 
 The caller must inspect that result and log or persist it. `null` or equivalent silent no-op behavior is not acceptable in this path.
+
+Definition of `superseded`:
+
+- the current handoff candidate belongs to an older bootstrap attempt for the same conversation
+- a newer attempt already owns the conversation
+- the older candidate must not advance state or overwrite checkpoints
+
+`superseded` is not a generic failure. It is a stale-attempt outcome.
 
 ### 5. Canonical Telegram conversation identity
 
@@ -132,6 +174,27 @@ Instead:
 - the decision must leave audit evidence
 
 This avoids invisible loss of state and makes bootstrap lifecycle explainable.
+
+#### TTL policy
+
+The plugin should keep the existing short-lived intent of classify states, but the policy must now be explicit:
+
+- `pending_classify`
+  - short TTL, intended only for classify startup and immediate reconciliation window
+- `classifying`
+  - slightly longer TTL than `pending_classify`, intended to allow delayed classify completion and recovery inspection
+
+The exact values should remain implementation-level constants, but the behavior must be fixed:
+
+- expiry is checked by explicit recovery/cleanup logic
+- expiry produces an auditable cleanup outcome
+- expiry is not allowed to silently happen as a side effect of `readTelegramBootstrapSession()`
+
+If a classify attempt expires without a usable result:
+
+- the bootstrap attempt transitions explicitly to failure or release state
+- suppress state is released consistently
+- the cleanup reason is auditable
 
 ## State Model
 
@@ -188,6 +251,14 @@ New behavior:
 - reconcile the result into the existing bootstrap attempt
 - continue to `bootstrapping` or `clarifying`
 
+Late classify reconciliation is only valid when:
+
+- the classify result is associated with the current bootstrap attempt
+- the attempt has not expired
+- the attempt has not been superseded
+
+Otherwise the classify result is discarded as stale and recorded as such.
+
 ### Handoff already active
 
 Current behavior:
@@ -207,6 +278,24 @@ Still allowed to fail, but explicitly:
 - record why the bootstrap failed
 - do not leave suppress state ambiguous
 
+### Suppress lifecycle coupling
+
+Suppress state is not independent from bootstrap state.
+
+Rules:
+
+- active bootstrap states suppress ordinary agent replies
+- terminal bootstrap states release ordinary-agent suppression
+- recovery-owned states continue suppressing only while the bootstrap attempt is still active and valid
+- expired or failed classify/bootstrap attempts must explicitly release suppress behavior
+
+This prevents both failure modes:
+
+- a conversation remaining silenced forever after bootstrap died
+- a normal agent reply leaking while bootstrap still legitimately owns the turn
+
+The same canonical conversation identity must be used for both bootstrap state and suppress checks.
+
 ## Observability
 
 Add minimal early-path auditability only where it explains real state transitions.
@@ -224,6 +313,27 @@ Recommended events:
 - `telegram_bootstrap_cleanup_expired`
 
 This is not a logging expansion for its own sake. It is the minimum needed to explain why a valid request did or did not become a project.
+
+Minimum payload contract for every early-path event:
+
+- `conversationIdCanonical`
+- `attemptId`
+- `attemptSeq`
+- `status`
+- `requestHash`
+
+Additional required fields by event family:
+
+- classify events
+  - `classifyRunKey` or equivalent classify identity
+  - `waitStatus`
+- handoff events
+  - `handoffOutcome`
+- cleanup events
+  - `cleanupReason`
+- stale/superseded events
+  - `supersededByAttemptId`
+  - `supersededByAttemptSeq`
 
 ## Kiro Review Lane
 
@@ -269,6 +379,13 @@ Required regressions:
    - expired transient state is cleaned explicitly
    - cleanup is auditable
 
+6. suppress lifecycle
+   - suppression remains active while bootstrap owns the conversation
+   - suppression is released on terminal/expired bootstrap outcomes
+
+7. superseded classify result
+   - stale classify output from an older attempt cannot overwrite a newer one
+
 ## Validation Criteria
 
 The change is only correct if all of the following are true:
@@ -278,6 +395,8 @@ The change is only correct if all of the following are true:
 3. The handoff from classify to bootstrap cannot silently no-op.
 4. Telegram identity is consistent across intake and suppress paths.
 5. A real prompt such as `csv-peek` can be revalidated end-to-end after implementation.
+6. A late classify result cannot resurrect or overwrite a superseded attempt.
+7. A failed or expired bootstrap attempt cannot leave the DM permanently suppressed.
 
 ## Recommended Scope
 
