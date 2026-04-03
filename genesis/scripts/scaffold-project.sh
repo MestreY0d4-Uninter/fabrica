@@ -103,6 +103,7 @@ else
   DELIVERY_TARGET="$(genesis_cross_validate_delivery_target "$DELIVERY_TARGET_NORMALIZED" "${GENESIS_IDEA:-$TITLE}")"
 fi
 INPUT_REPO_URL="$(echo "$INPUT" | jq -r '.metadata.repo_url // .repo_url // .repo // .scaffold.repo_url // empty')"
+INPUT_REPO_PATH="$(echo "$INPUT" | jq -r '.metadata.repo_path // .metadata.scaffold_plan.repo_local // empty')"
 INPUT_PROJECT_NAME="$(echo "$INPUT" | jq -r '.metadata.project_name // .project_name // .name // .repo_name // empty')"
 EXPLICIT_OWNER_REPO="$(genesis_parse_owner_repo "$INPUT_REPO_URL" || true)"
 
@@ -189,7 +190,7 @@ if ! validate_repo_name "$REPO_NAME"; then
 fi
 
 REPO_URL="https://github.com/$GH_OWNER/$REPO_NAME"
-REPO_LOCAL="$HOME/git/$REPO_NAME"
+REPO_LOCAL="${INPUT_REPO_PATH:-$HOME/git/$REPO_NAME}"
 
 echo "Repo: $GH_OWNER/$REPO_NAME, Stack: $STACK" >&2
 

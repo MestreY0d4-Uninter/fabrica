@@ -1,4 +1,3 @@
-import path from "node:path";
 import { z } from "zod";
 import type {
   CanonicalStack,
@@ -17,6 +16,7 @@ import {
 } from "./stack-detection.js";
 import {
   deriveRepoName,
+  deriveRepoLocalPath,
   normalizeIntakeText as normalizeText,
   parseOwnerRepo,
   sanitizeRepoName,
@@ -109,7 +109,7 @@ export async function buildScaffoldPlan(
   const repoUrl = explicitOwnerRepo
     ? `https://github.com/${explicitOwnerRepo.owner}/${explicitOwnerRepo.repo}`
     : `https://github.com/${owner}/${repoName}`;
-  const repoLocal = normalizeText(payload.metadata.repo_path) ?? path.join(ctx.homeDir, "git", owner, repoName);
+  const repoLocal = normalizeText(payload.metadata.repo_path) ?? deriveRepoLocalPath(ctx.homeDir, owner, repoName);
   const objective = normalizeText(payload.spec?.objective) ?? normalizeText(payload.raw_idea) ?? "Auto-scaffolded project";
 
   return scaffoldPlanSchema.parse({
@@ -152,6 +152,11 @@ export async function executeScaffoldPlan(
     if (parsed.created && parsed.stack !== plan.stack) {
       throw new Error(
         `Scaffold materialized stack "${parsed.stack ?? "unknown"}" but the planned stack was "${plan.stack}".`,
+      );
+    }
+    if (parsed.created && parsed.repo_local && parsed.repo_local !== plan.repo_local) {
+      throw new Error(
+        `Scaffold materialized repo_local "${parsed.repo_local}" but the planned repo_local was "${plan.repo_local}".`,
       );
     }
   }

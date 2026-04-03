@@ -23,6 +23,17 @@ async function readAuditEvents(workspaceDir: string): Promise<Array<Record<strin
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
+const VALID_DEVELOPER_QA_EVIDENCE = [
+  "## QA Evidence",
+  "lint",
+  "types",
+  "security",
+  "tests",
+  "coverage",
+  "Total coverage: 85%",
+  "Exit code: 0",
+].join("\n");
+
 describe("checkWorkerHealth", () => {
   let h: TestHarness | null = null;
 
@@ -674,6 +685,297 @@ describe("checkWorkerHealth", () => {
         expect.objectContaining({
           event: "first_worker_activity",
           source: "heartbeat_session_activity",
+        }),
+      ]),
+    );
+  });
+
+  it("repairs a terminal developer session when the transcript contains a canonical final result", async () => {
+    h = await createTestHarness({
+      workers: {
+        developer: {
+          active: true,
+          issueId: "42",
+          sessionKey: "agent:main:subagent:test-project-developer-senior-cecily",
+          level: "senior",
+          startTime: new Date(Date.now() - 20 * 60_000).toISOString(),
+          previousLabel: "To Do",
+        },
+      },
+    });
+    h.provider.seedIssue({ iid: 42, title: "Recover terminal developer completion", labels: ["Doing"] });
+    h.provider.setPrStatus(42, {
+      state: "open",
+      url: "https://example.com/pr/42",
+      body: VALID_DEVELOPER_QA_EVIDENCE,
+      linkedIssueIds: [42],
+      currentIssueMatch: true,
+    });
+
+    const transcriptPath = path.join(h.workspaceDir, "session-42.jsonl");
+    await fs.writeFile(
+      transcriptPath,
+      `${JSON.stringify({
+        role: "assistant",
+        content: [{ type: "text", text: "Work result: DONE" }],
+      })}\n`,
+      "utf-8",
+    );
+
+    const data = await h.readProjects();
+    data.projects[h.project.slug]!.issueRuntime = {
+      "42": {
+        dispatchRequestedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+        agentAcceptedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+        lastSessionKey: "agent:main:subagent:test-project-developer-senior-cecily",
+        firstWorkerActivityAt: new Date(Date.now() - 9 * 60_000).toISOString(),
+        sessionCompletedAt: null,
+      },
+    };
+    await writeProjects(h.workspaceDir, data);
+
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-senior-cecily",
+        {
+          key: "agent:main:subagent:test-project-developer-senior-cecily",
+          updatedAt: Date.now() - 60_000,
+          percentUsed: 15,
+          status: "done",
+          endedAt: Date.now() - 30_000,
+          sessionFile: transcriptPath,
+          sessionFileMtime: Date.now() - 1_000,
+        },
+      ],
+    ]);
+
+    const fixes = await checkWorkerHealth({
+      workspaceDir: h.workspaceDir,
+      projectSlug: h.project.slug,
+      project: data.projects[h.project.slug]!,
+      role: "developer",
+      autoFix: true,
+      provider: h.provider,
+      sessions,
+      staleWorkerHours: 999,
+      runCommand: h.runCommand,
+    });
+
+    expect(fixes).toHaveLength(1);
+    expect(fixes[0]?.fixed).toBe(true);
+
+    const issue = await h.provider.getIssue(42);
+    expect(issue.labels).toContain("To Review");
+    expect(issue.labels).not.toContain("Doing");
+    expect(h.provider.callsTo("transitionLabel")).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          args: expect.objectContaining({ from: "Doing", to: "To Do" }),
+        }),
+      ]),
+    );
+
+    const updated = await h.readProjects();
+    const slot = updated.projects[h.project.slug]!.workers.developer.levels.senior?.[0];
+    const runtime = updated.projects[h.project.slug]!.issueRuntime?.["42"];
+    expect(slot?.active).toBe(false);
+    expect(slot?.issueId).toBeNull();
+    expect(runtime?.sessionCompletedAt).toBeTruthy();
+
+    const events = await readAuditEvents(h.workspaceDir);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "worker_completion_applied",
+          issueId: 42,
+          role: "developer",
+          result: "DONE",
+          source: "session_history",
+        }),
+      ]),
+    );
+    expect(events).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "health_fix_applied",
+          type: "session_dead",
+          issueId: "42",
+        }),
+      ]),
+    );
+  });
+
+  it("does not advance a healthy live session just because the transcript already contains a canonical final result", async () => {
+    h = await createTestHarness({
+      workers: {
+        developer: {
+          active: true,
+          issueId: "42",
+          sessionKey: "agent:main:subagent:test-project-developer-senior-cecily",
+          level: "senior",
+          startTime: new Date(Date.now() - 20 * 60_000).toISOString(),
+          previousLabel: "To Do",
+        },
+      },
+    });
+    h.provider.seedIssue({ iid: 42, title: "Keep live developer session active", labels: ["Doing"] });
+    h.provider.setPrStatus(42, {
+      state: "open",
+      url: "https://example.com/pr/42",
+      body: VALID_DEVELOPER_QA_EVIDENCE,
+      linkedIssueIds: [42],
+      currentIssueMatch: true,
+    });
+
+    const transcriptPath = path.join(h.workspaceDir, "session-live-42.jsonl");
+    await fs.writeFile(
+      transcriptPath,
+      `${JSON.stringify({
+        role: "assistant",
+        content: [{ type: "text", text: "Work result: DONE" }],
+      })}\n`,
+      "utf-8",
+    );
+
+    const data = await h.readProjects();
+    data.projects[h.project.slug]!.issueRuntime = {
+      "42": {
+        dispatchRequestedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+        agentAcceptedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+        lastSessionKey: "agent:main:subagent:test-project-developer-senior-cecily",
+        firstWorkerActivityAt: new Date(Date.now() - 9 * 60_000).toISOString(),
+        sessionCompletedAt: null,
+      },
+    };
+    await writeProjects(h.workspaceDir, data);
+
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-senior-cecily",
+        {
+          key: "agent:main:subagent:test-project-developer-senior-cecily",
+          updatedAt: Date.now() - 15_000,
+          percentUsed: 15,
+          status: "running",
+          sessionFile: transcriptPath,
+          sessionFileMtime: Date.now() - 1_000,
+        },
+      ],
+    ]);
+
+    const fixes = await checkWorkerHealth({
+      workspaceDir: h.workspaceDir,
+      projectSlug: h.project.slug,
+      project: data.projects[h.project.slug]!,
+      role: "developer",
+      autoFix: true,
+      provider: h.provider,
+      sessions,
+      staleWorkerHours: 999,
+      runCommand: h.runCommand,
+    });
+
+    expect(fixes).toHaveLength(0);
+    expect(h.provider.callsTo("transitionLabel")).toHaveLength(0);
+
+    const updated = await h.readProjects();
+    const slot = updated.projects[h.project.slug]!.workers.developer.levels.senior?.[0];
+    expect(slot?.active).toBe(true);
+    expect(slot?.issueId).toBe("42");
+    expect(updated.projects[h.project.slug]!.issueRuntime?.["42"]?.sessionCompletedAt).toBeNull();
+  });
+
+  it("does not repair from a stale terminal transcript after the session key was reused for a newer dispatch", async () => {
+    h = await createTestHarness({
+      workers: {
+        developer: {
+          active: true,
+          issueId: "42",
+          sessionKey: "agent:main:subagent:test-project-developer-senior-cecily",
+          level: "senior",
+          startTime: new Date(Date.now() - 60_000).toISOString(),
+          previousLabel: "To Do",
+        },
+      },
+    });
+    h.provider.seedIssue({ iid: 42, title: "Ignore stale terminal transcript", labels: ["Doing"] });
+    h.provider.setPrStatus(42, {
+      state: "open",
+      url: "https://example.com/pr/42",
+      body: VALID_DEVELOPER_QA_EVIDENCE,
+      linkedIssueIds: [42],
+      currentIssueMatch: true,
+    });
+
+    const dispatchRequestedAt = Date.now() - 30_000;
+    const terminalEndedAt = dispatchRequestedAt - 20_000;
+    const transcriptPath = path.join(h.workspaceDir, "session-stale-42.jsonl");
+    await fs.writeFile(
+      transcriptPath,
+      `${JSON.stringify({
+        role: "assistant",
+        content: [{ type: "text", text: "Work result: DONE" }],
+      })}\n`,
+      "utf-8",
+    );
+    await fs.utimes(transcriptPath, terminalEndedAt / 1000, terminalEndedAt / 1000);
+
+    const data = await h.readProjects();
+    data.projects[h.project.slug]!.issueRuntime = {
+      "42": {
+        dispatchRequestedAt: new Date(dispatchRequestedAt).toISOString(),
+        agentAcceptedAt: new Date(dispatchRequestedAt + 5_000).toISOString(),
+        lastSessionKey: "agent:main:subagent:test-project-developer-senior-cecily",
+        firstWorkerActivityAt: null,
+        sessionCompletedAt: null,
+      },
+    };
+    await writeProjects(h.workspaceDir, data);
+
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-senior-cecily",
+        {
+          key: "agent:main:subagent:test-project-developer-senior-cecily",
+          updatedAt: terminalEndedAt,
+          percentUsed: 15,
+          status: "done",
+          endedAt: terminalEndedAt,
+          sessionFile: transcriptPath,
+          sessionFileMtime: terminalEndedAt,
+        },
+      ],
+    ]);
+
+    const fixes = await checkWorkerHealth({
+      workspaceDir: h.workspaceDir,
+      projectSlug: h.project.slug,
+      project: data.projects[h.project.slug]!,
+      role: "developer",
+      autoFix: true,
+      provider: h.provider,
+      sessions,
+      staleWorkerHours: 999,
+      runCommand: h.runCommand,
+      healthGracePeriodMs: 5 * 60_000,
+    });
+
+    expect(fixes).toHaveLength(0);
+    expect(h.provider.callsTo("transitionLabel")).toHaveLength(0);
+
+    const updated = await h.readProjects();
+    const slot = updated.projects[h.project.slug]!.workers.developer.levels.senior?.[0];
+    expect(slot?.active).toBe(true);
+    expect(slot?.issueId).toBe("42");
+    expect(updated.projects[h.project.slug]!.issueRuntime?.["42"]?.sessionCompletedAt).toBeNull();
+
+    const events = await readAuditEvents(h.workspaceDir);
+    expect(events).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "worker_completion_applied",
+          issueId: 42,
+          role: "developer",
         }),
       ]),
     );

@@ -15,9 +15,11 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import {
   registerTelegramBootstrapHook,
   _testContinueBootstrap,
+  _testRecoverDueBootstraps as recoverDueBootstraps,
   _testResumeBootstrapping as resumeBootstrapping,
   _testResetActiveBootstrapResumes as resetActiveBootstrapResumes,
 } from "../../lib/dispatch/telegram-bootstrap-hook.js";
+import { toCanonicalTelegramBootstrapConversationId } from "../../lib/dispatch/telegram-bootstrap-session.js";
 
 const {
   mockRunPipeline,
@@ -160,6 +162,14 @@ describe("telegram bootstrap clarification flow", () => {
 
     // ack sent first, then clarification question
     expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
+    await vi.waitFor(async () => {
+      const persisted = JSON.parse(await fs.readFile(
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${toCanonicalTelegramBootstrapConversationId(CONVERSATION_ID)}.json`),
+        "utf-8",
+      ));
+      expect(persisted.status).toBe("clarifying");
+    }, { timeout: 2000 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
     sendMessageTelegram.mockClear();
 
     // Step 2: user sends an irrelevant message
@@ -197,6 +207,14 @@ describe("telegram bootstrap clarification flow", () => {
 
     // ack sent first, then clarification question
     expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
+    await vi.waitFor(async () => {
+      const persisted = JSON.parse(await fs.readFile(
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${toCanonicalTelegramBootstrapConversationId(CONVERSATION_ID)}.json`),
+        "utf-8",
+      ));
+      expect(persisted.status).toBe("clarifying");
+    }, { timeout: 2000 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
     sendMessageTelegram.mockClear();
 
     // Step 2: structured clarification response for stack
@@ -213,6 +231,104 @@ describe("telegram bootstrap clarification flow", () => {
     expect(pipelinePayload.metadata.project_name).toBeTruthy();
     // original idea preserved
     expect(pipelinePayload.raw_idea).toContain("automatizar deploys");
+  });
+
+  it("fails closed when bootstrap reaches an unsupported greenfield stack", async () => {
+    await _testContinueBootstrap(
+      ctx,
+      CONVERSATION_ID,
+      workspaceDir,
+      {
+        rawIdea: "Build a small Go CLI tool called port-checker with tests and a README",
+        projectName: "port-checker",
+        stackHint: "go",
+      },
+      {
+        channel: "telegram",
+        channelId: CONVERSATION_ID,
+      },
+    );
+
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1] ?? "")).toContain('stack "go" is not supported yet');
+
+    const sessionRaw = await fs.readFile(
+      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
+      "utf-8",
+    );
+    const session = JSON.parse(sessionRaw) as {
+      status: string;
+      ackSentAt?: string | null;
+      error?: string | null;
+      lastError?: string | null;
+      stackHint?: string | null;
+    };
+    expect(session.status).toBe("failed");
+    expect(session.ackSentAt ?? null).toBeNull();
+    expect(session.stackHint).toBe("go");
+    expect(session.error).toContain('stack "go" is not supported yet');
+    expect(session.lastError).toContain('stack "go" is not supported yet');
+
+    const auditLog = await fs.readFile(
+      path.join(workspaceDir, "fabrica", "log", "audit.log"),
+      "utf-8",
+    );
+    expect(auditLog).toContain('"event":"telegram_bootstrap_failed"');
+    expect(auditLog).toContain('"projectSlug":"port-checker"');
+    expect(auditLog).toContain('"stackHint":"go"');
+    expect(auditLog).toContain('"reason":"unsupported_greenfield_stack"');
+  });
+
+  it("fails before ack when a bootstrapping session carries an unsupported stack", async () => {
+    await fs.mkdir(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
+      JSON.stringify({
+        id: "tgdm-unsupported-go",
+        conversationId: CONVERSATION_ID,
+        sourceChannel: "telegram",
+        sourceRoute: { channel: "telegram", channelId: CONVERSATION_ID },
+        requestHash: "req-hash-go",
+        requestFingerprint: "req-hash-go",
+        rawIdea: "Build a small Go CLI tool called port-checker with tests and a README",
+        projectName: "port-checker",
+        stackHint: "go",
+        projectSlug: "port-checker",
+        status: "bootstrapping",
+        bootstrapStep: "awaiting_ack",
+        attemptId: "attempt-go",
+        attemptSeq: 1,
+        ackSentAt: null,
+        language: "en",
+        createdAt: "2026-04-02T10:58:00.000Z",
+        updatedAt: "2026-04-02T10:58:00.000Z",
+        suppressUntil: new Date(Date.now() + 60_000).toISOString(),
+      }, null, 2) + "\n",
+      "utf-8",
+    );
+
+    await resumeBootstrapping(ctx, workspaceDir, CONVERSATION_ID);
+
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1] ?? "")).toContain('stack "go" is not supported yet');
+
+    const sessionRaw = await fs.readFile(
+      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
+      "utf-8",
+    );
+    const session = JSON.parse(sessionRaw) as {
+      status: string;
+      ackSentAt?: string | null;
+      error?: string | null;
+      lastError?: string | null;
+      stackHint?: string | null;
+    };
+    expect(session.status).toBe("failed");
+    expect(session.ackSentAt ?? null).toBeNull();
+    expect(session.error).toContain('stack "go" is not supported yet');
+    expect(session.lastError).toContain('stack "go" is not supported yet');
   });
 
   it("treats new bootstrap candidate as fresh request when clarifying session has expired", async () => {
@@ -239,16 +355,12 @@ describe("telegram bootstrap clarification flow", () => {
 
     // Simulate session expiry: overwrite the session file with a past suppressUntil
     const sessionDir = path.join(workspaceDir, "fabrica", "bootstrap-sessions");
-    const sessionFile = `${sessionDir}/${CONVERSATION_ID}.json`;
-    try {
-      const raw = await fs.readFile(sessionFile, "utf-8");
-      const session = JSON.parse(raw);
-      session.suppressUntil = new Date(Date.now() - 60_000).toISOString();
-      await fs.writeFile(sessionFile, JSON.stringify(session, null, 2) + "\n", "utf-8");
-    } catch {
-      // If session file doesn't exist, skip this test scenario
-      return;
-    }
+    const sessionFile = `${sessionDir}/${toCanonicalTelegramBootstrapConversationId(CONVERSATION_ID)}.json`;
+    const raw = await fs.readFile(sessionFile, "utf-8");
+    const session = JSON.parse(raw);
+    session.suppressUntil = new Date(Date.now() - 60_000).toISOString();
+    await fs.writeFile(sessionFile, JSON.stringify(session, null, 2) + "\n", "utf-8");
+    resetActiveBootstrapResumes();
 
     // Step 2: send a completely new bootstrap candidate with project name (newline-separated fields)
     await handler?.(
@@ -267,6 +379,34 @@ describe("telegram bootstrap clarification flow", () => {
     expect(pipelinePayload.raw_idea).toContain("outra ideia");
     expect(pipelinePayload.metadata.stack_hint).toBe("python-cli");
     expect(pipelinePayload.metadata.project_name).toBe("novo-projeto-cli");
+  });
+
+  it("restarts clarification when the same bootstrap candidate is retried after clarifying expiry", async () => {
+    await handler?.(
+      { content: "Crie um projeto CLI inicial", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
+    sendMessageTelegram.mockClear();
+
+    const sessionDir = path.join(workspaceDir, "fabrica", "bootstrap-sessions");
+    const sessionFile = `${sessionDir}/${toCanonicalTelegramBootstrapConversationId(CONVERSATION_ID)}.json`;
+    const raw = await fs.readFile(sessionFile, "utf-8");
+    const session = JSON.parse(raw);
+    session.suppressUntil = new Date(Date.now() - 60_000).toISOString();
+    await fs.writeFile(sessionFile, JSON.stringify(session, null, 2) + "\n", "utf-8");
+    resetActiveBootstrapResumes();
+
+    await handler?.(
+      { content: "Crie um projeto CLI inicial", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1])).toContain("Recebi");
+    expect(String(sendMessageTelegram.mock.calls[1]?.[1])).toContain("Qual stack");
   });
 
   it("proceeds to pipeline directly when stack is known and inferProjectSlug succeeds (Bug J: no name loop)", async () => {
@@ -296,6 +436,35 @@ describe("telegram bootstrap clarification flow", () => {
     // project_name should be inferred (non-null, not blank)
     expect(payload.metadata.project_name).toBeTruthy();
     expect(payload.metadata.stack_hint).toBe("python-cli");
+  });
+
+  it("routes a clear 'Build ... Python CLI tool called csv-peek' DM through the deterministic bootstrap path", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 804,
+          project_slug: "csv-peek",
+        },
+      },
+    });
+
+    await handler?.(
+      {
+        content: "Build a small Python CLI tool called csv-peek. Requirements: It reads a CSV file from a file path argument. By default, it prints the number of rows, the number of columns, and the column names. Add a --preview N flag to print the first N data rows. Add a --json flag to print the summary as JSON. Ignore empty trailing lines in the file. Include a README with usage examples. Include basic tests.",
+        metadata: {},
+      },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    const payload = mockRunPipeline.mock.calls[0]?.[0];
+    expect(payload.raw_idea).toContain("Build a small Python CLI tool called csv-peek");
+    expect(payload.metadata.stack_hint).toBe("python-cli");
+    expect(payload.metadata.project_name).toBe("csv-peek");
+    expect(sendMessageTelegram.mock.calls[0]?.[0]).toBe(CONVERSATION_ID);
+    expect(String(sendMessageTelegram.mock.calls[0]?.[1] ?? "")).toContain("Got it!");
   });
 
   it("recognizes 'Python.' (with punctuation) as stack clarification response and proceeds to pipeline", async () => {
@@ -641,7 +810,7 @@ describe("telegram bootstrap clarification flow", () => {
 
     await vi.waitFor(async () => {
       const sessionRaw = await fs.readFile(
-        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
         "utf-8",
       );
       const session = JSON.parse(sessionRaw);
@@ -661,10 +830,77 @@ describe("telegram bootstrap clarification flow", () => {
     await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
   });
 
+  it("reconciles a late classify result through bootstrap recovery after waitForRun timeout", async () => {
+    const mockWaitForRun = vi.fn().mockResolvedValueOnce({ status: "timeout" });
+    const mockGetSessionMessages = vi.fn()
+      .mockResolvedValueOnce([
+        { role: "assistant", content: JSON.stringify({
+          intent: "create_project",
+          confidence: 0.95,
+          stackHint: "python-cli",
+          projectSlug: "csv-peek",
+          language: "en",
+        }) },
+      ]);
+
+    ctx.runtime.subagent = {
+      run: vi.fn().mockResolvedValue({ runId: "late-classify-run" }),
+      waitForRun: mockWaitForRun,
+      getSessionMessages: mockGetSessionMessages,
+    };
+
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 990,
+          project_slug: "csv-peek",
+        },
+      },
+    });
+
+    await handler?.(
+      { content: "I need a tool for summarizing CSV files", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    await vi.waitFor(async () => {
+      const session = await fs.readFile(
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
+        "utf-8",
+      );
+      expect(JSON.parse(session).status).toBe("classifying");
+    }, { timeout: 2000 });
+
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+
+    const recovered = await recoverDueBootstraps(ctx, workspaceDir);
+    expect(recovered).toBeGreaterThan(0);
+
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    const sessionRaw = await fs.readFile(
+      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
+      "utf-8",
+    );
+    const session = JSON.parse(sessionRaw) as { status: string; projectRegisteredAt?: string | null };
+    expect(["dispatching", "completed"]).toContain(session.status);
+    expect(session.projectRegisteredAt ?? null).not.toBeNull();
+  });
+
   it("resumes from projectRegisteredAt without rerunning registration", async () => {
+    mockReadProjects.mockResolvedValue({
+      projects: {
+        "todo-summary-tool": {
+          slug: "todo-summary-tool",
+          name: "todo-summary-tool",
+        },
+      },
+    });
+
     await fs.mkdir(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true });
     await fs.writeFile(
-      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
       JSON.stringify({
         id: "tgdm-checkpointed",
         conversationId: CONVERSATION_ID,
@@ -681,6 +917,8 @@ describe("telegram bootstrap clarification flow", () => {
         projectName: "todo-summary-tool",
         stackHint: "python-cli",
         projectSlug: "todo-summary-tool",
+        attemptId: "attempt-checkpointed",
+        attemptSeq: 1,
         messageThreadId: 932,
         projectChannelId: "-1003709213169",
         status: "dispatching",
@@ -706,7 +944,7 @@ describe("telegram bootstrap clarification flow", () => {
 
     const persisted = JSON.parse(
       await fs.readFile(
-        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
         "utf-8",
       ),
     );
@@ -718,7 +956,7 @@ describe("telegram bootstrap clarification flow", () => {
   it("does not replay kickoff or projectTick after a later dispatch failure", async () => {
     await fs.mkdir(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true });
     await fs.writeFile(
-      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
       JSON.stringify({
         id: "tgdm-dispatch-retry",
         conversationId: CONVERSATION_ID,
@@ -735,6 +973,8 @@ describe("telegram bootstrap clarification flow", () => {
         projectName: "todo-summary-tool",
         stackHint: "python-cli",
         projectSlug: "todo-summary-tool",
+        attemptId: "attempt-dispatch-retry",
+        attemptSeq: 1,
         messageThreadId: 944,
         projectChannelId: "-1003709213169",
         status: "dispatching",
@@ -768,7 +1008,7 @@ describe("telegram bootstrap clarification flow", () => {
 
     const persisted = JSON.parse(
       await fs.readFile(
-        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
         "utf-8",
       ),
     );
@@ -780,7 +1020,7 @@ describe("telegram bootstrap clarification flow", () => {
   it("keeps projectTick retryable when pickup fails during dispatch recovery", async () => {
     await fs.mkdir(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true });
     await fs.writeFile(
-      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
       JSON.stringify({
         id: "tgdm-projecttick-retry",
         conversationId: CONVERSATION_ID,
@@ -797,6 +1037,8 @@ describe("telegram bootstrap clarification flow", () => {
         projectName: "todo-summary-tool",
         stackHint: "python-cli",
         projectSlug: "todo-summary-tool",
+        attemptId: "attempt-projecttick-retry",
+        attemptSeq: 1,
         messageThreadId: 945,
         projectChannelId: "-1003709213169",
         status: "dispatching",
@@ -821,7 +1063,7 @@ describe("telegram bootstrap clarification flow", () => {
 
     let persisted = JSON.parse(
       await fs.readFile(
-        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
         "utf-8",
       ),
     );
@@ -838,7 +1080,7 @@ describe("telegram bootstrap clarification flow", () => {
 
     persisted = JSON.parse(
       await fs.readFile(
-        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
         "utf-8",
       ),
     );
@@ -881,7 +1123,7 @@ describe("telegram bootstrap clarification flow", () => {
       },
     );
 
-    const sessionRaw = await fs.readFile(path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`), "utf-8");
+    const sessionRaw = await fs.readFile(path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`), "utf-8");
     const session = JSON.parse(sessionRaw) as { status: string; error?: string | null };
 
     expect(session.status).toBe("failed");
@@ -893,7 +1135,7 @@ describe("telegram bootstrap clarification flow", () => {
   it("stops the successful pipeline path when ownership changes before project_registered is persisted", async () => {
     await fs.mkdir(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true });
     await fs.writeFile(
-      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+      path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
       JSON.stringify({
         id: "tgdm-owner-loss",
         conversationId: CONVERSATION_ID,
@@ -920,7 +1162,7 @@ describe("telegram bootstrap clarification flow", () => {
 
     mockRunPipeline.mockImplementationOnce(async () => {
       await fs.writeFile(
-        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
         JSON.stringify({
           id: "tgdm-owner-loss-new",
           conversationId: CONVERSATION_ID,
@@ -977,7 +1219,7 @@ describe("telegram bootstrap clarification flow", () => {
 
     const persisted = JSON.parse(
       await fs.readFile(
-        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `${CONVERSATION_ID}.json`),
+        path.join(workspaceDir, "fabrica", "bootstrap-sessions", `telegram:${CONVERSATION_ID}.json`),
         "utf-8",
       ),
     );

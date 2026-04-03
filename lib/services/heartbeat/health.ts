@@ -59,6 +59,7 @@ import {
   getLastObservableSessionActivityAt,
   hasObservableSessionActivitySince,
   isSessionAlive,
+  isTerminalSession,
   type SessionLookup,
 } from "../gateway-sessions.js";
 import { recordIssueLifecycle } from "../../projects/lifecycle.js";
@@ -66,6 +67,11 @@ import { withCorrelationContext } from "../../observability/context.js";
 import { withTelemetrySpan } from "../../observability/telemetry.js";
 import { resilientLabelTransition } from "../../workflow/labels.js";
 import { notify, type NotificationConfig } from "../../dispatch/notify.js";
+import {
+  applyWorkerResult,
+  readWorkerResultFromSessionFile,
+  resolveWorkerSessionContext,
+} from "../worker-completion.js";
 
 // Re-export for consumers that import from health.ts
 export { fetchGatewaySessions, isSessionAlive, type GatewaySession, type SessionLookup } from "../gateway-sessions.js";
@@ -100,6 +106,7 @@ export type HealthIssue = {
     | "dispatch_unconfirmed" // Active worker never reached agent bootstrap/activity after dispatch
     | "completion_recovery_exhausted" // Worker showed activity but never produced a canonical result
     | "execution_contract_recovery_exhausted" // Worker violated execution contract and did not recover canonically
+    | "terminal_completion_repair" // Terminal session transcript proved completion and heartbeat repaired it
     | "stateless_issue";     // Case 8: open managed issue with no state label (#473)
   severity: "critical" | "warning";
   project: string;
@@ -179,6 +186,28 @@ function hasDispatchCycleMismatch(
     issueRuntime?.lastDispatchCycleId &&
     slot.dispatchCycleId !== issueRuntime.lastDispatchCycleId,
   );
+}
+
+function hasDispatchRunMismatch(
+  slot: { dispatchRunId?: string | null },
+  issueRuntime?: { dispatchRunId?: string | null } | null,
+): boolean {
+  return Boolean(
+    slot.dispatchRunId &&
+    issueRuntime?.dispatchRunId &&
+    slot.dispatchRunId !== issueRuntime.dispatchRunId,
+  );
+}
+
+function getTerminalSessionEvidenceAt(session: {
+  endedAt?: number | null;
+  sessionFileMtime?: number | null;
+  updatedAt?: number | null;
+}): number | null {
+  const timestamps = [session.endedAt ?? null, session.sessionFileMtime ?? null, session.updatedAt ?? null]
+    .filter((value): value is number => value !== null && Number.isFinite(value) && value > 0);
+  if (timestamps.length === 0) return null;
+  return Math.max(...timestamps);
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +353,9 @@ export async function checkWorkerHealth(opts: {
     for (let slotIndex = 0; slotIndex < slots.length; slotIndex++) {
       const slot = slots[slotIndex]!;
       const sessionKey = slot.sessionKey;
+      const session = sessionKey && sessions
+        ? sessions.get(sessionKey)
+        : undefined;
 
       // Use the label stored at dispatch time (previousLabel) if available
       const slotQueueLabel: string = slot.previousLabel ?? queueLabel;
@@ -503,6 +535,87 @@ export async function checkWorkerHealth(opts: {
         }
         fixes.push(fix);
         continue;
+      }
+
+      const terminalRepairRole = role === "developer" || role === "tester" || role === "architect"
+        ? role
+        : null;
+      if (
+        terminalRepairRole &&
+        slot.active &&
+        issue &&
+        currentLabel === expectedLabel &&
+        issueIdNum &&
+        sessionKey &&
+        session &&
+        isTerminalSession(session) &&
+        issueRuntime?.sessionCompletedAt == null &&
+        issueRuntime?.lastSessionKey === sessionKey &&
+        !hasDispatchRunMismatch(slot, issueRuntime)
+      ) {
+        const terminalEvidenceAt = getTerminalSessionEvidenceAt(session);
+        const dispatchBaselineAt = agentAcceptedAt ?? dispatchRequestedAt;
+        if (
+          terminalEvidenceAt === null ||
+          (dispatchBaselineAt !== null && terminalEvidenceAt < dispatchBaselineAt)
+        ) {
+          continue;
+        }
+
+        const context = await resolveWorkerSessionContext(sessionKey, workspaceDir);
+        const transcriptResult = await readWorkerResultFromSessionFile(terminalRepairRole, session.sessionFile);
+
+        if (context && transcriptResult) {
+          const fix: HealthFix = {
+            issue: {
+              type: "terminal_completion_repair",
+              severity: "critical",
+              project: project.name,
+              projectSlug,
+              role,
+              sessionKey,
+              level,
+              issueId: slot.issueId,
+              expectedLabel,
+              actualLabel: currentLabel,
+              slotIndex,
+              message: `${role.toUpperCase()} ${level}[${slotIndex}] terminal session "${sessionKey}" contained a canonical completion result and can be recovered`,
+            },
+            fixed: false,
+          };
+
+          if (!autoFix) {
+            fixes.push(fix);
+            continue;
+          }
+
+          if (runCommand) {
+            const completion = await applyWorkerResult({
+              context,
+              result: transcriptResult,
+              workspaceDir,
+              runCommand,
+              providerOverride: provider,
+            });
+
+            if (completion.applied) {
+              fix.fixed = true;
+              const toLabel = getCompletionRule(workflow, role, transcriptResult.value.toLowerCase())?.to ?? null;
+              await auditHealthFixApplied(workspaceDir, fix, {
+                action: "recover_terminal_completion",
+                fromLabel: expectedLabel,
+                toLabel,
+                deliveryState,
+              });
+              fixes.push(fix);
+              continue;
+            }
+
+            if (completion.reason === "already_completed" || completion.reason === "stale_dispatch_cycle") {
+              continue;
+            }
+          }
+        }
       }
 
       if (slot.active && issue && currentLabel === expectedLabel && issueRuntime?.inconclusiveCompletionAt) {

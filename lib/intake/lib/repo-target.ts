@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { GenesisPayload } from "../types.js";
 
 const REPO_NAME_BLOCKLIST = new Set([
@@ -94,6 +95,10 @@ export function deriveRepoName(
     { value: payload.spec?.title, source: "spec.title" },
     { value: payload.raw_idea, source: "raw_idea" },
   ], `genesis-${payload.session_id}`);
+}
+
+export function deriveRepoLocalPath(homeDir: string, owner: string, repoName: string): string {
+  return path.join(homeDir, "git", owner, repoName);
 }
 
 export function inferProjectNameFromIdea(text: string, repoUrl?: string | null): string | null {

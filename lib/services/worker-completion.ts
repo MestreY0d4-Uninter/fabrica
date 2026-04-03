@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import type { IssueProvider, PrStatus } from "../providers/provider.js";
 import type { RunCommand } from "../context.js";
 import { log as auditLog } from "../audit.js";
@@ -100,11 +101,7 @@ async function resolveWorkerResultFromRuntime(
       };
     }
 
-    const sessionMessages: unknown[] = Array.isArray(messagesResult)
-      ? messagesResult
-      : (Array.isArray((messagesResult as { messages?: unknown[] }).messages)
-        ? (messagesResult as { messages: unknown[] }).messages
-        : []);
+    const sessionMessages = normalizeSessionMessagesPayload(messagesResult);
     const sessionActivityObserved = hasObservableWorkerActivity(sessionMessages);
     const historyResult = extractWorkerResultFromMessages(role, sessionMessages);
     const sessionViolation = detectExecutionContractViolation(sessionMessages);
@@ -130,6 +127,65 @@ async function resolveWorkerResultFromRuntime(
       activityObserved: eventActivityObserved,
       executionContractViolation: eventViolation ?? undefined,
     };
+  }
+}
+
+function normalizeSessionMessagesPayload(messagesResult: unknown): unknown[] {
+  if (Array.isArray(messagesResult)) return messagesResult;
+  if (typeof messagesResult !== "object" || messagesResult == null) return [];
+
+  const payload = messagesResult as {
+    messages?: unknown[];
+    message?: unknown;
+    role?: unknown;
+    content?: unknown;
+  };
+  if (Array.isArray(payload.messages)) return payload.messages;
+  if (payload.message && typeof payload.message === "object") return [payload.message];
+  if ("role" in payload || "content" in payload) return [payload];
+  return [];
+}
+
+function parseSessionTranscript(raw: string): unknown[] {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+
+  try {
+    return normalizeSessionMessagesPayload(JSON.parse(trimmed));
+  } catch {
+    const messages: unknown[] = [];
+    for (const line of raw.split("\n")) {
+      const candidate = line.trim();
+      if (!candidate) continue;
+      try {
+        const parsed = JSON.parse(candidate);
+        messages.push(...normalizeSessionMessagesPayload(parsed));
+      } catch {
+        // Ignore malformed lines — session transcripts can contain partial writes.
+      }
+    }
+    return messages;
+  }
+}
+
+export async function readWorkerResultFromSessionFile(
+  role: Exclude<WorkerRole, "reviewer">,
+  sessionFile: string | null | undefined,
+): Promise<WorkerResult | null> {
+  if (!sessionFile) return null;
+
+  try {
+    const raw = await fs.readFile(sessionFile, "utf-8");
+    const messages = parseSessionTranscript(raw);
+    const result = extractWorkerResultFromMessages(role, messages);
+    return result
+      ? {
+          ...result,
+          source: "session_history",
+        }
+      : null;
+  } catch {
+    return null;
   }
 }
 

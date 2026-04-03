@@ -8,6 +8,7 @@ import type {
   StepContext,
 } from "../types.js";
 import { buildScaffoldPlan } from "./scaffold-service.js";
+import { deriveRepoLocalPath } from "./repo-target.js";
 import { GitHubProvider } from "../../providers/github.js";
 
 type GitHubTarget = {
@@ -135,7 +136,7 @@ async function resolveRepositoryTarget(
 
   if (repoUrl) {
     const remote = parseGitHubRemote(repoUrl);
-    const localPath = remote ? path.join(ctx.homeDir, "git", remote.owner, remote.name) : null;
+    const localPath = remote ? deriveRepoLocalPath(ctx.homeDir, remote.owner, remote.name) : null;
     return {
       mode: "remote_only",
       remote,

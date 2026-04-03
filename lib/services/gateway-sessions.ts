@@ -272,7 +272,7 @@ async function getSessionFileMtime(sessionFile: string | null): Promise<number |
   }
 }
 
-function isTerminalSession(session: GatewaySession): boolean {
+export function isTerminalSession(session: GatewaySession): boolean {
   if (session.endedAt) return true;
   return session.status === "done" || session.status === "failed" || session.status === "aborted";
 }

@@ -201,6 +201,52 @@ function normalizeRepoIdentity(value?: string | null): string | null {
   return trimmed.replace(/\.git$/i, "").toLowerCase();
 }
 
+const NODE_STACKS = new Set<CanonicalStack>(["nextjs", "node-cli", "express"]);
+const PYTHON_STACKS = new Set<CanonicalStack>(["fastapi", "flask", "django", "python-cli"]);
+
+async function pathExists(candidate: string): Promise<boolean> {
+  try {
+    await fs.access(candidate);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function assertStackManifestPresent(repoPath: string, stack: CanonicalStack): Promise<void> {
+  if (!path.isAbsolute(repoPath)) return;
+
+  if (!await pathExists(repoPath)) {
+    throw new Error(
+      `Registration blocked: local repository path "${repoPath}" does not exist for stack "${stack}".`,
+    );
+  }
+
+  if (NODE_STACKS.has(stack)) {
+    if (!await pathExists(path.join(repoPath, "package.json"))) {
+      throw new Error(
+        `Registration blocked: local repository path "${repoPath}" does not contain package.json for stack "${stack}". ` +
+        "Scaffold output did not materialize into the canonical repo path.",
+      );
+    }
+    return;
+  }
+
+  if (PYTHON_STACKS.has(stack)) {
+    const hasPythonManifest = await Promise.all([
+      pathExists(path.join(repoPath, "pyproject.toml")),
+      pathExists(path.join(repoPath, "requirements.txt")),
+      pathExists(path.join(repoPath, "uv.lock")),
+    ]).then((checks) => checks.some(Boolean));
+    if (!hasPythonManifest) {
+      throw new Error(
+        `Registration blocked: local repository path "${repoPath}" does not contain pyproject.toml, requirements.txt, or uv.lock for stack "${stack}". ` +
+        "Scaffold output did not materialize into the canonical repo path.",
+      );
+    }
+  }
+}
+
 export type ProjectRegisterParams = {
   workspaceDir: string;
   route: RouteRef;
@@ -350,6 +396,10 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
       repoRemote = await provider.resolveRepositoryRemote() ?? undefined;
     } catch {
       repoRemote = undefined;
+    }
+
+    if (stack) {
+      await assertStackManifestPresent(repoPath, stack);
     }
 
     if (existing) {

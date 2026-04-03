@@ -99,6 +99,57 @@ describe("scaffold-service", () => {
     expect(plan.repo_target_source).toBe("metadata.repo_url");
   });
 
+  it("derives distinct local paths for different owners sharing the same repo name", async () => {
+    const ctx: StepContext = {
+      homeDir: "/tmp/fabrica-home",
+      workspaceDir: "/tmp/fabrica-home/.openclaw/workspace",
+      log: vi.fn(),
+      runCommand: vi.fn(async () => {
+        throw new Error("gh should not be called when repo_url is explicit");
+      }),
+    };
+
+    const acmePlan = await buildScaffoldPlan(
+      makePayload({
+        metadata: {
+          source: "test",
+          factory_change: false,
+          repo_url: "https://github.com/acme/stack-cli.git",
+        },
+      }),
+      ctx,
+    );
+    const otherPlan = await buildScaffoldPlan(
+      makePayload({
+        metadata: {
+          source: "test",
+          factory_change: false,
+          repo_url: "https://github.com/other-org/stack-cli.git",
+        },
+      }),
+      ctx,
+    );
+
+    expect(acmePlan.repo_local).toBe("/tmp/fabrica-home/git/acme/stack-cli");
+    expect(otherPlan.repo_local).toBe("/tmp/fabrica-home/git/other-org/stack-cli");
+    expect(acmePlan.repo_local).not.toBe(otherPlan.repo_local);
+  });
+
+  it("preserves an explicit local repo path when provided", async () => {
+    const plan = await buildScaffoldPlan(
+      makePayload({
+        metadata: {
+          source: "test",
+          factory_change: false,
+          repo_path: "/tmp/custom-root/demo-cli",
+        },
+      }),
+      makeCtx(),
+    );
+
+    expect(plan.repo_local).toBe("/tmp/custom-root/demo-cli");
+  });
+
   it("parses scaffold output contracts with a stable schema", () => {
     const scaffold = parseScaffoldOutput(
       JSON.stringify({
@@ -188,5 +239,43 @@ describe("scaffold-service", () => {
       }),
       makeCtx(),
     )).rejects.toThrow(/not supported yet/i);
+  });
+
+  it("fails closed when scaffolded repo_local diverges from the planned canonical repo path", async () => {
+    const ctx: StepContext = {
+      homeDir: "/tmp/fabrica-home",
+      workspaceDir: "/tmp/fabrica-home/.openclaw/workspace",
+      log: vi.fn(),
+      runCommand: vi.fn(async (cmd, args) => {
+        if (cmd === "gh") {
+          expect(args).toEqual(["api", "user", "-q", ".login"]);
+          return { stdout: "MestreY0d4-Uninter\n", stderr: "", exitCode: 0 };
+        }
+        if (cmd === "bash") {
+          return {
+            stdout: JSON.stringify({
+              scaffold: {
+                created: true,
+                stack: "python-cli",
+                repo_url: "https://github.com/MestreY0d4-Uninter/password-cli",
+                repo_local: "/tmp/fabrica-home/git/password-cli",
+                project_slug: "password-cli",
+              },
+            }),
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        throw new Error(`Unexpected command: ${cmd}`);
+      }),
+    };
+
+    const plan = await buildScaffoldPlan(makePayload(), ctx);
+
+    await expect(import("../../lib/intake/lib/scaffold-service.js").then(({ executeScaffoldPlan }) =>
+      executeScaffoldPlan(makePayload(), ctx, plan),
+    )).rejects.toThrow(
+      /materialized repo_local "\/tmp\/fabrica-home\/git\/password-cli" but the planned repo_local was "\/tmp\/fabrica-home\/git\/MestreY0d4-Uninter\/password-cli"/i,
+    );
   });
 });

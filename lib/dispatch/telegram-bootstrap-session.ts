@@ -56,6 +56,9 @@ export type TelegramBootstrapSession = {
   status: TelegramBootstrapStatus;
   attemptId?: string | null;
   attemptSeq?: number | null;
+  classifySessionKey?: string | null;
+  classifyRunId?: string | null;
+  classifyStartedAt?: string | null;
   bootstrapStep?: TelegramBootstrapStep | null;
   attemptCount?: number | null;
   lastError?: string | null;
@@ -83,13 +86,47 @@ type BootstrapCheckpointWriteDecision = { ok: true } | { ok: false; reason: "sta
 
 const SESSION_TTL_MS = 10 * 60_000;
 const CLASSIFYING_TTL_MS = 15_000; // 15s — matches LLM timeout
+const RELEASED_CLASSIFY_ERRORS = new Set([
+  "classify_invalid_result",
+  "classify_low_confidence",
+  "classify_not_project",
+  "classify_result_expired",
+]);
+
+export function toCanonicalTelegramBootstrapConversationId(conversationId: string): string {
+  const trimmed = conversationId.trim();
+  if (!trimmed) return trimmed;
+  return trimmed.startsWith("telegram:") ? trimmed : `telegram:${trimmed}`;
+}
 
 function sessionsDir(workspaceDir: string): string {
   return path.join(workspaceDir, DATA_DIR, "bootstrap-sessions");
 }
 
 function sessionPath(workspaceDir: string, conversationId: string): string {
-  return path.join(sessionsDir(workspaceDir), `${conversationId}.json`);
+  return path.join(
+    sessionsDir(workspaceDir),
+    `${toCanonicalTelegramBootstrapConversationId(conversationId)}.json`,
+  );
+}
+
+function alternateSessionPath(workspaceDir: string, conversationId: string): string | null {
+  const canonical = toCanonicalTelegramBootstrapConversationId(conversationId);
+  const bare = canonical.startsWith("telegram:") ? canonical.slice("telegram:".length) : canonical;
+  if (!bare || bare === canonical) return null;
+  return path.join(sessionsDir(workspaceDir), `${bare}.json`);
+}
+
+function normalizeStoredSession(session: TelegramBootstrapSession): TelegramBootstrapSession {
+  const canonicalConversationId = toCanonicalTelegramBootstrapConversationId(session.conversationId);
+  if (canonicalConversationId === session.conversationId) {
+    return session;
+  }
+  return {
+    ...session,
+    id: buildBootstrapSessionId(canonicalConversationId, session.rawIdea),
+    conversationId: canonicalConversationId,
+  };
 }
 
 function stableHash(input: string): string {
@@ -136,6 +173,10 @@ function nextSuppressUntil(status?: TelegramBootstrapStatus): string {
   return new Date(Date.now() + ttl).toISOString();
 }
 
+function isReleasedClassifyFailure(error: string | null | undefined): boolean {
+  return Boolean(error && RELEASED_CLASSIFY_ERRORS.has(error));
+}
+
 function resolveNullableField<T>(
   inputValue: T | null | undefined,
   existingValue: T | null | undefined,
@@ -174,6 +215,16 @@ export function shouldPersistBootstrapCheckpoint(
   if (!current) return { ok: true };
   if (current.conversationId !== next.conversationId) return { ok: true };
 
+  const currentAttemptSeq = current.attemptSeq ?? null;
+  const nextAttemptSeq = next.attemptSeq ?? null;
+  if (
+    currentAttemptSeq != null &&
+    nextAttemptSeq != null &&
+    nextAttemptSeq < currentAttemptSeq
+  ) {
+    return { ok: false, reason: "stale_regression" };
+  }
+
   const sameAttempt = Boolean(
     current.attemptId &&
     next.attemptId &&
@@ -198,17 +249,28 @@ export async function readTelegramBootstrapSession(
   workspaceDir: string,
   conversationId: string,
 ): Promise<TelegramBootstrapSession | null> {
+  const canonicalConversationId = toCanonicalTelegramBootstrapConversationId(conversationId);
+  const paths = [
+    sessionPath(workspaceDir, canonicalConversationId),
+    alternateSessionPath(workspaceDir, conversationId),
+  ].filter((entry): entry is string => Boolean(entry));
+
   try {
-    const raw = await fs.readFile(sessionPath(workspaceDir, conversationId), "utf-8");
-    const session = JSON.parse(raw) as TelegramBootstrapSession;
-    // Auto-cleanup expired transient sessions so they don't block new requests (A4).
-    // Sessions stuck in "pending_classify", "classifying", or "clarifying" past their
-    // suppressUntil TTL will never be resolved — remove from disk so next message starts fresh.
-    if ((session.status === "clarifying" || session.status === "classifying" || session.status === "pending_classify") && Date.parse(session.suppressUntil) < Date.now()) {
-      await fs.unlink(sessionPath(workspaceDir, conversationId)).catch(() => {});
-      return null;
+    for (const candidatePath of paths) {
+      try {
+        const raw = await fs.readFile(candidatePath, "utf-8");
+        const session = normalizeStoredSession(JSON.parse(raw) as TelegramBootstrapSession);
+        if (session.status === "failed" && isReleasedClassifyFailure(session.error)) {
+          await deleteTelegramBootstrapSession(workspaceDir, canonicalConversationId);
+          return null;
+        }
+        return session;
+      } catch (error: any) {
+        if (error?.code === "ENOENT") continue;
+        throw error;
+      }
     }
-    return session;
+    return null;
   } catch (error: any) {
     if (error?.code === "ENOENT") return null;
     throw error;
@@ -220,18 +282,54 @@ export async function deleteTelegramBootstrapSession(
   conversationId: string,
 ): Promise<void> {
   await fs.unlink(sessionPath(workspaceDir, conversationId)).catch(() => {});
+  const legacyPath = alternateSessionPath(workspaceDir, conversationId);
+  if (legacyPath) {
+    await fs.unlink(legacyPath).catch(() => {});
+  }
+}
+
+export async function expireTelegramBootstrapSession(
+  workspaceDir: string,
+  conversationId: string,
+): Promise<TelegramBootstrapSession | null> {
+  const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
+  if (!session) return null;
+
+  const expiredSession: TelegramBootstrapSession = {
+    ...session,
+    updatedAt: new Date().toISOString(),
+    suppressUntil: new Date(0).toISOString(),
+  };
+
+  await writeTelegramBootstrapSession(workspaceDir, expiredSession);
+  return expiredSession;
+}
+
+export async function cleanupTelegramBootstrapSession(
+  workspaceDir: string,
+  conversationId: string,
+): Promise<boolean> {
+  const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
+  if (!session) return false;
+  await deleteTelegramBootstrapSession(workspaceDir, conversationId);
+  return true;
 }
 
 export async function writeTelegramBootstrapSession(
   workspaceDir: string,
   session: TelegramBootstrapSession,
 ): Promise<void> {
+  const canonicalSession = normalizeStoredSession(session);
   const dir = sessionsDir(workspaceDir);
   await fs.mkdir(dir, { recursive: true });
-  const file = sessionPath(workspaceDir, session.conversationId);
+  const file = sessionPath(workspaceDir, canonicalSession.conversationId);
   const tmp = `${file}.${randomUUID()}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(session, null, 2) + "\n", "utf-8");
+  await fs.writeFile(tmp, JSON.stringify(canonicalSession, null, 2) + "\n", "utf-8");
   await fs.rename(tmp, file);
+  const legacyPath = alternateSessionPath(workspaceDir, session.conversationId);
+  if (legacyPath) {
+    await fs.unlink(legacyPath).catch(() => {});
+  }
 }
 
 export async function upsertTelegramBootstrapSession(
@@ -258,6 +356,9 @@ export async function upsertTelegramBootstrapSession(
     attemptCount?: number | null;
     attemptId?: string | null;
     attemptSeq?: number | null;
+    classifySessionKey?: string | null;
+    classifyRunId?: string | null;
+    classifyStartedAt?: string | null;
     bootstrapStep?: TelegramBootstrapStep | null;
     lastError?: string | null;
     nextRetryAt?: string | null;
@@ -268,7 +369,8 @@ export async function upsertTelegramBootstrapSession(
     completionAckSentAt?: string | null;
   },
 ): Promise<TelegramBootstrapSession> {
-  const existing = await readTelegramBootstrapSession(workspaceDir, input.conversationId);
+  const conversationId = toCanonicalTelegramBootstrapConversationId(input.conversationId);
+  const existing = await readTelegramBootstrapSession(workspaceDir, conversationId);
   const resolvedSourceRoute = resolveNullableField(input.sourceRoute, existing?.sourceRoute);
   const resolvedProjectRoute = resolveNullableField(input.projectRoute, existing?.projectRoute);
   const resolvedProjectName = resolveNullableField(input.projectName, existing?.projectName);
@@ -282,6 +384,9 @@ export async function upsertTelegramBootstrapSession(
   const resolvedAttemptCount = resolveNullableField(input.attemptCount, existing?.attemptCount, 0);
   const resolvedAttemptId = resolveNullableField(input.attemptId, existing?.attemptId);
   const resolvedAttemptSeq = resolveNullableField(input.attemptSeq, existing?.attemptSeq);
+  const resolvedClassifySessionKey = resolveNullableField(input.classifySessionKey, existing?.classifySessionKey);
+  const resolvedClassifyRunId = resolveNullableField(input.classifyRunId, existing?.classifyRunId);
+  const resolvedClassifyStartedAt = resolveNullableField(input.classifyStartedAt, existing?.classifyStartedAt);
   const resolvedBootstrapStep = resolveNullableField(input.bootstrapStep, existing?.bootstrapStep);
   const resolvedNextRetryAt =
     input.nextRetryAt !== undefined
@@ -307,8 +412,8 @@ export async function upsertTelegramBootstrapSession(
   });
   const now = new Date().toISOString();
   const session: TelegramBootstrapSession = {
-    id: existing?.id ?? buildBootstrapSessionId(input.conversationId, input.rawIdea),
-    conversationId: input.conversationId,
+    id: existing?.id ?? buildBootstrapSessionId(conversationId, input.rawIdea),
+    conversationId,
     sourceChannel: input.sourceChannel ?? input.sourceRoute?.channel ?? existing?.sourceChannel ?? "telegram",
     sourceRoute: resolvedSourceRoute,
     projectRoute: resolvedProjectRoute,
@@ -331,6 +436,9 @@ export async function upsertTelegramBootstrapSession(
     status: input.status,
     attemptId: resolvedAttemptId,
     attemptSeq: resolvedAttemptSeq,
+    classifySessionKey: resolvedClassifySessionKey,
+    classifyRunId: resolvedClassifyRunId,
+    classifyStartedAt: resolvedClassifyStartedAt,
     bootstrapStep: resolvedBootstrapStep,
     attemptCount: resolvedAttemptCount,
     lastError: resolvedError,
@@ -370,10 +478,23 @@ export function shouldSuppressTelegramBootstrapReply(
   } | null,
 ): boolean {
   if (!session) return false;
-  if (Date.parse(session.suppressUntil) < Date.now()) return false;
-  if (session.status !== "completed" && session.status !== "failed") return true;
+  if (isTelegramBootstrapSessionExpired(session)) return false;
+  if (session.status === "completed" || session.status === "failed") {
+    if (session.status === "failed" && isReleasedClassifyFailure(session.error)) return false;
+    if (!request) return false;
+    return buildBootstrapRequestFingerprint(request) === session.requestHash;
+  }
   if (!request) return true;
   return buildBootstrapRequestFingerprint(request) === session.requestHash;
+}
+
+export function isTelegramBootstrapSessionExpired(
+  session: TelegramBootstrapSession | null | undefined,
+  now = Date.now(),
+): boolean {
+  if (!session) return false;
+  const suppressUntil = Date.parse(session.suppressUntil);
+  return !Number.isNaN(suppressUntil) && suppressUntil < now;
 }
 
 export function isRecoverableTelegramBootstrapSession(

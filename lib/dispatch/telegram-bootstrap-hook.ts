@@ -9,19 +9,23 @@ import { hasGenesisAgent } from "../setup/agent.js";
 import { runPipeline, type GenesisPayload, type StepContext } from "../intake/index.js";
 import { createProvider } from "../providers/index.js";
 import { normalizeStackHint } from "../intake/lib/stack-detection.js";
+import { supportsGreenfieldScaffold } from "../test-env/bootstrap.js";
 import { readFabricaTelegramConfig } from "../telegram/config.js";
 import { readProjects } from "../projects/index.js";
 import { discoverAgents } from "../services/heartbeat/agent-discovery.js";
 import { projectTick } from "../services/tick.js";
+import { log as auditLog } from "../audit.js";
 import { z } from "zod";
 import {
   buildBootstrapRequestHash,
   deleteTelegramBootstrapSession,
   isClaimableTelegramBootstrapSession,
   isRecoverableTelegramBootstrapSession,
+  isTelegramBootstrapSessionExpired,
   isSupersededTelegramBootstrapAttempt,
   readTelegramBootstrapSession,
   shouldSuppressTelegramBootstrapReply,
+  toCanonicalTelegramBootstrapConversationId,
   upsertTelegramBootstrapSession,
   type TelegramBootstrapSession,
   type TelegramBootstrapStep,
@@ -30,10 +34,70 @@ import { DATA_DIR } from "../setup/constants.js";
 const BOOTSTRAP_RETRY_DELAY_MS = 15_000;
 const LAYER3_CONFIDENCE_THRESHOLD = 0.6;
 const activeBootstrapResumes = new Set<string>();
+const TELEGRAM_DISPATCH_CLAIM_TTL_MS = 15_000;
+const activeTelegramDispatchClaims = new Map<string, number>();
+const activeTelegramConversationClaims = new Map<string, number>();
 
 function buildActiveBootstrapResumeKey(workspaceDir: string, conversationId: string): string {
-  return `${workspaceDir}::${conversationId}`;
+  return `${workspaceDir}::${toCanonicalTelegramBootstrapConversationId(conversationId)}`;
 }
+
+function buildTelegramDispatchClaimKey(conversationId: string, content: string): string {
+  return `${toCanonicalTelegramBootstrapConversationId(conversationId)}::${buildBootstrapRequestHash({ rawIdea: content })}`;
+}
+
+function sweepExpiredTelegramDispatchClaims(now: number = Date.now()): void {
+  for (const [claimKey, expiresAt] of activeTelegramDispatchClaims.entries()) {
+    if (expiresAt <= now) activeTelegramDispatchClaims.delete(claimKey);
+  }
+  for (const [conversationId, expiresAt] of activeTelegramConversationClaims.entries()) {
+    if (expiresAt <= now) activeTelegramConversationClaims.delete(conversationId);
+  }
+}
+
+function acquireTelegramDispatchClaim(conversationId: string, content: string): string {
+  sweepExpiredTelegramDispatchClaims();
+  const claimKey = buildTelegramDispatchClaimKey(conversationId, content);
+  activeTelegramDispatchClaims.set(claimKey, Date.now() + TELEGRAM_DISPATCH_CLAIM_TTL_MS);
+  return claimKey;
+}
+
+function hasTelegramDispatchClaim(conversationId: string, content: string): boolean {
+  sweepExpiredTelegramDispatchClaims();
+  return activeTelegramDispatchClaims.has(buildTelegramDispatchClaimKey(conversationId, content));
+}
+
+function releaseTelegramDispatchClaim(claimKey: string): void {
+  activeTelegramDispatchClaims.delete(claimKey);
+}
+
+function acquireTelegramConversationClaim(conversationId: string): void {
+  sweepExpiredTelegramDispatchClaims();
+  activeTelegramConversationClaims.set(
+    toCanonicalTelegramBootstrapConversationId(conversationId),
+    Date.now() + TELEGRAM_DISPATCH_CLAIM_TTL_MS,
+  );
+}
+
+function hasTelegramConversationClaim(conversationId: string): boolean {
+  sweepExpiredTelegramDispatchClaims();
+  return activeTelegramConversationClaims.has(toCanonicalTelegramBootstrapConversationId(conversationId));
+}
+
+type BootstrapResumeHandoffOutcome =
+  | "started"
+  | "already_active"
+  | "superseded"
+  | "failed_to_start";
+
+type BootstrapResumeHandoffResult = {
+  outcome: BootstrapResumeHandoffOutcome;
+  session: TelegramBootstrapSession | null;
+};
+
+type BootstrapResumeHandoffOptions = {
+  resumeSession?: (session: TelegramBootstrapSession) => Promise<TelegramBootstrapSession | null>;
+};
 
 type BootstrapRequest = {
   rawIdea: string;
@@ -135,10 +199,17 @@ function parseIdeaBlock(text: string): string | undefined {
   return normalizeText(match?.[2]);
 }
 
+function parseExplicitProjectName(text: string): string | undefined {
+  const match = text.match(/\b(?:called|named|chamado)\s+[`"'“”‘’]?([a-z0-9][a-z0-9-]{1,63})[`"'“”‘’]?(?=$|[\s.,!?;:])/i);
+  return match?.[1]?.toLowerCase();
+}
+
 function parseBootstrapRequest(text: string): BootstrapRequest {
   const repoUrl = parseField(text, ["repository url", "repo url", "reposit[oó]rio url", "github repo"]);
   const rawIdea = parseIdeaBlock(text) ?? text.trim();
-  const projectName = parseField(text, ["project name", "nome do projeto", "repo name", "repository name"]);
+  const projectName =
+    parseField(text, ["project name", "nome do projeto", "repo name", "repository name"])
+    ?? parseExplicitProjectName(text);
   const repoPath = parseField(text, ["local repository path", "repo path", "caminho local", "local path"]);
   const explicitStack = parseField(text, ["stack", "framework", "linguagem"]);
   const stackHint = (explicitStack ? normalizeStackHint(explicitStack) : "") || detectStackHint(text);
@@ -156,8 +227,18 @@ const MAX_CLASSIFY_LENGTH = 500;
 function isAmbiguousCandidate(text: string): boolean {
   const lower = text.toLowerCase();
   if (lower.length <= 20 || lower.length > MAX_CLASSIFY_LENGTH) return false;
+  const projectIntentCue = /\b(i need|need\b|want\b|looking for|preciso\b|quero\b|gostaria\b|me faz|faça\b|fazer\b|make me|build me|can you build|could you build)\b/.test(lower);
   const softwareCue = /\b(projeto|project|cli|api|app|aplicativo|servi[cç]o|library|biblioteca|repo|reposit[oó]rio|tool|ferramenta|sistema|system|bot|script|programa|program)\b/.test(lower);
-  return softwareCue;
+  if (!softwareCue) return false;
+  if (projectIntentCue) return true;
+
+  const informationalQuestionCue =
+    /\?$/.test(lower) ||
+    /^\s*(how|what|why|when|where|who|which)\b/.test(lower) ||
+    /^\s*(can|could|would)\s+you\s+(help|explain|tell)\b/.test(lower) ||
+    /\b(help|support|status|explain|working|works|broken|down|error|problem|issue)\b/.test(lower);
+
+  return !informationalQuestionCue;
 }
 
 type DmIntentClassification = {
@@ -166,6 +247,14 @@ type DmIntentClassification = {
   stackHint?: string | null;
   projectSlug?: string | null;
   language: "pt" | "en";
+};
+
+type DmIntentClassificationAttempt = {
+  sessionKey: string;
+  runId: string | null;
+  waitStatus: "ok" | "error" | "timeout";
+  classification: DmIntentClassification | null;
+  executionError: string | null;
 };
 
 const DmIntentSchema = z.object({
@@ -190,79 +279,183 @@ Examples:
 - "Oi, tudo bem?" → {"intent":"other","confidence":0.99,"stackHint":null,"projectSlug":null,"language":"pt"}
 - "Me faz um app que converte temperaturas" → {"intent":"create_project","confidence":0.9,"stackHint":null,"projectSlug":"conversor-temperaturas","language":"pt"}`;
 
-async function classifyDmIntent(
+function parseDmIntentClassification(rawText: string): DmIntentClassification | null {
+  const jsonStr = rawText.replace(/^```(json)?/gm, "").replace(/```$/gm, "").trim();
+  const intentData = JSON.parse(jsonStr);
+  const validated = DmIntentSchema.safeParse(intentData);
+  return validated.success ? validated.data : null;
+}
+
+function extractAssistantMessage(messagesResult: unknown): Record<string, unknown> | null {
+  const messages = Array.isArray(messagesResult)
+    ? messagesResult
+    : (Array.isArray((messagesResult as any)?.messages) ? (messagesResult as any).messages : []);
+  const lastAssistant = messages.filter((m: any) => m.role === "assistant").pop();
+  return lastAssistant && typeof lastAssistant === "object" ? lastAssistant as Record<string, unknown> : null;
+}
+
+function extractAssistantText(messagesResult: unknown): string {
+  const lastAssistant = extractAssistantMessage(messagesResult);
+  if (!lastAssistant) return "";
+  const rawContent = lastAssistant.content;
+  return typeof rawContent === "string"
+    ? rawContent
+    : (Array.isArray(rawContent)
+      ? (rawContent.find((b: any) => b.type === "text")?.text ?? "")
+      : "");
+}
+
+function extractAssistantExecutionError(messagesResult: unknown): string | null {
+  const lastAssistant = extractAssistantMessage(messagesResult);
+  if (!lastAssistant) return null;
+
+  const errorMessage = typeof lastAssistant.errorMessage === "string"
+    ? lastAssistant.errorMessage.trim()
+    : "";
+  if (errorMessage) return errorMessage;
+
+  return lastAssistant.stopReason === "error"
+    ? "assistant session stopped with stopReason=error"
+    : null;
+}
+
+async function readClassifySessionOutcome(
+  ctx: PluginContext,
+  sessionKey: string,
+): Promise<{ classification: DmIntentClassification | null; executionError: string | null }> {
+  try {
+    const runtime = ctx.runtime;
+    if (!runtime?.subagent?.getSessionMessages) {
+      return { classification: null, executionError: null };
+    }
+
+    const messagesResult = await runtime.subagent.getSessionMessages({ sessionKey });
+    const executionError = extractAssistantExecutionError(messagesResult);
+    if (executionError) {
+      return { classification: null, executionError };
+    }
+
+    const text = extractAssistantText(messagesResult);
+    if (!text.trim()) {
+      return { classification: null, executionError: null };
+    }
+
+    try {
+      return {
+        classification: parseDmIntentClassification(text),
+        executionError: null,
+      };
+    } catch {
+      return { classification: null, executionError: null };
+    }
+  } catch (err) {
+    ctx.logger.warn(`[telegram-bootstrap] classify getSessionMessages exception: ${(err as Error).message ?? err}`);
+    return { classification: null, executionError: null };
+  }
+}
+
+async function classifyDmIntentAttempt(
   ctx: PluginContext,
   content: string,
-  _workspaceDir: string,
-): Promise<DmIntentClassification | null> {
+  sessionKey?: string,
+): Promise<DmIntentClassificationAttempt | null> {
   try {
     const runtime = ctx.runtime;
     if (!runtime?.subagent?.run) return null;
 
     const truncated = content.slice(0, MAX_CLASSIFY_LENGTH);
     const prompt = CLASSIFY_PROMPT_TEMPLATE.replace("$CONTENT", truncated.replace(/"/g, '\\"'));
-    const sessionKey = `dm-classify-${Date.now()}`;
+    const resolvedSessionKey = sessionKey ?? `dm-classify-${Date.now()}`;
 
     const { runId } = await runtime.subagent.run({
-      sessionKey,
+      sessionKey: resolvedSessionKey,
       message: prompt,
       extraSystemPrompt: "You are a JSON classifier. Return ONLY valid JSON, no markdown fences.",
       lane: "subagent",
       deliver: false,
-      idempotencyKey: sessionKey,
+      idempotencyKey: resolvedSessionKey,
     });
 
     const waitResult = await runtime.subagent.waitForRun({ runId, timeoutMs: 15_000 });
     if (waitResult.status !== "ok") {
       ctx.logger.warn(`[telegram-bootstrap] classify waitForRun status=${waitResult.status} (expected ok)`);
-      return null;
+      return {
+        sessionKey: resolvedSessionKey,
+        runId,
+        waitStatus: waitResult.status,
+        classification: null,
+        executionError: null,
+      };
     }
 
-    const messagesResult = await runtime.subagent.getSessionMessages({ sessionKey });
-    // getSessionMessages may return an array or an object with a messages property
-    const messages = Array.isArray(messagesResult)
-      ? messagesResult
-      : (Array.isArray((messagesResult as any)?.messages) ? (messagesResult as any).messages : []);
-    const lastAssistant = messages.filter((m: any) => m.role === "assistant").pop();
-    if (!lastAssistant) {
-      ctx.logger.warn(`[telegram-bootstrap] classify: no assistant message found (messages=${messages.length}, resultType=${typeof messagesResult})`);
-      return null;
+    const messagesResult = await runtime.subagent.getSessionMessages({ sessionKey: resolvedSessionKey });
+    const executionError = extractAssistantExecutionError(messagesResult);
+    if (executionError) {
+      ctx.logger.warn(`[telegram-bootstrap] classify assistant execution error: ${executionError}`);
+      return {
+        sessionKey: resolvedSessionKey,
+        runId,
+        waitStatus: "ok",
+        classification: null,
+        executionError,
+      };
     }
-    // content may be a string or an array of content blocks (thinking + text)
-    const rawContent = lastAssistant.content;
-    const text = typeof rawContent === "string"
-      ? rawContent
-      : (Array.isArray(rawContent)
-        ? (rawContent.find((b: any) => b.type === "text")?.text ?? "")
-        : "");
+
+    const text = extractAssistantText(messagesResult);
     if (!text.trim()) {
-      ctx.logger.warn(`[telegram-bootstrap] classify: empty text from assistant (contentType=${typeof rawContent}, isArray=${Array.isArray(rawContent)})`);
-      return null;
+      ctx.logger.warn(`[telegram-bootstrap] classify: empty text from assistant`);
+      return {
+        sessionKey: resolvedSessionKey,
+        runId,
+        waitStatus: "ok",
+        classification: null,
+        executionError: null,
+      };
     }
 
-    const jsonStr = text.replace(/^```(json)?/gm, "").replace(/```$/gm, "").trim();
-    const intentData = JSON.parse(jsonStr);
-    const validated = DmIntentSchema.safeParse(intentData);
-    if (!validated.success) {
-      ctx.logger.warn(`[telegram-bootstrap] classify: schema validation failed: ${validated.error?.message}`);
+    let classification: DmIntentClassification | null = null;
+    try {
+      classification = parseDmIntentClassification(text);
+    } catch {
+      classification = null;
     }
-    return validated.success ? validated.data : null;
+    if (!classification) {
+      ctx.logger.warn(`[telegram-bootstrap] classify: schema validation failed`);
+    }
+    return {
+      sessionKey: resolvedSessionKey,
+      runId,
+      waitStatus: "ok",
+      classification,
+      executionError: null,
+    };
   } catch (err) {
     ctx.logger.warn(`[telegram-bootstrap] classify exception: ${(err as Error).message ?? err}`);
     return null;
   }
 }
 
-function resetActiveBootstrapResumesForTests(): void {
-  activeBootstrapResumes.clear();
+async function classifyDmIntent(
+  ctx: PluginContext,
+  content: string,
+  _workspaceDir: string,
+): Promise<DmIntentClassification | null> {
+  const attempt = await classifyDmIntentAttempt(ctx, content);
+  return attempt?.classification ?? null;
 }
 
-export { isAmbiguousCandidate as _testIsAmbiguousCandidate, classifyDmIntent as _testClassifyDmIntent, buildTopicDeepLink as _testBuildTopicDeepLink, inferProjectSlug as _testInferProjectSlug, normalizeUserResponse as _testNormalizeUserResponse, continueBootstrap as _testContinueBootstrap, recoverDueTelegramBootstrapSessions as _testRecoverDueBootstraps, resumeBootstrapping as _testResumeBootstrapping, resetActiveBootstrapResumesForTests as _testResetActiveBootstrapResumes };
+function resetActiveBootstrapResumesForTests(): void {
+  activeBootstrapResumes.clear();
+  activeTelegramDispatchClaims.clear();
+  activeTelegramConversationClaims.clear();
+}
+
+export { isAmbiguousCandidate as _testIsAmbiguousCandidate, classifyDmIntent as _testClassifyDmIntent, buildTopicDeepLink as _testBuildTopicDeepLink, inferProjectSlug as _testInferProjectSlug, normalizeUserResponse as _testNormalizeUserResponse, continueBootstrap as _testContinueBootstrap, recoverDueTelegramBootstrapSessions as _testRecoverDueBootstraps, resumeBootstrapping as _testResumeBootstrapping, resetActiveBootstrapResumesForTests as _testResetActiveBootstrapResumes, startFreshBootstrapResume as _testStartFreshBootstrapResume };
 
 function isBootstrapCandidate(text: string): boolean {
   const lower = text.toLowerCase();
   if (/^\s*(project name|nome do projeto|repository url|repo url|stack)\s*:/im.test(text)) return true;
-  const createCue = /\b(crie|cria|criar|create|register|registre|construa|desenvolva|novo projeto|new project)\b/.test(lower);
+  const createCue = /\b(crie|cria|criar|create|build|register|registre|construa|desenvolva|novo projeto|new project)\b/.test(lower);
   const softwareCue = /\b(projeto|project|cli|api|app|aplicativo|servi[cç]o|library|biblioteca|repo|reposit[oó]rio)\b/.test(lower);
   return createCue && softwareCue;
 }
@@ -362,6 +555,258 @@ function buildTopicKickoff(projectName: string, idea: string, language: Bootstra
 
 function normalizeTelegramChatTarget(target: string): string {
   return target.startsWith("telegram:") ? target.slice("telegram:".length) : target;
+}
+
+function resolveTelegramBootstrapConversationIdFromSessionKey(sessionKey: string): string {
+  if (!sessionKey.includes(":telegram:")) return "";
+  const directDmMatch = sessionKey.match(/(?:^|:)telegram:(?:slash|direct):([^:]+)(?::|$)/);
+  if (directDmMatch?.[1]) {
+    return toCanonicalTelegramBootstrapConversationId(directDmMatch[1]);
+  }
+
+  const groupedTopicMatch = sessionKey.match(/(?:^|:)telegram:group:[^:]+:topic:[^:]+(?:$|:)/);
+  if (groupedTopicMatch) return "";
+
+  const match = sessionKey.match(/:telegram:(?:slash|direct):([^:]+)$/);
+  return match?.[1] ? toCanonicalTelegramBootstrapConversationId(match[1]) : "";
+}
+
+function resolveTelegramBootstrapDmConversationIdFromHookContext(
+  eventCtx: { channelId?: string; sessionKey?: string; conversationId?: string },
+): string {
+  const fromSessionKey = resolveTelegramBootstrapConversationIdFromSessionKey(eventCtx.sessionKey ?? "");
+  if (fromSessionKey) return fromSessionKey;
+
+  const rawConversationId = String(eventCtx.conversationId ?? "").trim();
+  if (!rawConversationId) {
+    return eventCtx.channelId === "telegram" ? "" : "";
+  }
+
+  const canonicalConversationId = toCanonicalTelegramBootstrapConversationId(rawConversationId);
+  if (canonicalConversationId.includes(":group:") || canonicalConversationId.includes(":topic:")) return "";
+
+  const bareConversationId = normalizeTelegramChatTarget(canonicalConversationId);
+  if (!bareConversationId || bareConversationId.startsWith("-")) return "";
+
+  return canonicalConversationId;
+}
+
+function isBlockedTelegramBootstrapTool(toolName: string): boolean {
+  const normalized = toolName.trim().toLowerCase();
+  return normalized === "exec" || normalized.includes("codex");
+}
+
+function shouldClaimTelegramBootstrapBeforeDispatch(
+  session: TelegramBootstrapSession | null,
+  content: string,
+): boolean {
+  const sessionIsExpired =
+    session != null &&
+    !Number.isNaN(Date.parse(session.suppressUntil)) &&
+    Date.parse(session.suppressUntil) < Date.now();
+  if (session && !sessionIsExpired) {
+    if (isRecoverableTelegramBootstrapSession(session)) return true;
+    if (session.status === "pending_classify" || session.status === "classifying" || session.status === "clarifying") {
+      return true;
+    }
+  }
+  return isBootstrapCandidate(content) || isAmbiguousCandidate(content);
+}
+
+async function handleTelegramBootstrapDmMessage(
+  ctx: PluginContext,
+  rawConversationId: string,
+  content: string,
+): Promise<void> {
+  const conversationId = toCanonicalTelegramBootstrapConversationId(rawConversationId);
+
+  const workspaceDir = resolveWorkspaceDir(ctx.config as Record<string, unknown>);
+  if (!workspaceDir) {
+    if (isBootstrapCandidate(content)) {
+      await sendTelegramText(ctx, conversationId, "Nao encontrei o workspace da Fabrica configurado no OpenClaw.");
+    }
+    return;
+  }
+
+  // Layer 1: Active clarifying OR classifying session?
+  const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
+  if (isRecoverableTelegramBootstrapSession(existingSession)) {
+    const nextRetryAt = existingSession.nextRetryAt ?? null;
+    if (isClaimableTelegramBootstrapSession(existingSession)) {
+      startFreshBootstrapResume(
+        ctx,
+        workspaceDir,
+        existingSession.conversationId,
+        () => leaseBootstrapRecovery(workspaceDir, existingSession.conversationId),
+      );
+    } else {
+      ctx.logger.info(`[telegram-bootstrap] recovery deferred until ${nextRetryAt} for ${conversationId}`);
+    }
+    return;
+  }
+  // If the clarifying session has expired, treat any new bootstrap candidate as a fresh request
+  const sessionIsExpired = existingSession != null && Date.parse(existingSession.suppressUntil) < Date.now();
+  if (existingSession && !sessionIsExpired && (existingSession.status === "classifying" || existingSession.status === "pending_classify")) {
+    // LLM classification is in progress (pending or active) — suppress duplicate messages
+    ctx.logger.info(`[telegram-bootstrap] LLM classification in progress for ${conversationId}, ignoring concurrent message`);
+    return;
+  }
+  if (existingSession?.status === "clarifying" && !sessionIsExpired) {
+    const clarResult = parseClarificationResponse(content, existingSession);
+    if (!clarResult.recognized) {
+      // Re-ask — don't let the regular agent respond to this message either
+      ctx.logger.info(`[telegram-bootstrap] clarification response not recognized, re-asking (conversation: ${conversationId})`);
+      await sendTelegramText(ctx, conversationId, buildClarificationMessage(
+        { rawIdea: existingSession.rawIdea, stackHint: existingSession.stackHint ?? undefined, projectName: existingSession.projectName ?? undefined },
+        existingSession.pendingClarification ?? undefined,
+        existingSession.language ?? "pt",
+      ));
+      return;
+    }
+    // Merge clarification into existing session, preserving rawIdea
+    const mergedRequest = {
+      rawIdea: existingSession.rawIdea,
+      projectName: clarResult.projectName ?? existingSession.projectName ?? null,
+      stackHint: clarResult.stackHint ?? existingSession.stackHint ?? null,
+      repoUrl: existingSession.repoUrl ?? null,
+      repoPath: existingSession.repoPath ?? null,
+    };
+    ctx.logger.info(`[telegram-bootstrap] clarification resolved: stack=${mergedRequest.stackHint}, idea="${mergedRequest.rawIdea}" (conversation: ${conversationId})`);
+    startFreshBootstrapResume(ctx, workspaceDir, conversationId, () => enterBootstrapping(
+      workspaceDir,
+      conversationId,
+      mergedRequest,
+      existingSession.sourceRoute ?? {
+        channel: "telegram",
+        channelId: normalizeTelegramChatTarget(conversationId),
+      },
+      existingSession.language ?? "pt",
+      {
+        ackSentAt: existingSession.ackSentAt ?? null,
+      },
+    ));
+    return;
+  }
+
+  if (!isBootstrapCandidate(content)) {
+    // Layer 3: LLM for ambiguous cases (fire-and-forget)
+    if (isAmbiguousCandidate(content)) {
+      const classifyOwner = resolveBootstrapAttemptOwner(existingSession);
+      classifyOwner.conversationId = conversationId;
+      // Create session IMMEDIATELY with pending_classify to suppress agent response for this turn
+      await upsertTelegramBootstrapSession(workspaceDir, {
+        conversationId,
+        rawIdea: content,
+        sourceRoute: { channel: "telegram", channelId: rawConversationId },
+        status: "pending_classify",
+        attemptId: classifyOwner.attemptId,
+        attemptSeq: classifyOwner.attemptSeq,
+        ...freshBootstrapResetFields({ rawIdea: content }),
+      });
+
+      // Fire-and-forget: LLM classify + bootstrap runs detached from event handler
+      classifyAndBootstrap(ctx, workspaceDir, conversationId, content).catch((err) => {
+        logBootstrapWarning(ctx, `[telegram-bootstrap] LLM classify error: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+    return;
+  }
+
+  const parsed = parseBootstrapRequest(content);
+
+  // Dedup guard: compute hash from parsed fields (pre-LLM, projectName may be null)
+  // and check for existing in-flight sessions before starting classification.
+  const preClassifyRequest = {
+    rawIdea: parsed.rawIdea,
+    projectName: parsed.projectName ?? null,
+    stackHint: parsed.stackHint ?? null,
+    repoUrl: parsed.repoUrl ?? null,
+    repoPath: parsed.repoPath ?? null,
+  };
+  const preClassifyHash = buildBootstrapRequestHash(preClassifyRequest);
+  const sessionForHashPreClassify = await readTelegramBootstrapSession(workspaceDir, conversationId);
+  // Hash guard uses pre-LLM state (projectName may be null). For messages without a structured
+  // projectName, the hash will NOT match a previously stored post-LLM session (which includes
+  // the LLM-derived slug). Dedup in that window is carried by the pending_classify session
+  // status check below, not by this hash guard.
+  if (sessionForHashPreClassify?.requestHash === preClassifyHash) {
+    if (sessionForHashPreClassify.status === "completed") {
+      ctx.logger.info(`[telegram-bootstrap] duplicate completed DM ignored for conversation ${conversationId}`);
+      return;
+    }
+    // Allow restart if pipeline is stuck in "received" with an expired suppress window.
+    // This happens when the gateway restarts mid-pipeline (session never reached "failed").
+    const suppressUntil = Date.parse(sessionForHashPreClassify.suppressUntil);
+    const isExpiredRestartableSession =
+      !Number.isNaN(suppressUntil) &&
+      suppressUntil < Date.now() &&
+      (
+        sessionForHashPreClassify.status === "received" ||
+        sessionForHashPreClassify.status === "pending_classify" ||
+        sessionForHashPreClassify.status === "classifying" ||
+        sessionForHashPreClassify.status === "clarifying"
+      );
+    // Note: unlike Layer 3, this guard intentionally does NOT exclude "classifying" status.
+    // If a "classifying" session has a matching hash and is still active, Layer 2 is correctly
+    // blocked — this avoids double-firing during the LLM classification window.
+    if (sessionForHashPreClassify.status !== "failed" && !isExpiredRestartableSession) {
+      ctx.logger.info(`[telegram-bootstrap] duplicate in-flight DM ignored for conversation ${conversationId}`);
+      return;
+    }
+    if (isExpiredRestartableSession) {
+      ctx.logger.info(`[telegram-bootstrap] stale in-flight session (expired) — restarting pipeline for conversation ${conversationId}`);
+    }
+  }
+
+  const incomingRequest = {
+    rawIdea: parsed.rawIdea,
+    projectName: parsed.projectName ?? null,
+    stackHint: parsed.stackHint ?? null,
+    repoUrl: parsed.repoUrl ?? null,
+    repoPath: parsed.repoPath ?? null,
+  };
+
+  // Layer 2 language heuristic: detect from the matched createCue
+  const language: BootstrapLanguage = /\b(cria|crie|criar|construa|desenvolva|registre|novo projeto)\b/i.test(content)
+    ? "pt" : "en";
+
+  if (!parsed.stackHint) {
+    await startFreshBootstrapResume(ctx, workspaceDir, conversationId, () => enterBootstrapping(
+      workspaceDir,
+      conversationId,
+      incomingRequest,
+      {
+        channel: "telegram",
+        channelId: rawConversationId,
+      },
+      language,
+    ));
+    return;
+  }
+
+  const handled = await runBootstrapPreflightOrFail(
+    ctx,
+    conversationId,
+    workspaceDir,
+    incomingRequest,
+    {
+      channel: "telegram",
+      channelId: rawConversationId,
+    },
+    { language },
+  );
+  if (handled) return;
+
+  startFreshBootstrapResume(ctx, workspaceDir, conversationId, () => enterBootstrapping(
+    workspaceDir,
+    conversationId,
+    incomingRequest,
+    {
+      channel: "telegram",
+      channelId: rawConversationId,
+    },
+    language,
+  ));
 }
 
 function isRecoverableRuntimeTelegramSendError(err: unknown): boolean {
@@ -467,6 +912,9 @@ function freshBootstrapResetFields(request: BootstrapRequest): {
   projectRoute: null;
   projectSlug: string | null;
   issueId: null;
+  classifySessionKey: null;
+  classifyRunId: null;
+  classifyStartedAt: null;
   bootstrapStep: null;
   attemptCount: number;
   pendingClarification: null;
@@ -484,6 +932,9 @@ function freshBootstrapResetFields(request: BootstrapRequest): {
     projectRoute: null,
     projectSlug: request.projectName ?? null,
     issueId: null,
+    classifySessionKey: null,
+    classifyRunId: null,
+    classifyStartedAt: null,
     bootstrapStep: null,
     attemptCount: 0,
     pendingClarification: null,
@@ -507,6 +958,27 @@ function createBootstrapAttemptOwner(
     attemptSeq: Math.max(existingSession?.attemptSeq ?? 0, 0) + 1,
     conversationId: existingSession?.conversationId ?? "",
   };
+}
+
+function resolveBootstrapAttemptOwner(
+  existingSession: TelegramBootstrapSession | null,
+): BootstrapAttemptOwner {
+  const existingOwner = buildBootstrapAttemptOwner(existingSession);
+  if (
+    existingOwner &&
+    existingSession &&
+    !isTelegramBootstrapSessionExpired(existingSession) &&
+    (
+      existingSession.status === "pending_classify" ||
+      existingSession.status === "classifying" ||
+      existingSession.status === "clarifying" ||
+      existingSession.status === "bootstrapping" ||
+      existingSession.status === "dispatching"
+    )
+  ) {
+    return existingOwner;
+  }
+  return createBootstrapAttemptOwner(existingSession);
 }
 
 function buildBootstrapAttemptOwner(session: TelegramBootstrapSession | null | undefined): BootstrapAttemptOwner | null {
@@ -561,6 +1033,9 @@ async function persistOwnedBootstrapCheckpoint(
     projectChannelId?: string | null;
     language?: BootstrapLanguage;
     attemptCount?: number | null;
+    classifySessionKey?: string | null;
+    classifyRunId?: string | null;
+    classifyStartedAt?: string | null;
     lastError?: string | null;
     nextRetryAt?: string | null;
     ackSentAt?: string | null;
@@ -599,6 +1074,9 @@ async function persistOwnedBootstrapCheckpoint(
     attemptId: owner.attemptId,
     attemptSeq: owner.attemptSeq,
     attemptCount: input.attemptCount,
+    classifySessionKey: input.classifySessionKey,
+    classifyRunId: input.classifyRunId,
+    classifyStartedAt: input.classifyStartedAt,
     lastError: input.lastError,
     nextRetryAt: input.nextRetryAt,
     ackSentAt: input.ackSentAt,
@@ -622,7 +1100,7 @@ async function enterBootstrapping(
   },
 ): Promise<TelegramBootstrapSession> {
   const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
-  const owner = createBootstrapAttemptOwner(existingSession);
+  const owner = resolveBootstrapAttemptOwner(existingSession);
   owner.conversationId = conversationId;
   return upsertTelegramBootstrapSession(workspaceDir, {
     conversationId,
@@ -656,6 +1134,9 @@ async function recordBootstrapRetry(
       rawIdea: session.rawIdea,
       status: session.status === "dispatching" || session.projectRegisteredAt ? "dispatching" : "bootstrapping",
       attemptCount: (session.attemptCount ?? 0) + 1,
+      classifySessionKey: session.classifySessionKey ?? null,
+      classifyRunId: session.classifyRunId ?? null,
+      classifyStartedAt: session.classifyStartedAt ?? null,
       lastError: message,
       nextRetryAt: new Date(Date.now() + BOOTSTRAP_RETRY_DELAY_MS).toISOString(),
       language: session.language,
@@ -677,6 +1158,9 @@ async function recordBootstrapRetry(
     projectChannelId: session.projectChannelId,
     language: session.language,
     attemptCount: (session.attemptCount ?? 0) + 1,
+    classifySessionKey: session.classifySessionKey ?? null,
+    classifyRunId: session.classifyRunId ?? null,
+    classifyStartedAt: session.classifyStartedAt ?? null,
     lastError: message,
     nextRetryAt: new Date(Date.now() + BOOTSTRAP_RETRY_DELAY_MS).toISOString(),
     ackSentAt: session.ackSentAt ?? null,
@@ -717,33 +1201,73 @@ async function leaseBootstrapRecovery(
       options?.requireClaimable === false
         ? session.nextRetryAt ?? null
         : new Date(Date.now() + BOOTSTRAP_RETRY_DELAY_MS).toISOString(),
-    lastError: session.lastError ?? null,
-    language: session.language,
+      lastError: session.lastError ?? null,
+      classifySessionKey: session.classifySessionKey ?? null,
+      classifyRunId: session.classifyRunId ?? null,
+      classifyStartedAt: session.classifyStartedAt ?? null,
+      language: session.language,
   });
 }
 
-function startFreshBootstrapResume(
+async function startFreshBootstrapResume(
   ctx: PluginContext,
   workspaceDir: string,
   conversationId: string,
   start: () => Promise<TelegramBootstrapSession | null>,
-): Promise<TelegramBootstrapSession | null> | null {
-  const resumeKey = buildActiveBootstrapResumeKey(workspaceDir, conversationId);
+  options?: BootstrapResumeHandoffOptions,
+): Promise<BootstrapResumeHandoffResult> {
+  const canonicalConversationId = toCanonicalTelegramBootstrapConversationId(conversationId);
+  const resumeKey = buildActiveBootstrapResumeKey(workspaceDir, canonicalConversationId);
   if (activeBootstrapResumes.has(resumeKey)) {
-    return null;
+    return {
+      outcome: "already_active",
+      session: await readTelegramBootstrapSession(workspaceDir, canonicalConversationId),
+    };
   }
 
   activeBootstrapResumes.add(resumeKey);
-  const resumePromise = (async () => {
+  try {
     const session = await start();
     if (!session) {
-      return null;
+      return {
+        outcome: "failed_to_start",
+        session: await readTelegramBootstrapSession(workspaceDir, canonicalConversationId),
+      };
     }
-    return await resumeBootstrappingSession(ctx, workspaceDir, session);
-  })().finally(() => {
+
+    const resumeSession = options?.resumeSession
+      ?? ((startedSession: TelegramBootstrapSession) => resumeBootstrappingSession(ctx, workspaceDir, startedSession));
+    const finalSession = await resumeSession(session);
+    if (isSupersededTelegramBootstrapAttempt(finalSession, session)) {
+      return {
+        outcome: "superseded",
+        session: finalSession,
+      };
+    }
+
+    return {
+      outcome: "started",
+      session: finalSession,
+    };
+  } finally {
     activeBootstrapResumes.delete(resumeKey);
-  });
-  return resumePromise;
+  }
+}
+
+async function auditBootstrapResumeHandoff(
+  workspaceDir: string,
+  source: "classify" | "classify_recovery",
+  handoff: BootstrapResumeHandoffResult,
+  session: TelegramBootstrapSession,
+): Promise<void> {
+  await auditLog(workspaceDir, "telegram_bootstrap_resume_handoff", {
+    source,
+    outcome: handoff.outcome,
+    conversationIdCanonical: handoff.session?.conversationId ?? session.conversationId,
+    attemptId: handoff.session?.attemptId ?? session.attemptId ?? null,
+    attemptSeq: handoff.session?.attemptSeq ?? session.attemptSeq ?? null,
+    requestHash: handoff.session?.requestHash ?? session.requestHash,
+  }).catch(() => {});
 }
 
 async function persistDispatchProgress(
@@ -780,6 +1304,9 @@ async function persistDispatchProgress(
       projectTickedAt: input.projectTickedAt,
       completionAckSentAt: input.completionAckSentAt,
       lastError: null,
+      classifySessionKey: null,
+      classifyRunId: null,
+      classifyStartedAt: null,
       nextRetryAt: null,
       language: session.language,
     });
@@ -803,6 +1330,9 @@ async function persistDispatchProgress(
     projectTickedAt: input.projectTickedAt,
     completionAckSentAt: input.completionAckSentAt,
     lastError: null,
+    classifySessionKey: null,
+    classifyRunId: null,
+    classifyStartedAt: null,
     nextRetryAt: null,
     language: session.language,
     ackSentAt: session.ackSentAt ?? null,
@@ -844,6 +1374,21 @@ async function runBootstrapHandoff(
   }
   session = currentSession as TelegramBootstrapSession;
 
+  if (session.projectRegisteredAt) {
+    return completeRegisteredBootstrap(ctx, workspaceDir, session);
+  }
+
+  if (await runBootstrapPreflightOrFail(
+    ctx,
+    session.conversationId,
+    workspaceDir,
+    buildBootstrapRequestFromSession(session),
+    buildSessionSourceRoute(session),
+    { language: session.language ?? "pt" },
+  )) {
+    return await readTelegramBootstrapSession(workspaceDir, session.conversationId) ?? session;
+  }
+
   if (!session.ackSentAt) {
     await sendTelegramText(
       ctx,
@@ -875,10 +1420,6 @@ async function runBootstrapHandoff(
     if (!ownsBootstrapAttempt(session, owner)) {
       return session;
     }
-  }
-
-  if (session.projectRegisteredAt) {
-    return completeRegisteredBootstrap(ctx, workspaceDir, session);
   }
 
   await continueBootstrap(
@@ -1092,7 +1633,7 @@ async function resumeBootstrapping(
 ): Promise<TelegramBootstrapSession | null> {
   const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
   if (!isRecoverableTelegramBootstrapSession(session)) return session;
-  const resumed = startFreshBootstrapResume(
+  const handoff = await startFreshBootstrapResume(
     ctx,
     workspaceDir,
     conversationId,
@@ -1103,7 +1644,7 @@ async function resumeBootstrapping(
       return leasedSession ?? session;
     },
   );
-  return resumed ? await resumed : session;
+  return handoff.session ?? session;
 }
 
 export async function recoverDueTelegramBootstrapSessions(
@@ -1125,6 +1666,13 @@ export async function recoverDueTelegramBootstrapSessions(
     if (!file.endsWith(".json")) continue;
     const conversationId = file.replace(/\.json$/, "");
     const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
+    if (!session) continue;
+
+    if (await recoverClassifyingTelegramBootstrapSession(ctx, workspaceDir, session)) {
+      resumedCount++;
+      continue;
+    }
+
     if (!isClaimableTelegramBootstrapSession(session)) continue;
     const resumeKey = buildActiveBootstrapResumeKey(workspaceDir, session.conversationId);
     if (activeBootstrapResumes.has(resumeKey)) continue;
@@ -1162,8 +1710,10 @@ async function runBootstrapPreflightOrFail(
   const telegramConfig = readFabricaTelegramConfig(ctx.pluginConfig);
   const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
   const language = options?.language ?? existingSession?.language ?? "pt";
+  const candidateSlug = inferProjectSlug(request.projectName ?? request.rawIdea);
+  const normalizedStack = request.stackHint ? normalizeStackHint(request.stackHint) : "";
 
-  if (!telegramConfig.projectsForumChatId) {
+  const persistAndAuditFailure = async (error: string, reason: string): Promise<void> => {
     await upsertTelegramBootstrapSession(workspaceDir, {
       conversationId,
       rawIdea: request.rawIdea,
@@ -1173,9 +1723,22 @@ async function runBootstrapPreflightOrFail(
       repoPath: request.repoPath ?? undefined,
       sourceRoute,
       status: "failed",
+      projectSlug: candidateSlug ?? undefined,
       language,
-      error: "missing_projects_forum_chat",
+      lastError: error,
+      error,
     });
+    await auditLog(workspaceDir, "telegram_bootstrap_failed", {
+      conversationId,
+      projectSlug: candidateSlug ?? null,
+      stackHint: request.stackHint ?? null,
+      reason,
+      error,
+    }).catch(() => {});
+  };
+
+  if (!telegramConfig.projectsForumChatId) {
+    await persistAndAuditFailure("missing_projects_forum_chat", "missing_projects_forum_chat");
     await sendTelegramText(
       ctx,
       conversationId,
@@ -1185,31 +1748,253 @@ async function runBootstrapPreflightOrFail(
     return true;
   }
 
-  const candidateSlug = inferProjectSlug(request.projectName ?? request.rawIdea);
+  if (normalizedStack && !supportsGreenfieldScaffold(normalizedStack)) {
+    const error =
+      `Greenfield scaffold for stack "${normalizedStack}" is not supported yet. ` +
+      `Supported stacks: nextjs, node-cli, express, fastapi, flask, django, python-cli.`;
+    await persistAndAuditFailure(error, "unsupported_greenfield_stack");
+    await sendTelegramText(
+      ctx,
+      conversationId,
+      `Nao consegui registrar o projeto automaticamente.\n\nErro: ${error}`,
+    );
+    return true;
+  }
+
   if (!candidateSlug) return false;
 
   const projects = await readProjects(workspaceDir).catch(() => null);
   if (!projects?.projects?.[candidateSlug]) return false;
 
-  await upsertTelegramBootstrapSession(workspaceDir, {
-    conversationId,
-    rawIdea: request.rawIdea,
-    projectName: request.projectName ?? undefined,
-    stackHint: request.stackHint ?? undefined,
-    repoUrl: request.repoUrl ?? undefined,
-    repoPath: request.repoPath ?? undefined,
-    sourceRoute,
-    status: "failed",
-    projectSlug: candidateSlug,
-    language,
-    error: "duplicate_project_slug",
-  });
+  await persistAndAuditFailure("duplicate_project_slug", "duplicate_project_slug");
   await sendTelegramText(
     ctx,
     conversationId,
     `Ja existe um projeto registrado com o slug "${candidateSlug}". Use o fluxo administrativo para vincular canais ou ajustar o projeto existente.`,
   );
   return true;
+}
+
+async function failClassifyingBootstrapSession(
+  ctx: PluginContext,
+  workspaceDir: string,
+  session: TelegramBootstrapSession,
+  error: string,
+  reason: string,
+): Promise<TelegramBootstrapSession> {
+  const owner = buildBootstrapAttemptOwner(session);
+  const latestSession = await readTelegramBootstrapSession(workspaceDir, session.conversationId);
+  const canMutateLegacySession = Boolean(
+    !owner &&
+    latestSession &&
+    (latestSession.status === "pending_classify" || latestSession.status === "classifying") &&
+    latestSession.requestHash === session.requestHash &&
+    (latestSession.classifySessionKey ?? null) === (session.classifySessionKey ?? null),
+  );
+  if ((!owner || !ownsBootstrapAttempt(latestSession, owner)) && !canMutateLegacySession) {
+    return latestSession ?? session;
+  }
+  if (latestSession && latestSession.status !== "pending_classify" && latestSession.status !== "classifying") {
+    return latestSession;
+  }
+  if (isSupersededTelegramBootstrapAttempt(latestSession, session)) {
+    await auditLog(workspaceDir, "telegram_bootstrap_classify_result_superseded", {
+      conversationIdCanonical: session.conversationId,
+      attemptId: session.attemptId ?? null,
+      attemptSeq: session.attemptSeq ?? null,
+      requestHash: session.requestHash,
+      classifySessionKey: session.classifySessionKey ?? null,
+      reason,
+      resolution: "skip_fail",
+    }).catch(() => {});
+    return latestSession!;
+  }
+
+  const persisted = await upsertTelegramBootstrapSession(workspaceDir, {
+    conversationId: session.conversationId,
+    rawIdea: session.rawIdea,
+    projectName: session.projectName ?? undefined,
+    stackHint: session.stackHint ?? undefined,
+    repoUrl: session.repoUrl ?? undefined,
+    repoPath: session.repoPath ?? undefined,
+    sourceRoute: buildSessionSourceRoute(session),
+    status: "failed",
+    projectSlug: session.projectSlug ?? undefined,
+    language: session.language,
+    attemptId: session.attemptId ?? undefined,
+    attemptSeq: session.attemptSeq ?? undefined,
+    classifySessionKey: session.classifySessionKey ?? null,
+    classifyRunId: session.classifyRunId ?? null,
+    classifyStartedAt: session.classifyStartedAt ?? null,
+    lastError: error,
+    error,
+  });
+  await auditLog(workspaceDir, "telegram_bootstrap_classify_failed", {
+    conversationIdCanonical: persisted.conversationId,
+    attemptId: persisted.attemptId ?? null,
+    attemptSeq: persisted.attemptSeq ?? null,
+    requestHash: persisted.requestHash,
+    classifySessionKey: persisted.classifySessionKey ?? null,
+    reason,
+    error,
+  }).catch(() => {});
+  return persisted;
+}
+
+async function releaseClassifyingBootstrapSession(
+  ctx: PluginContext,
+  workspaceDir: string,
+  session: TelegramBootstrapSession,
+  reason: string,
+  error: string,
+): Promise<void> {
+  const owner = buildBootstrapAttemptOwner(session);
+  const latestSession = await readTelegramBootstrapSession(workspaceDir, session.conversationId);
+  const canMutateLegacySession = Boolean(
+    !owner &&
+    latestSession &&
+    (latestSession.status === "pending_classify" || latestSession.status === "classifying") &&
+    latestSession.requestHash === session.requestHash &&
+    (latestSession.classifySessionKey ?? null) === (session.classifySessionKey ?? null),
+  );
+  if ((!owner || !ownsBootstrapAttempt(latestSession, owner)) && !canMutateLegacySession) {
+    return;
+  }
+  if (latestSession && latestSession.status !== "pending_classify" && latestSession.status !== "classifying") {
+    return;
+  }
+  if (isSupersededTelegramBootstrapAttempt(latestSession, session)) {
+    await auditLog(workspaceDir, "telegram_bootstrap_classify_result_superseded", {
+      conversationIdCanonical: session.conversationId,
+      attemptId: session.attemptId ?? null,
+      attemptSeq: session.attemptSeq ?? null,
+      requestHash: session.requestHash,
+      classifySessionKey: session.classifySessionKey ?? null,
+      reason,
+      resolution: "skip_release",
+    }).catch(() => {});
+    return;
+  }
+
+  await deleteTelegramBootstrapSession(workspaceDir, session.conversationId);
+  await auditLog(workspaceDir, "telegram_bootstrap_classify_released", {
+    conversationIdCanonical: session.conversationId,
+    attemptId: session.attemptId ?? null,
+    attemptSeq: session.attemptSeq ?? null,
+    requestHash: session.requestHash,
+    classifySessionKey: session.classifySessionKey ?? null,
+    reason,
+    error,
+  }).catch(() => {});
+  logBootstrapWarning(ctx, `[telegram-bootstrap] released ambiguous DM classification session for ${session.conversationId}: ${reason}`);
+}
+
+function mergeBootstrapRequestWithClassification(
+  rawIdea: string,
+  classification: DmIntentClassification,
+): BootstrapRequest {
+  const parsed = parseBootstrapRequest(rawIdea);
+  if (classification.stackHint && !parsed.stackHint) {
+    parsed.stackHint = classification.stackHint;
+  }
+  if (classification.projectSlug && !parsed.projectName) {
+    parsed.projectName = classification.projectSlug;
+  }
+  return parsed;
+}
+
+async function recoverClassifyingTelegramBootstrapSession(
+  ctx: PluginContext,
+  workspaceDir: string,
+  session: TelegramBootstrapSession,
+): Promise<boolean> {
+  if (session.status !== "pending_classify" && session.status !== "classifying") {
+    return false;
+  }
+
+  const latestSession = await readTelegramBootstrapSession(workspaceDir, session.conversationId);
+  if (!latestSession || (latestSession.status !== "pending_classify" && latestSession.status !== "classifying")) {
+    return false;
+  }
+
+  const classifyOutcome = latestSession.classifySessionKey
+    ? await readClassifySessionOutcome(ctx, latestSession.classifySessionKey)
+    : { classification: null, executionError: null };
+  const classification = classifyOutcome.classification;
+
+  if (classifyOutcome.executionError) {
+    await failClassifyingBootstrapSession(
+      ctx,
+      workspaceDir,
+      latestSession,
+      `classify_execution_error: ${classifyOutcome.executionError}`,
+      "classify_execution_error",
+    );
+    return true;
+  }
+
+  if (!classification) {
+    if (!isTelegramBootstrapSessionExpired(latestSession)) {
+      return false;
+    }
+
+    await failClassifyingBootstrapSession(
+      ctx,
+      workspaceDir,
+      latestSession,
+      "classify_result_expired",
+      "classify_result_expired",
+    );
+    return true;
+  }
+
+  if (classification.intent !== "create_project" || classification.confidence < LAYER3_CONFIDENCE_THRESHOLD) {
+    await releaseClassifyingBootstrapSession(
+      ctx,
+      workspaceDir,
+      latestSession,
+      classification.intent !== "create_project" ? "classify_not_project" : "classify_low_confidence",
+      classification.intent !== "create_project" ? "classify_not_project" : "classify_low_confidence",
+    );
+    return true;
+  }
+
+  const request = mergeBootstrapRequestWithClassification(latestSession.rawIdea, classification);
+  const handoff = await startFreshBootstrapResume(
+    ctx,
+    workspaceDir,
+    latestSession.conversationId,
+    () => enterBootstrapping(
+      workspaceDir,
+      latestSession.conversationId,
+      request,
+      buildSessionSourceRoute(latestSession),
+      classification.language ?? latestSession.language ?? "pt",
+    ),
+  );
+  await auditBootstrapResumeHandoff(workspaceDir, "classify_recovery", handoff, latestSession);
+  if (handoff.outcome === "failed_to_start") {
+    await failClassifyingBootstrapSession(
+      ctx,
+      workspaceDir,
+      latestSession,
+      "classify_resume_failed_to_start",
+      "classify_resume_failed_to_start",
+    );
+    return true;
+  }
+  if (handoff.outcome === "started" || handoff.outcome === "superseded") {
+    await auditLog(workspaceDir, "telegram_bootstrap_classify_result_reconciled", {
+      conversationIdCanonical: latestSession.conversationId,
+      attemptId: latestSession.attemptId ?? null,
+      attemptSeq: latestSession.attemptSeq ?? null,
+      requestHash: latestSession.requestHash,
+      classifySessionKey: latestSession.classifySessionKey ?? null,
+      handoffOutcome: handoff.outcome,
+    }).catch(() => {});
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -1225,72 +2010,120 @@ async function classifyAndBootstrap(
   conversationId: string,
   content: string,
 ): Promise<void> {
-  // Transition from pending_classify → classifying (LLM call about to start)
-  await upsertTelegramBootstrapSession(workspaceDir, {
+  const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
+  const owner = resolveBootstrapAttemptOwner(existingSession);
+  owner.conversationId = conversationId;
+  const classifySessionKey = `dm-classify-${Date.now()}`;
+
+  const classifyingSession = await upsertTelegramBootstrapSession(workspaceDir, {
     conversationId,
     rawIdea: content,
-    sourceRoute: { channel: "telegram", channelId: conversationId },
+    sourceRoute: {
+      channel: "telegram",
+      channelId: normalizeTelegramChatTarget(conversationId),
+    },
     status: "classifying",
+    attemptId: owner.attemptId,
+    attemptSeq: owner.attemptSeq,
+    ...freshBootstrapResetFields({ rawIdea: content }),
+    classifySessionKey,
+    classifyStartedAt: new Date().toISOString(),
   });
 
-  const classification = await classifyDmIntent(ctx, content, workspaceDir);
-
-  // Fail-open: if LLM failed or returned "other" or low confidence, delete session so agent can respond
-  if (!classification || classification.intent !== "create_project" || classification.confidence < LAYER3_CONFIDENCE_THRESHOLD) {
-    if (!classification) {
-      logBootstrapWarning(ctx, `[telegram-bootstrap] LLM classify failed, falling back (conversation: ${conversationId})`);
-    }
-    const latestSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
-    if (latestSession?.status === "classifying" || latestSession?.status === "pending_classify") {
-      await deleteTelegramBootstrapSession(workspaceDir, conversationId);
-    }
+  const attempt = await classifyDmIntentAttempt(ctx, content, classifySessionKey);
+  if (!attempt) {
+    await failClassifyingBootstrapSession(
+      ctx,
+      workspaceDir,
+      classifyingSession,
+      "classify_runtime_unavailable",
+      "classify_runtime_unavailable",
+    );
     return;
   }
 
-  const language: BootstrapLanguage = classification.language ?? "pt";
+  const updatedSession = await upsertTelegramBootstrapSession(workspaceDir, {
+    conversationId,
+    rawIdea: content,
+    sourceRoute: buildSessionSourceRoute(classifyingSession),
+    status: "classifying",
+    attemptId: owner.attemptId,
+    attemptSeq: owner.attemptSeq,
+    classifySessionKey: attempt.sessionKey,
+    classifyRunId: attempt.runId,
+    classifyStartedAt: classifyingSession.classifyStartedAt ?? new Date().toISOString(),
+  });
 
-  // Parse the original content with existing regex parser, then merge LLM enrichment
-  const parsed = parseBootstrapRequest(content);
-  if (classification.stackHint && !parsed.stackHint) {
-    parsed.stackHint = classification.stackHint;
-  }
-  if (classification.projectSlug && !parsed.projectName) {
-    parsed.projectName = classification.projectSlug;
+  if (attempt.waitStatus !== "ok") {
+    await auditLog(workspaceDir, "telegram_bootstrap_classify_wait_aborted", {
+      conversationIdCanonical: updatedSession.conversationId,
+      attemptId: updatedSession.attemptId ?? null,
+      attemptSeq: updatedSession.attemptSeq ?? null,
+      requestHash: updatedSession.requestHash,
+      classifySessionKey: updatedSession.classifySessionKey ?? null,
+      waitStatus: attempt.waitStatus,
+    }).catch(() => {});
+    return;
   }
 
-  const incomingRequest = {
-    rawIdea: parsed.rawIdea,
-    projectName: parsed.projectName ?? null,
-    stackHint: parsed.stackHint ?? null,
-    repoUrl: parsed.repoUrl ?? null,
-    repoPath: parsed.repoPath ?? null,
+  const classification = attempt.classification;
+  if (!classification || classification.intent !== "create_project" || classification.confidence < LAYER3_CONFIDENCE_THRESHOLD) {
+    const executionError = attempt.executionError
+      ? `classify_execution_error: ${attempt.executionError}`
+      : null;
+    const releaseReason = !classification
+      ? "classify_invalid_result"
+      : classification.intent !== "create_project"
+        ? "classify_not_project"
+        : "classify_low_confidence";
+    if (executionError) {
+      await failClassifyingBootstrapSession(
+        ctx,
+        workspaceDir,
+        updatedSession,
+        executionError,
+        "classify_execution_error",
+      );
+      return;
+    }
+    await releaseClassifyingBootstrapSession(ctx, workspaceDir, updatedSession, releaseReason, releaseReason);
+    return;
+  }
+
+  const latestSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
+  if (isSupersededTelegramBootstrapAttempt(latestSession, updatedSession)) {
+    await auditLog(workspaceDir, "telegram_bootstrap_classify_result_superseded", {
+      conversationIdCanonical: updatedSession.conversationId,
+      attemptId: updatedSession.attemptId ?? null,
+      attemptSeq: updatedSession.attemptSeq ?? null,
+      requestHash: updatedSession.requestHash,
+      classifySessionKey: updatedSession.classifySessionKey ?? null,
+    }).catch(() => {});
+    return;
+  }
+
+  const incomingRequest = mergeBootstrapRequestWithClassification(content, classification);
+  const sourceRoute: TelegramBootstrapRoute = {
+    channel: "telegram",
+    channelId: normalizeTelegramChatTarget(updatedSession.conversationId),
   };
-
-  // Dedup check — same logic as Layer 2
-  const incomingRequestHash = buildBootstrapRequestHash(incomingRequest);
-  const sessionForHash = await readTelegramBootstrapSession(workspaceDir, conversationId);
-  if (sessionForHash?.requestHash === incomingRequestHash) {
-    if (sessionForHash.status === "completed") {
-      ctx.logger.info(`[telegram-bootstrap] duplicate completed DM ignored (LLM path) for conversation ${conversationId}`);
-      return;
-    }
-    const isExpiredReceived =
-      sessionForHash.status === "received" &&
-      Date.parse(sessionForHash.suppressUntil) < Date.now();
-    if (sessionForHash.status !== "failed" && sessionForHash.status !== "classifying" && !isExpiredReceived) {
-      ctx.logger.info(`[telegram-bootstrap] duplicate in-flight DM ignored (LLM path) for conversation ${conversationId}`);
-      return;
-    }
-  }
-
-  const sourceRoute: TelegramBootstrapRoute = { channel: "telegram", channelId: conversationId };
-  startFreshBootstrapResume(ctx, workspaceDir, conversationId, () => enterBootstrapping(
+  const handoff = await startFreshBootstrapResume(ctx, workspaceDir, conversationId, () => enterBootstrapping(
     workspaceDir,
     conversationId,
     incomingRequest,
     sourceRoute,
-    language,
+    classification.language ?? "pt",
   ));
+  await auditBootstrapResumeHandoff(workspaceDir, "classify", handoff, updatedSession);
+  if (handoff.outcome === "failed_to_start") {
+    await failClassifyingBootstrapSession(
+      ctx,
+      workspaceDir,
+      updatedSession,
+      "classify_resume_failed_to_start",
+      "classify_resume_failed_to_start",
+    );
+  }
 }
 
 /**
@@ -1624,23 +2457,88 @@ async function continueBootstrap(
 
 export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: PluginContext): void {
   // When genesis agent exists, it handles DMs exclusively — main never receives them.
-  // Suppress hooks (before_prompt_build + message_sending) are unnecessary in that case.
+  // Suppress hooks (before_prompt_build + before_tool_call + message_sending) are unnecessary in that case.
   const apiRuntime = (api as any).runtime;
   const hasGenesis = apiRuntime ? hasGenesisAgent(apiRuntime) : false;
 
   if (!hasGenesis) {
+    (api as any).on("before_dispatch", async (event: unknown, eventCtx: unknown) => {
+      const hookCtx = eventCtx as { channelId?: string; sessionKey?: string; conversationId?: string };
+      if (hookCtx.channelId !== "telegram") return undefined;
+
+      const telegramConfig = readFabricaTelegramConfig(ctx.pluginConfig);
+      if (!telegramConfig.bootstrapDmEnabled) return undefined;
+
+      const conversationId = resolveTelegramBootstrapDmConversationIdFromHookContext(hookCtx);
+      if (!conversationId) return undefined;
+
+      const dispatchEvent = event as { body?: string; content?: string; isGroup?: boolean };
+      if (dispatchEvent.isGroup) return undefined;
+
+      const content = String(dispatchEvent.body ?? dispatchEvent.content ?? "").trim();
+      if (!content) return undefined;
+      if (isBootstrapCandidate(content) || isAmbiguousCandidate(content)) {
+        acquireTelegramConversationClaim(conversationId);
+      }
+
+      const workspaceDir = resolveWorkspaceDir(ctx.config as Record<string, unknown>);
+      const existingSession = workspaceDir
+        ? await readTelegramBootstrapSession(workspaceDir, conversationId)
+        : null;
+      const shouldClaim = shouldClaimTelegramBootstrapBeforeDispatch(existingSession, content);
+      if (!shouldClaim) return undefined;
+
+      acquireTelegramConversationClaim(conversationId);
+      const claimKey = acquireTelegramDispatchClaim(conversationId, content);
+      const rawConversationId = normalizeTelegramChatTarget(conversationId);
+      void handleTelegramBootstrapDmMessage(ctx, rawConversationId, content)
+        .catch((err) => {
+          logBootstrapWarning(ctx, `[telegram-bootstrap] before_dispatch bootstrap error: ${err instanceof Error ? err.message : String(err)}`);
+        })
+        .finally(() => {
+          releaseTelegramDispatchClaim(claimKey);
+        });
+
+      return { handled: true };
+    });
+
+    api.on("before_tool_call", async (_event, eventCtx) => {
+      const toolName = String((_event as { toolName?: string }).toolName ?? "");
+      if (!isBlockedTelegramBootstrapTool(toolName)) return {};
+
+      const hookCtx = eventCtx as { channelId?: string; sessionKey?: string; conversationId?: string };
+      const conversationId = resolveTelegramBootstrapDmConversationIdFromHookContext(hookCtx);
+      if (!conversationId) return {};
+
+      if (hasTelegramConversationClaim(conversationId)) {
+        return { block: true };
+      }
+
+      const workspaceDir = resolveWorkspaceDir(ctx.config as Record<string, unknown>);
+      if (!workspaceDir) return {};
+
+      const session = await readTelegramBootstrapSession(workspaceDir, conversationId);
+      if (!shouldSuppressTelegramBootstrapReply(session)) return {};
+
+      return { block: true };
+    });
+
     api.on("before_prompt_build", async (_event, eventCtx) => {
-    const hookCtx = eventCtx as { channelId?: string; sessionKey?: string };
-    if (hookCtx.channelId !== "telegram") return {};
-    // before_prompt_build receives PluginHookAgentContext which does NOT have conversationId.
-    // Extract the Telegram chat ID from sessionKey (format: "agent:main:telegram:slash:<chatId>").
-    // Group topics use "agent:main:telegram:group:<groupId>:topic:<topicId>" — skip those.
-    const sessionKey = hookCtx.sessionKey ?? "";
-    if (sessionKey.includes(":topic:") || sessionKey.includes(":group:")) return {};
-    const sessionKeyParts = sessionKey.split(":");
-    const chatId = sessionKeyParts.length >= 5 ? sessionKeyParts[sessionKeyParts.length - 1] : "";
-    const conversationId = chatId ? `telegram:${chatId}` : "";
+    const hookCtx = eventCtx as { channelId?: string; sessionKey?: string; conversationId?: string };
+    // Prefer the session key for direct/slash DM sessions, but fall back to conversationId when
+    // the runtime omits channel metadata during resumed direct Telegram runs.
+    const conversationId = resolveTelegramBootstrapDmConversationIdFromHookContext(hookCtx);
     if (!conversationId) return {};
+
+    if (hasTelegramConversationClaim(conversationId)) {
+      return {
+        prependSystemContext: [
+          "This Telegram DM bootstrap conversation is being handled out-of-band by Fabrica.",
+          "Do not call genesis, tasks_status, or other orchestration tools for this turn.",
+          "Reply with exactly: NO_REPLY",
+        ].join("\n"),
+      };
+    }
 
     const workspaceDir = resolveWorkspaceDir(ctx.config as Record<string, unknown>);
     if (!workspaceDir) return {};
@@ -1663,16 +2561,21 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
   // Bootstrap sends use the Telegram runtime channel directly when available and fall back
   // to explicit CLI delivery otherwise, bypassing the agent-originated message pipeline.
   api.on("message_sending", async (event, eventCtx) => {
-    const hookCtx = eventCtx as { channelId?: string };
-    if (hookCtx.channelId !== "telegram") return;
-    // message_sending receives PluginHookMessageContext which does NOT populate conversationId.
-    // Use event.to (the outbound Telegram chat ID) to derive the conversationId.
+    const hookCtx = eventCtx as { channelId?: string; conversationId?: string; sessionKey?: string };
     const sendEvent = event as { to?: string; content?: string; metadata?: Record<string, unknown> };
     const rawTo = String(sendEvent.to ?? "").trim();
-    if (!rawTo || rawTo.startsWith("-")) return;
-    // event.to is a bare chat ID (e.g. "6951571380") — convert to session key format
-    const conversationId = rawTo.includes(":") ? rawTo : `telegram:${rawTo}`;
+    const conversationId = rawTo
+      ? toCanonicalTelegramBootstrapConversationId(rawTo)
+      : resolveTelegramBootstrapDmConversationIdFromHookContext(hookCtx);
+    if (!conversationId) return;
+
+    if (hookCtx.channelId && hookCtx.channelId !== "telegram") return;
+    if (rawTo.startsWith("-")) return;
     if (conversationId.includes(":topic:")) return;
+
+    if (hasTelegramConversationClaim(conversationId)) {
+      return { cancel: true };
+    }
 
     const workspaceDir = resolveWorkspaceDir(ctx.config as Record<string, unknown>);
     if (!workspaceDir) return;
@@ -1700,206 +2603,24 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
     const telegramConfig = readFabricaTelegramConfig(ctx.pluginConfig);
     if (!telegramConfig.bootstrapDmEnabled) return;
 
-    const conversationId = String(eventCtx.conversationId ?? "").trim();
+    const rawConversationId = String(eventCtx.conversationId ?? "").trim();
     const content = String(event.content ?? "").trim();
-    if (!conversationId || !content) return;
+    if (!rawConversationId || !content) return;
 
     // DM-only bootstrap: positive Telegram IDs, no topic suffix.
-    if (conversationId.includes(":topic:") || conversationId.startsWith("-")) return;
-
-    const workspaceDir = resolveWorkspaceDir(ctx.config as Record<string, unknown>);
-    if (!workspaceDir) {
-      if (isBootstrapCandidate(content)) {
-        await sendTelegramText(ctx, conversationId, "Nao encontrei o workspace da Fabrica configurado no OpenClaw.");
-      }
+    if (rawConversationId.includes(":topic:") || rawConversationId.startsWith("-")) return;
+    const conversationId = toCanonicalTelegramBootstrapConversationId(rawConversationId);
+    if (isBootstrapCandidate(content) || isAmbiguousCandidate(content)) {
+      acquireTelegramConversationClaim(conversationId);
+    }
+    // Yield once so the synchronous before_dispatch hook can claim the turn first in the
+    // real runtime, then bail out here if that happened.
+    await Promise.resolve();
+    if (hasTelegramDispatchClaim(conversationId, content)) {
+      ctx.logger.info(`[telegram-bootstrap] before_dispatch already claimed DM for ${conversationId}`);
       return;
     }
 
-    // Layer 1: Active clarifying OR classifying session?
-    const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
-    if (isRecoverableTelegramBootstrapSession(existingSession)) {
-      const nextRetryAt = existingSession.nextRetryAt ?? null;
-      if (isClaimableTelegramBootstrapSession(existingSession)) {
-        startFreshBootstrapResume(
-          ctx,
-          workspaceDir,
-          existingSession.conversationId,
-          () => leaseBootstrapRecovery(workspaceDir, existingSession.conversationId),
-        );
-      } else {
-        ctx.logger.info(`[telegram-bootstrap] recovery deferred until ${nextRetryAt} for ${conversationId}`);
-      }
-      return;
-    }
-    // If the clarifying session has expired, treat any new bootstrap candidate as a fresh request
-    const sessionIsExpired = existingSession != null && Date.parse(existingSession.suppressUntil) < Date.now();
-    if (existingSession && !sessionIsExpired && (existingSession.status === "classifying" || existingSession.status === "pending_classify")) {
-      // LLM classification is in progress (pending or active) — suppress duplicate messages
-      ctx.logger.info(`[telegram-bootstrap] LLM classification in progress for ${conversationId}, ignoring concurrent message`);
-      return;
-    }
-    if (existingSession?.status === "clarifying" && !sessionIsExpired) {
-      const clarResult = parseClarificationResponse(content, existingSession);
-      if (!clarResult.recognized) {
-        // Re-ask — don't let the regular agent respond to this message either
-        ctx.logger.info(`[telegram-bootstrap] clarification response not recognized, re-asking (conversation: ${conversationId})`);
-        await sendTelegramText(ctx, conversationId, buildClarificationMessage(
-          { rawIdea: existingSession.rawIdea, stackHint: existingSession.stackHint ?? undefined, projectName: existingSession.projectName ?? undefined },
-          existingSession.pendingClarification ?? undefined,
-          existingSession.language ?? "pt",
-        ));
-        return;
-      }
-      // Merge clarification into existing session, preserving rawIdea
-      const mergedRequest = {
-        rawIdea: existingSession.rawIdea,
-        projectName: clarResult.projectName ?? existingSession.projectName ?? null,
-        stackHint: clarResult.stackHint ?? existingSession.stackHint ?? null,
-        repoUrl: existingSession.repoUrl ?? null,
-        repoPath: existingSession.repoPath ?? null,
-      };
-      ctx.logger.info(`[telegram-bootstrap] clarification resolved: stack=${mergedRequest.stackHint}, idea="${mergedRequest.rawIdea}" (conversation: ${conversationId})`);
-      startFreshBootstrapResume(ctx, workspaceDir, conversationId, () => enterBootstrapping(
-        workspaceDir,
-        conversationId,
-        mergedRequest,
-        existingSession.sourceRoute ?? {
-          channel: "telegram",
-          channelId: conversationId,
-        },
-        existingSession.language ?? "pt",
-        {
-          ackSentAt: existingSession.ackSentAt ?? null,
-        },
-      ));
-      return;
-    }
-
-    if (!isBootstrapCandidate(content)) {
-      // Layer 3: LLM for ambiguous cases (fire-and-forget)
-      if (isAmbiguousCandidate(content)) {
-        // Create session IMMEDIATELY with pending_classify to suppress agent response for this turn
-        await upsertTelegramBootstrapSession(workspaceDir, {
-          conversationId,
-          rawIdea: content,
-          sourceRoute: { channel: "telegram", channelId: conversationId },
-          status: "pending_classify",
-          ...freshBootstrapResetFields({ rawIdea: content }),
-        });
-
-        // Fire-and-forget: LLM classify + bootstrap runs detached from event handler
-        classifyAndBootstrap(ctx, workspaceDir, conversationId, content).catch((err) => {
-          logBootstrapWarning(ctx, `[telegram-bootstrap] LLM classify error: ${err instanceof Error ? err.message : String(err)}`);
-        });
-      }
-      return;
-    }
-
-    const parsed = parseBootstrapRequest(content);
-
-    // Dedup guard: compute hash from parsed fields (pre-LLM, projectName may be null)
-    // and check for existing in-flight sessions before starting classification.
-    const preClassifyRequest = {
-      rawIdea: parsed.rawIdea,
-      projectName: parsed.projectName ?? null,
-      stackHint: parsed.stackHint ?? null,
-      repoUrl: parsed.repoUrl ?? null,
-      repoPath: parsed.repoPath ?? null,
-    };
-    const preClassifyHash = buildBootstrapRequestHash(preClassifyRequest);
-    const sessionForHashPreClassify = await readTelegramBootstrapSession(workspaceDir, conversationId);
-    // Hash guard uses pre-LLM state (projectName may be null). For messages without a structured
-    // projectName, the hash will NOT match a previously stored post-LLM session (which includes
-    // the LLM-derived slug). Dedup in that window is carried by the pending_classify session
-    // status check below, not by this hash guard.
-    if (sessionForHashPreClassify?.requestHash === preClassifyHash) {
-      if (sessionForHashPreClassify.status === "completed") {
-        ctx.logger.info(`[telegram-bootstrap] duplicate completed DM ignored for conversation ${conversationId}`);
-        return;
-      }
-      // Allow restart if pipeline is stuck in "received" with an expired suppress window.
-      // This happens when the gateway restarts mid-pipeline (session never reached "failed").
-      const isExpiredReceived =
-        sessionForHashPreClassify.status === "received" &&
-        Date.parse(sessionForHashPreClassify.suppressUntil) < Date.now();
-      // Note: unlike Layer 3, this guard intentionally does NOT exclude "classifying" status.
-      // If a "classifying" session has a matching hash and is still active, Layer 2 is correctly
-      // blocked — this avoids double-firing during the LLM classification window.
-      if (sessionForHashPreClassify.status !== "failed" && !isExpiredReceived) {
-        ctx.logger.info(`[telegram-bootstrap] duplicate in-flight DM ignored for conversation ${conversationId}`);
-        return;
-      }
-      if (isExpiredReceived) {
-        ctx.logger.info(`[telegram-bootstrap] stale received session (expired) — restarting pipeline for conversation ${conversationId}`);
-      }
-    }
-
-    // If no projectName from structured fields, try LLM slug derivation
-    if (!parsed.projectName && ctx.runtime?.subagent?.run != null) {
-      // Bug B fix: create pending_classify session BEFORE await to prevent suppress race
-      // (same pattern as Layer 3). The session is overwritten with "received" status after
-      // the LLM call completes.
-      await upsertTelegramBootstrapSession(workspaceDir, {
-        conversationId,
-        rawIdea: parsed.rawIdea,
-        sourceRoute: { channel: "telegram", channelId: conversationId },
-        status: "pending_classify",
-        ...freshBootstrapResetFields({ rawIdea: parsed.rawIdea }),
-      });
-      const classification = await classifyDmIntent(ctx, content, workspaceDir);
-      if (classification?.projectSlug) {
-        parsed.projectName = classification.projectSlug;
-      }
-    }
-
-    const incomingRequest = {
-      rawIdea: parsed.rawIdea,
-      projectName: parsed.projectName ?? null,
-      stackHint: parsed.stackHint ?? null,
-      repoUrl: parsed.repoUrl ?? null,
-      repoPath: parsed.repoPath ?? null,
-    };
-
-    // Layer 2 language heuristic: detect from the matched createCue
-    const language: BootstrapLanguage = /\b(cria|crie|criar|construa|desenvolva|registre|novo projeto)\b/i.test(content)
-      ? "pt" : "en";
-
-    if (!parsed.stackHint) {
-      await startFreshBootstrapResume(ctx, workspaceDir, conversationId, () => enterBootstrapping(
-        workspaceDir,
-        conversationId,
-        incomingRequest,
-        {
-          channel: "telegram",
-          channelId: conversationId,
-        },
-        language,
-      ));
-      return;
-    }
-
-    const handled = await runBootstrapPreflightOrFail(
-      ctx,
-      conversationId,
-      workspaceDir,
-      incomingRequest,
-      {
-        channel: "telegram",
-        channelId: conversationId,
-      },
-      { language },
-    );
-    if (handled) return;
-
-    startFreshBootstrapResume(ctx, workspaceDir, conversationId, () => enterBootstrapping(
-      workspaceDir,
-      conversationId,
-      incomingRequest,
-      {
-        channel: "telegram",
-        channelId: conversationId,
-      },
-      language,
-    ));
+    await handleTelegramBootstrapDmMessage(ctx, rawConversationId, content);
   });
 }

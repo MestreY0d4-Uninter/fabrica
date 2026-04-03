@@ -288,6 +288,35 @@ describe("worker-completion", () => {
     );
   });
 
+  it("ignores thinking-only confessions for execution-contract violations", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{
+        role: "assistant",
+        content: [{ type: "thinking", thinking: "I delegated this issue to Codex to do the work." }],
+      }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "inconclusive_completion" });
+    expect(mockAuditLog).not.toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_execution_contract_violation",
+      expect.anything(),
+    );
+    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "demo",
+      7,
+      expect.objectContaining({
+        inconclusiveCompletionReason: "missing_result_line",
+      }),
+    );
+  });
+
   it("does not mark inconclusive activity for a stale run that no longer owns the dispatch", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 

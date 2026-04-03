@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.15 - 2026-04-03
+
+- Hardened Telegram DM intake around durable `pending_classify` / `classifying` recovery, newer-attempt ownership, and explicit late-classify reconciliation.
+- Added runtime-aware DM claiming via `before_dispatch` plus short-lived message/conversation guards so Telegram prompts stay inside Fabrica instead of leaking to the generic OpenClaw agent.
+- Fixed greenfield scaffold canonical repo path handling so `metadata.repo_path` / `scaffold_plan.repo_local` survive all the way into `scaffold-project.sh` and published genesis assets.
+- Tightened bootstrap and register fail-closed behavior for unsupported stacks and missing materialized repositories, preventing half-registered validation projects.
+- Reset and revalidated the temporary Telegram validation harness, including a reusable runner path and regression coverage for read/wait flows.
+- Extended regression coverage for Telegram bootstrap recovery, scaffold path ownership, classify-step typing, and end-to-end hot-path stability.
+
 ## 0.2.14 - 2026-04-02
 
 - Added a stack-aware environment gate so developer and tester pickup only start after project environments are provisioned and marked ready.

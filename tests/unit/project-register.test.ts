@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -23,9 +23,28 @@ vi.mock("../../lib/telegram/topic-service.js", () => ({
   createProjectForumTopic: mockCreateProjectForumTopic,
 }));
 
+const tempDirs: string[] = [];
+
+async function makeLocalRepo(files: Record<string, string>): Promise<string> {
+  const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-project-register-repo-"));
+  tempDirs.push(repoDir);
+  await Promise.all(Object.entries(files).map(async ([relativePath, content]) => {
+    const filePath = path.join(repoDir, relativePath);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, content, "utf-8");
+  }));
+  return repoDir;
+}
+
 describe("registerProject", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    while (tempDirs.length > 0) {
+      await fs.rm(tempDirs.pop()!, { recursive: true, force: true });
+    }
   });
 
   it("materializes a project workflow override with reviewPolicy agent for autonomous DM bootstrap", async () => {
@@ -43,6 +62,9 @@ describe("registerProject", () => {
       topicId: 602,
       name: "demo-autonomous",
     });
+    const repoDir = await makeLocalRepo({
+      "pyproject.toml": "[project]\nname='demo-autonomous'\nversion='0.1.0'\n",
+    });
 
     try {
       const result = await registerProject({
@@ -52,7 +74,7 @@ describe("registerProject", () => {
           channelId: "6951571380",
         },
         name: "demo-autonomous",
-        repo: "/tmp/demo-autonomous",
+        repo: repoDir,
         runCommand: vi.fn(async () => ({
           stdout: "",
           stderr: "",
@@ -95,6 +117,98 @@ describe("registerProject", () => {
       }));
       expect(projects.projects["demo-autonomous"]?.stack).toBe("python-cli");
       expect(projects.projects["demo-autonomous"]?.environment).toBeNull();
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when a stack-specific local repo path lacks scaffold manifests", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-project-register-"));
+    await fs.mkdir(path.join(workspaceDir, DATA_DIR), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, DATA_DIR, "projects.json"),
+      JSON.stringify({ projects: {} }, null, 2),
+      "utf-8",
+    );
+    const repoDir = await makeLocalRepo({
+      "README.md": "# demo\n",
+    });
+    const provider = new TestProvider();
+    mockCreateProvider.mockResolvedValue({ provider, type: "github" });
+
+    try {
+      await expect(registerProject({
+        workspaceDir,
+        route: {
+          channel: "telegram",
+          channelId: "6951571380",
+        },
+        name: "demo-node",
+        repo: repoDir,
+        runCommand: vi.fn(async () => ({
+          stdout: "",
+          stderr: "",
+          code: 0,
+          signal: null,
+          killed: false,
+          termination: "exit",
+        })) as any,
+        pluginConfig: {},
+        baseBranch: "main",
+        stack: "node-cli",
+      })).rejects.toThrow(/does not contain package\.json/i);
+
+      const projects = JSON.parse(await fs.readFile(
+        path.join(workspaceDir, DATA_DIR, "projects.json"),
+        "utf-8",
+      )) as { projects: Record<string, unknown> };
+      expect(projects.projects["demo-node"]).toBeUndefined();
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when a Python repo path lacks pyproject, requirements, and uv.lock", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-project-register-"));
+    await fs.mkdir(path.join(workspaceDir, DATA_DIR), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, DATA_DIR, "projects.json"),
+      JSON.stringify({ projects: {} }, null, 2),
+      "utf-8",
+    );
+    const repoDir = await makeLocalRepo({
+      "README.md": "# demo\n",
+    });
+    const provider = new TestProvider();
+    mockCreateProvider.mockResolvedValue({ provider, type: "github" });
+
+    try {
+      await expect(registerProject({
+        workspaceDir,
+        route: {
+          channel: "telegram",
+          channelId: "6951571380",
+        },
+        name: "demo-python",
+        repo: repoDir,
+        runCommand: vi.fn(async () => ({
+          stdout: "",
+          stderr: "",
+          code: 0,
+          signal: null,
+          killed: false,
+          termination: "exit",
+        })) as any,
+        pluginConfig: {},
+        baseBranch: "main",
+        stack: "python-cli",
+      })).rejects.toThrow(/does not contain pyproject\.toml, requirements\.txt, or uv\.lock/i);
+
+      const projects = JSON.parse(await fs.readFile(
+        path.join(workspaceDir, DATA_DIR, "projects.json"),
+        "utf-8",
+      )) as { projects: Record<string, unknown> };
+      expect(projects.projects["demo-python"]).toBeUndefined();
     } finally {
       await fs.rm(workspaceDir, { recursive: true, force: true });
     }
