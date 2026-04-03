@@ -11,6 +11,9 @@
 
 type WakeCallback = (reason: string) => Promise<void>;
 let _wakeCallback: WakeCallback | null = null;
+let _lastWakeAt = 0;
+let _wakeInFlight: Promise<void> | null = null;
+const WAKE_COALESCE_MS = 2_000;
 
 /**
  * Register the heartbeat wake callback. Called by heartbeat service on start.
@@ -18,6 +21,10 @@ let _wakeCallback: WakeCallback | null = null;
  */
 export function setPluginWakeHandler(cb: WakeCallback | null): void {
   _wakeCallback = cb;
+  if (!cb) {
+    _lastWakeAt = 0;
+    _wakeInFlight = null;
+  }
 }
 
 /**
@@ -25,7 +32,24 @@ export function setPluginWakeHandler(cb: WakeCallback | null): void {
  * and subagent-lifecycle-hook. No-op if heartbeat service is not running.
  */
 export async function wakeHeartbeat(reason: string): Promise<void> {
-  await _wakeCallback?.(reason);
+  if (!_wakeCallback) return;
+
+  const now = Date.now();
+  if (_wakeInFlight) {
+    await _wakeInFlight;
+    return;
+  }
+
+  if (_lastWakeAt > 0 && now - _lastWakeAt < WAKE_COALESCE_MS) {
+    return;
+  }
+
+  _lastWakeAt = now;
+  const wakePromise = Promise.resolve(_wakeCallback(reason)).finally(() => {
+    _wakeInFlight = null;
+  });
+  _wakeInFlight = wakePromise;
+  await wakePromise;
 }
 
 /** For tests: check if a handler is registered. */
