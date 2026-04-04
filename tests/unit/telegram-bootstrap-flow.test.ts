@@ -107,7 +107,17 @@ describe("telegram bootstrap clarification flow", () => {
 
   afterEach(async () => {
     resetActiveBootstrapResumes();
-    await fs.rm(workspaceDir, { recursive: true, force: true });
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        await fs.rm(workspaceDir, { recursive: true, force: true });
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== "ENOTEMPTY" || attempt === 4) {
+          throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
   });
 
   it("resumes pipeline with original rawIdea after bare 'python' clarification response (Bug J: skips name clarification)", async () => {
