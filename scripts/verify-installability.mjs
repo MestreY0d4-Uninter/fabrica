@@ -76,7 +76,12 @@ export function verifyInstallabilitySmoke({
       throw new Error("npm pack --json did not return a tarball filename.");
     }
 
-    const installArgs = ["--profile", profile, "plugins", "install", tarball];
+    const installArgs = [
+      "--profile", profile,
+      "plugins", "install",
+      "--dangerously-force-unsafe-install",
+      tarball,
+    ];
     const installResult = exec("openclaw", installArgs, { timeoutMs });
     if (installResult.status !== 0) {
       failCommand("openclaw", installArgs, installResult.status, installResult.output);
