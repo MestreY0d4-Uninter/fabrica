@@ -2456,12 +2456,16 @@ async function continueBootstrap(
 }
 
 export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: PluginContext): void {
-  // When genesis agent exists, it handles DMs exclusively — main never receives them.
-  // Suppress hooks (before_prompt_build + before_tool_call + message_sending) are unnecessary in that case.
+  const telegramConfig = readFabricaTelegramConfig(ctx.pluginConfig);
   const apiRuntime = (api as any).runtime;
   const hasGenesis = apiRuntime ? hasGenesisAgent(apiRuntime) : false;
+  const usesDedicatedGenesisBootstrap =
+    hasGenesis && telegramConfig.bootstrapDmEnabled && Boolean(telegramConfig.projectsForumChatId);
 
-  if (!hasGenesis) {
+  // Only switch to genesis-exclusive DM handling when the official DM bootstrap
+  // flow is actually configured. This keeps genesis as an internal implementation
+  // detail instead of a hard runtime dependency for every Telegram setup.
+  if (!usesDedicatedGenesisBootstrap) {
     (api as any).on("before_dispatch", async (event: unknown, eventCtx: unknown) => {
       const hookCtx = eventCtx as { channelId?: string; sessionKey?: string; conversationId?: string };
       if (hookCtx.channelId !== "telegram") return undefined;
@@ -2592,11 +2596,12 @@ export function registerTelegramBootstrapHook(api: OpenClawPluginApi, ctx: Plugi
       return { cancel: true };
     }
   });
-  } // end if (!hasGenesis)
+  } // end if (!usesDedicatedGenesisBootstrap)
 
-  // When genesis agent exists, it handles DM bootstrapping exclusively —
-  // do NOT process message_received here to avoid double-processing.
-  if (hasGenesis) return;
+  // When the dedicated genesis bootstrap mode is active, genesis handles DM
+  // bootstrapping exclusively — do NOT process message_received here to avoid
+  // double-processing.
+  if (usesDedicatedGenesisBootstrap) return;
 
   api.on("message_received", async (event, eventCtx) => {
     if (eventCtx.channelId !== "telegram") return;

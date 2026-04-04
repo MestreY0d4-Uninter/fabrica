@@ -11,6 +11,7 @@ const {
   mockReplayGitHubDeliveryForWorkspace,
   mockReconcileGitHubPullRequestForWorkspace,
   mockCleanupWorkspace,
+  mockRunSetup,
 } = vi.hoisted(() => ({
   mockRunDoctor: vi.fn(),
   mockRunHeartbeatSweep: vi.fn(),
@@ -21,6 +22,7 @@ const {
   mockReplayGitHubDeliveryForWorkspace: vi.fn(),
   mockReconcileGitHubPullRequestForWorkspace: vi.fn(),
   mockCleanupWorkspace: vi.fn(),
+  mockRunSetup: vi.fn(),
 }));
 
 vi.mock("../../lib/setup/doctor.js", () => ({
@@ -35,6 +37,10 @@ vi.mock("../../lib/services/heartbeat/cli-sweeps.js", () => ({
 
 vi.mock("../../lib/setup/security-doctor.js", () => ({
   runSecurityDoctor: mockRunSecurityDoctor,
+}));
+
+vi.mock("../../lib/setup/index.js", () => ({
+  runSetup: mockRunSetup,
 }));
 
 vi.mock("../../lib/github/process-events.js", () => ({
@@ -133,6 +139,53 @@ describe("fabrica CLI operational wrappers", () => {
       qualityGateUpdates: 2,
     });
     mockCleanupWorkspace.mockResolvedValue(undefined);
+    mockRunSetup.mockResolvedValue({
+      agentId: "fabrica",
+      agentCreated: false,
+      workspacePath: "/tmp/default-workspace",
+      models: {},
+      filesWritten: [],
+      warnings: [],
+    });
+  });
+
+  it("passes ensureGenesis + forumGroupId to runSetup when DM bootstrap is configured", async () => {
+    const program = new Command();
+    const ctx = createCtx();
+    ctx.pluginConfig = {
+      work_heartbeat: { enabled: true },
+      telegram: {
+        bootstrapDmEnabled: true,
+        projectsForumChatId: "-1003709213169",
+      },
+    };
+    registerCli(program, ctx);
+
+    await program.parseAsync(["node", "test", "fabrica", "setup", "--workspace", "/tmp/default-workspace"], { from: "node" });
+
+    expect(mockRunSetup).toHaveBeenCalledWith(expect.objectContaining({
+      ensureGenesis: true,
+      forumGroupId: "-1003709213169",
+    }));
+  });
+
+  it("does not force genesis setup when the Telegram forum id is missing", async () => {
+    const program = new Command();
+    const ctx = createCtx();
+    ctx.pluginConfig = {
+      work_heartbeat: { enabled: true },
+      telegram: {
+        bootstrapDmEnabled: true,
+      },
+    };
+    registerCli(program, ctx);
+
+    await program.parseAsync(["node", "test", "fabrica", "setup", "--workspace", "/tmp/default-workspace"], { from: "node" });
+
+    expect(mockRunSetup).toHaveBeenCalledWith(expect.objectContaining({
+      ensureGenesis: false,
+      forumGroupId: undefined,
+    }));
   });
 
   it("routes `fabrica heartbeat once` through the one-shot heartbeat sweep", async () => {

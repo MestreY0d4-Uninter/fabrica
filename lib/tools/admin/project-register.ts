@@ -512,6 +512,7 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
     await writeProjects(workspaceDir, data);
     projectsPersisted = true;
 
+    let finalResolvedConfig = resolvedConfig;
     if (autonomousProject) {
       workflowOverrideCreated = await ensureAutonomousWorkflowOverride(
         workspaceDir,
@@ -528,6 +529,7 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
           `Autonomous DM bootstrap resolved reviewPolicy="${persistedConfig.workflow.reviewPolicy}" for "${slug}", expected "${expectedReviewPolicy}"`,
         );
       }
+      finalResolvedConfig = persistedConfig;
     }
 
     promptsCreated = await scaffoldPromptFiles(workspaceDir, slug);
@@ -544,7 +546,7 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
       deployUrl: deployUrl || null,
       isNewProject: !existing,
       workflowOverrideCreated,
-      reviewPolicy: resolvedConfig.workflow.reviewPolicy ?? "human",
+      reviewPolicy: finalResolvedConfig.workflow.reviewPolicy ?? "human",
     });
 
     const action = existing ? "Channel added to existing project" : `Project "${name}" created`;
@@ -565,8 +567,8 @@ export async function registerProject(params: ProjectRegisterParams): Promise<Pr
       workflowOverrideCreated,
       isNewProject: !existing,
       activeWorkflow: {
-        reviewPolicy: resolvedConfig.workflow.reviewPolicy ?? "human",
-        testPhase: Object.values(resolvedConfig.workflow.states).some(
+        reviewPolicy: finalResolvedConfig.workflow.reviewPolicy ?? "human",
+        testPhase: Object.values(finalResolvedConfig.workflow.states).some(
           (s) => s.role === "tester" && (s.type === "queue" || s.type === "active"),
         ),
         hint: "The user can change the review policy or enable the test phase — call workflow_guide for the full reference.",

@@ -137,7 +137,7 @@ const plugin = {
       },
       telegram: {
         type: "object",
-        description: "Telegram routing for DM bootstrap, project forum topics, and ops notifications.",
+        description: "Telegram routing for the official DM → project-topic flow. Core settings are DM bootstrap and the projects forum chat.",
         properties: {
           bootstrapDmEnabled: {
             type: "boolean",
@@ -146,15 +146,15 @@ const plugin = {
           },
           projectsForumChatId: {
             type: "string",
-            description: "Telegram forum group chat ID where Fabrica creates one topic per project.",
+            description: "Telegram forum group chat ID where Fabrica creates one topic per project. This is the key Telegram setting for the official Fabrica flow.",
           },
           projectsForumAccountId: {
             type: "string",
-            description: "Optional Telegram account ID to use when creating/sending project forum topics.",
+            description: "Optional Telegram account ID to use when creating or sending project forum topic updates.",
           },
           opsChatId: {
             type: "string",
-            description: "Telegram group/chat ID for cron, health, and ops-only notifications.",
+            description: "Optional Telegram group/chat ID for separate ops-only notifications. Not required for the core DM → topic product flow.",
           },
         },
       },

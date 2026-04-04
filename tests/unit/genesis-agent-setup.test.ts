@@ -50,7 +50,7 @@ describe("ensureGenesisAgent", () => {
     expect(rc).not.toHaveBeenCalled();
   });
 
-  it("adds telegram binding for genesis and removes main channel-wide telegram", async () => {
+  it("adds telegram binding for genesis and removes main channel-wide telegram only when forumGroupId is provided", async () => {
     const mainTelegramBinding = { agentId: "main", match: { channel: "telegram" } };
     const runtime = mockRuntime([{ id: "main" }], [mainTelegramBinding]);
     const rc = vi.fn().mockResolvedValue({ stdout: "", stderr: "" });
@@ -64,7 +64,7 @@ describe("ensureGenesisAgent", () => {
     expect(bindings).toContainEqual(
       expect.objectContaining({ agentId: "genesis", match: { channel: "telegram" } }),
     );
-    // Main's channel-wide telegram removed
+    // Main's channel-wide telegram removed when we can replace it with forum-specific binding
     expect(bindings).not.toContainEqual(
       expect.objectContaining({ agentId: "main", match: { channel: "telegram" } }),
     );
@@ -74,6 +74,24 @@ describe("ensureGenesisAgent", () => {
         agentId: "main",
         match: { channel: "telegram", peer: { kind: "group", id: "-1003709213169" } },
       }),
+    );
+  });
+
+  it("preserves main channel-wide telegram binding when no forumGroupId is provided", async () => {
+    const mainTelegramBinding = { agentId: "main", match: { channel: "telegram" } };
+    const runtime = mockRuntime([{ id: "main" }], [mainTelegramBinding]);
+    const rc = vi.fn().mockResolvedValue({ stdout: "", stderr: "" });
+
+    await ensureGenesisAgent(runtime as any, rc);
+
+    const writtenConfig = runtime.config.writeConfigFile.mock.calls[0]?.[0];
+    const bindings = writtenConfig?.bindings ?? [];
+
+    expect(bindings).toContainEqual(
+      expect.objectContaining({ agentId: "genesis", match: { channel: "telegram" } }),
+    );
+    expect(bindings).toContainEqual(
+      expect.objectContaining({ agentId: "main", match: { channel: "telegram" } }),
     );
   });
 });

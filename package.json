@@ -18,8 +18,6 @@
     "genesis/",
     "fabrica.manifest.json",
     "openclaw.plugin.json",
-    "ARCHITECTURE.md",
-    "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],

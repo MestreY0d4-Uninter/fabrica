@@ -14,6 +14,7 @@ import { runSecurityDoctor } from "./security-doctor.js";
 import { getAllDefaultModels, getAllRoleIds, getLevelsForRole } from "../roles/index.js";
 import { readProjects, writeProjects, type Channel } from "../projects/index.js";
 import { countActiveSlots } from "../projects/slots.js";
+import { readFabricaTelegramConfig } from "../telegram/config.js";
 import { log as auditLog } from "../audit.js";
 import { runHealthSweep, runHeartbeatSweep, runTriageSweep } from "../services/heartbeat/cli-sweeps.js";
 import { createGitHubStores } from "../github/store-factory.js";
@@ -95,6 +96,9 @@ export function registerCli(program: Command, ctx: PluginContext): void {
         if (Object.keys(roleModels).length > 0) models[role] = roleModels;
       }
 
+      const telegramConfig = readFabricaTelegramConfig(ctx.pluginConfig as Record<string, unknown> | undefined);
+      const shouldEnsureGenesis = telegramConfig.bootstrapDmEnabled && Boolean(telegramConfig.projectsForumChatId);
+
       const result = await runSetup({
         runtime: ctx.runtime,
         newAgentName: opts.newAgent,
@@ -102,6 +106,8 @@ export function registerCli(program: Command, ctx: PluginContext): void {
         workspacePath: opts.workspace,
         models: Object.keys(models).length > 0 ? models : undefined,
         runCommand: ctx.runCommand,
+        ensureGenesis: shouldEnsureGenesis,
+        forumGroupId: telegramConfig.projectsForumChatId,
       });
 
       if (result.agentCreated) {
@@ -128,9 +134,15 @@ export function registerCli(program: Command, ctx: PluginContext): void {
       }
 
       console.log("\nDone! Next steps:");
-      console.log("  1. Keep the bot reachable in DM");
-      console.log("  2. Add the bot to the projects forum group and allow topic creation");
-      console.log("  3. Send the project idea to the bot in DM to bootstrap the project automatically");
+      if (shouldEnsureGenesis) {
+        console.log("  1. Keep the bot reachable in DM");
+        console.log("  2. Add the bot to the projects forum group and allow topic creation");
+        console.log("  3. Send the project idea to the bot in DM to bootstrap the project automatically");
+      } else {
+        console.log("  1. Run `openclaw fabrica doctor workspace --workspace <path>` to confirm workspace readiness");
+        console.log("  2. If you want the official Telegram DM → topic flow, set plugins.entries.fabrica.config.telegram.projectsForumChatId");
+        console.log("  3. Re-run `openclaw fabrica setup` after the Telegram forum config is in place");
+      }
     });
 
   // Doctor — diagnostic + optional auto-fix

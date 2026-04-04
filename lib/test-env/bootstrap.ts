@@ -461,15 +461,17 @@ export async function ensurePythonToolchain(
     await fs.rm(toolchainPath, { recursive: true, force: true });
   }
 
+  const uvCmd = await ensureUv(runCommand);
+
   // Create toolchain venv
   await fs.mkdir(path.dirname(toolchainPath), { recursive: true });
-  const venvResult = await runCommand("uv", ["venv", toolchainPath], { timeout: 60_000 });
+  const venvResult = await runCommand(uvCmd, ["venv", toolchainPath], { timeout: 60_000 });
   if (venvResult.exitCode !== 0) {
     throw new Error(`Failed to create toolchain venv: ${venvResult.stderr}`);
   }
 
   // Install tools
-  const installResult = await runCommand("uv", [
+  const installResult = await runCommand(uvCmd, [
     "pip", "install",
     "-p", path.join(toolchainPath, "bin", "python"),
     ...PYTHON_TOOLCHAIN_PACKAGES,
@@ -774,7 +776,7 @@ async function ensurePythonEnvironment(
   }
 
   // Ensure uv is available (auto-install if needed)
-  await ensureUv(runCommand);
+  const uvCmd = await ensureUv(runCommand);
 
   const uvLock = await pathExists(path.join(repoPath, "uv.lock"));
   const pyproject = await pathExists(path.join(repoPath, "pyproject.toml"));
@@ -796,12 +798,28 @@ async function ensurePythonEnvironment(
     };
   }
 
+  if (uvLock && !pyproject) {
+    return {
+      ready: false,
+      skipped: false,
+      stack,
+      family: "python",
+      toolchain: "uv",
+      packageManager: "uv",
+      lockfile: "uv.lock",
+      environmentPath: null,
+      commandsRun,
+      fingerprint,
+      reason: "uv_lock_requires_pyproject",
+    };
+  }
+
   // Ensure shared toolchain exists (only for real Python projects)
   await ensurePythonToolchain(runCommand);
 
   if (uvLock) {
     await runAndAssert(runCommand, repoPath, commandsRun, {
-      cmd: "uv",
+      cmd: uvCmd,
       args: ["sync", "--locked"],
       reason: "uv sync",
     });
@@ -822,13 +840,13 @@ async function ensurePythonEnvironment(
 
   // uv is guaranteed available after ensureUv() — use it unconditionally
   await runAndAssert(runCommand, repoPath, commandsRun, {
-    cmd: "uv",
+    cmd: uvCmd,
     args: ["venv", ".venv"],
     reason: "create project-local virtualenv with uv",
   });
-  if (requirements) {
+  if (requirements && !pyproject) {
     await runAndAssert(runCommand, repoPath, commandsRun, {
-      cmd: "uv",
+      cmd: uvCmd,
       args: ["pip", "install", "--python", ".venv/bin/python", "-r", "requirements.txt"],
       reason: "install requirements.txt dependencies with uv",
     });
@@ -836,7 +854,7 @@ async function ensurePythonEnvironment(
   if (pyproject) {
     const hasDevExtra = await hasPyprojectDevExtra(repoPath);
     await runAndAssert(runCommand, repoPath, commandsRun, {
-      cmd: "uv",
+      cmd: uvCmd,
       args: ["pip", "install", "--python", ".venv/bin/python", "-e", hasDevExtra ? ".[dev]" : "."],
       reason: hasDevExtra ? "install editable project with dev extras via uv" : "install editable project via uv",
     });

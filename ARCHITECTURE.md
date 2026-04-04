@@ -30,6 +30,27 @@ Main areas:
 
 ## Runtime model
 
+## Environment gate
+
+`lib/test-env` provisions the shared toolchain and the project environment
+before dispatching workers in `developer` or `tester` mode.
+
+State model:
+
+`pending -> provisioning -> ready | failed`
+
+Environment contracts are versioned per family using `{family}@v1`
+(for example `python@v1` and `node@v1`).
+
+Operational rules:
+
+- Python uses a shared toolchain in `~/.openclaw/toolchains/python`
+- Python project environments are materialized locally as `.venv`
+- Existing Node repos require a reproducible lockfile before real work starts
+- Failure backoff is 60 seconds
+- A provisioning state older than 10 minutes is treated as stale and retried
+- `dryRun: true` skips environment provisioning entirely and stays side-effect free
+
 ## Telegram routing model
 
 New project intake is DM-first. The Fabrica bot accepts a new-project request in

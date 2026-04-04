@@ -11,6 +11,7 @@ import { runSetup, type SetupOpts } from "../../setup/index.js";
 import { writeAllDefaults } from "../../setup/workspace.js";
 import { getAllDefaultModels, getAllRoleIds, getLevelsForRole } from "../../roles/index.js";
 import { ExecutionMode } from "../../workflow/index.js";
+import { readFabricaTelegramConfig } from "../../telegram/config.js";
 
 export function createSetupTool(ctx: PluginContext) {
   return (toolCtx: ToolContext) => ({
@@ -85,6 +86,9 @@ export function createSetupTool(ctx: PluginContext) {
         });
       }
 
+      const telegramConfig = readFabricaTelegramConfig(ctx.pluginConfig as Record<string, unknown> | undefined);
+      const shouldEnsureGenesis = telegramConfig.bootstrapDmEnabled && Boolean(telegramConfig.projectsForumChatId);
+
       const result = await runSetup({
         runtime: ctx.runtime,
         newAgentName: params.newAgentName as string | undefined,
@@ -98,6 +102,8 @@ export function createSetupTool(ctx: PluginContext) {
           | ExecutionMode
           | undefined,
         runCommand: ctx.runCommand,
+        ensureGenesis: shouldEnsureGenesis,
+        forumGroupId: telegramConfig.projectsForumChatId,
       });
 
       const lines = [

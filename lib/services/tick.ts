@@ -50,6 +50,20 @@ export type TickResult = {
   skipped: Array<{ role?: string; reason: string }>;
 };
 
+function classifyEnvironmentGateSkip(state: {
+  status?: string | null;
+  nextProvisionRetryAt?: string | null;
+  lastProvisionError?: string | null;
+}): string {
+  if (state.status === "provisioning") return "environment_provisioning_in_progress";
+  if (state.status === "failed") {
+    if (state.nextProvisionRetryAt) return "environment_retry_backoff_active";
+    return "environment_failed";
+  }
+  if (state.status === "pending") return "environment_pending_provisioning";
+  return "environment_not_ready";
+}
+
 /**
  * Scan one project's queue and fill free worker slots.
  *
@@ -342,12 +356,16 @@ export async function projectTick(opts: {
         runCommand: runCommand!,
       });
       if (!environment.ready) {
-        skipped.push({ role, reason: "environment_not_ready" });
+        const environmentSkipReason = classifyEnvironmentGateSkip(environment.state);
+        skipped.push({ role, reason: environmentSkipReason });
         await auditLog(workspaceDir, "dispatch_blocked_environment_not_ready", {
           projectSlug,
           role,
           issueId: issue.iid,
+          reason: environmentSkipReason,
           environmentStatus: environment.state.status,
+          nextProvisionRetryAt: environment.state.nextProvisionRetryAt ?? null,
+          lastProvisionError: environment.state.lastProvisionError ?? null,
         }).catch(() => {});
         continue;
       }

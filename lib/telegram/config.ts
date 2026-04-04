@@ -2,6 +2,7 @@ export type FabricaTelegramConfig = {
   bootstrapDmEnabled: boolean;
   projectsForumChatId?: string;
   projectsForumAccountId?: string;
+  /** Optional legacy/advanced route for separate ops-only notifications. */
   opsChatId?: string;
 };
 

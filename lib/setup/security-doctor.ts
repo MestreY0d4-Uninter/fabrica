@@ -157,15 +157,26 @@ export async function runSecurityDoctor(openclawHome: string): Promise<SecurityD
         : "No residual non-essential plugins enabled",
   });
 
-  const routerBinding = (config.bindings ?? []).find(
+  const legacyRouterBinding = (config.bindings ?? []).find(
     (binding) => binding.agentId === "genesis-router" && binding.match?.channel === "telegram",
   );
   checks.push({
     name: "bindings:telegram-router",
-    severity: routerBinding ? "warn" : "ok",
-    message: routerBinding
-      ? "Telegram is still bound to genesis-router"
+    severity: legacyRouterBinding ? "warn" : "ok",
+    message: legacyRouterBinding
+      ? "Telegram is still bound to legacy genesis-router"
       : "Telegram is not bound to legacy genesis-router",
+  });
+
+  const genesisBinding = (config.bindings ?? []).find(
+    (binding) => binding.agentId === "genesis" && binding.match?.channel === "telegram" && !(binding.match as any)?.peer,
+  );
+  checks.push({
+    name: "bindings:telegram-genesis",
+    severity: genesisBinding ? "ok" : "warn",
+    message: genesisBinding
+      ? "Genesis agent owns the channel-wide Telegram DM binding"
+      : "Genesis agent does not own a channel-wide Telegram binding",
   });
 
   try {

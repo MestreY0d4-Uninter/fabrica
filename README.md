@@ -96,7 +96,17 @@ operational/workspace state, then tells you what is still missing.
 
 ## Quick start
 
-**1. Install Fabrica**:
+This is the minimum recommended path to get Fabrica working end-to-end with the official product flow.
+
+**1. Authenticate GitHub CLI**:
+
+```bash
+gh auth status || gh auth login
+```
+
+Fabrica uses authenticated `gh` CLI for GitHub operations in the default setup.
+
+**2. Install Fabrica**:
 
 ```bash
 openclaw plugins install @mestreyoda/fabrica
@@ -104,37 +114,69 @@ openclaw plugins install @mestreyoda/fabrica
 
 The plugin should load immediately after install, without manual remediation.
 
-**2. Confirm loadability**:
+**3. Confirm loadability**:
 
 ```bash
 openclaw plugins inspect fabrica
 ```
 
-**3. Configure operational state for a workspace**:
+**4. Configure Fabrica for a workspace**:
 
 ```bash
 openclaw fabrica doctor workspace --workspace /path/to/workspace
 openclaw fabrica setup --workspace /path/to/workspace --new-agent fabrica
 ```
 
-Use `openclaw fabrica setup --agent <id>` if you already have an agent. GitHub,
-Telegram, and webhook behavior are separate operational concerns, not
-installation dependencies.
+Use `openclaw fabrica setup --agent <id>` if you already have an agent.
+
+When the official Telegram DM bootstrap flow is configured (`bootstrapDmEnabled=true`
+plus `projectsForumChatId`), `openclaw fabrica setup` also prepares the dedicated
+internal `genesis` agent automatically.
+
+**5. Configure Telegram for the official Fabrica flow**:
+
+The official flow is:
+- Telegram DM with the bot for new-project intake
+- one Telegram forum group for project topics/timelines
+
+At minimum, when DM bootstrap is enabled, set:
+- `plugins.entries.fabrica.config.telegram.bootstrapDmEnabled=true`
+- `plugins.entries.fabrica.config.telegram.projectsForumChatId=<YOUR_PROJECTS_FORUM_CHAT_ID>`
+
+If `projectsForumChatId` is missing while DM bootstrap is enabled, Fabrica can accept the DM but will fail when it needs to create the project topic.
+
+**6. Validate operational readiness**:
+
+```bash
+openclaw plugins inspect fabrica
+openclaw fabrica doctor workspace --workspace /path/to/workspace
+```
 
 **Environment provisioning note**:
 
-Developer and tester pickup now pass through a stack environment gate. For
-supported stacks such as `python-cli`, Fabrica provisions the required toolchain
-and project-local environment before dispatching workers, instead of discovering
-missing dependencies inside a live worker run.
+Developer and tester pickup pass through a stack environment gate. Fabrica
+prepares the project environment before dispatching real work, instead of
+finding missing dependencies inside a live worker run.
 
-**4. Restart the gateway**:
+For Python projects, this includes just-in-time `uv` installation when needed,
+a shared toolchain, and a project-local `.venv`.
+
+For existing Node projects, Fabrica expects a reproducible lockfile
+(`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, or `bun.lock`) before
+real developer/tester dispatch. Greenfield scaffold mode can materialize the
+first deterministic lockfile, but regular runtime pickup fails closed without
+one.
+
+`dryRun: true` skips environment provisioning entirely and remains side-effect
+free.
+
+**7. Restart the gateway if needed**:
 
 ```bash
 systemctl --user restart openclaw-gateway.service
 ```
 
-**5. Trigger a new project programmatically**:
+**8. Trigger a new project programmatically**:
 
 ```bash
 cd ~/fabrica  # GitHub clone install only
@@ -146,13 +188,13 @@ npx tsx scripts/genesis-trigger.ts "A CLI tool that counts words in a file" \
 
 Remove `--dry-run` to execute for real.
 
-**6. Watch the pipeline run**:
+**9. Watch the pipeline run**:
 
 ```bash
 tail -f ~/.openclaw/workspace/logs/genesis.log
 ```
 
-**7. Check metrics**:
+**10. Check metrics**:
 
 ```bash
 openclaw fabrica metrics
@@ -223,7 +265,11 @@ Use plugin config when you want explicit webhook behavior or provider auth profi
 
 ### With Telegram
 
-Telegram enables DM-based project bootstrap, per-project forum topics, and a separate ops chat for heartbeat and cron notifications.
+Telegram is the primary human-facing entrypoint for Fabrica:
+- DM with the bot for new-project intake and short clarifications
+- one Telegram forum group where Fabrica creates one topic per project
+
+Recommended minimum Telegram configuration:
 
 ```json
 {
@@ -243,8 +289,7 @@ Telegram enables DM-based project bootstrap, per-project forum topics, and a sep
           "telegram": {
             "bootstrapDmEnabled": true,
             "projectsForumChatId": "<YOUR_PROJECTS_FORUM_CHAT_ID>",
-            "projectsForumAccountId": "<OPTIONAL_TELEGRAM_ACCOUNT_ID>",
-            "opsChatId": "<YOUR_OPS_CHAT_ID>"
+            "projectsForumAccountId": "<OPTIONAL_TELEGRAM_ACCOUNT_ID>"
           }
         }
       }
@@ -253,7 +298,15 @@ Telegram enables DM-based project bootstrap, per-project forum topics, and a sep
 }
 ```
 
-With Telegram enabled, send a project idea to the bot in a DM. Fabrica will ask clarifying questions, provision the GitHub repo, create a dedicated forum topic for the project, and keep ops-only notifications on the separate `opsChatId` route.
+`projectsForumChatId` is the key Fabrica-specific Telegram setting for the official DM → topic flow.
+
+When both `bootstrapDmEnabled=true` and `projectsForumChatId` are present,
+`openclaw fabrica setup` automatically prepares the internal `genesis` agent used
+for the DM intake path.
+
+`opsChatId` still exists in plugin config for deployments that want a separate ops-only route, but it is not required for the core product flow.
+
+With Telegram enabled, send a project idea to the bot in a DM. Fabrica will ask clarifying questions, provision the GitHub repo, create a dedicated forum topic for the project, and continue the project lifecycle in that topic.
 
 Project topics are event-driven timelines. Fabrica emits explicit messages for
 worker start, worker completion, review queueing, reviewer reject/approve, and

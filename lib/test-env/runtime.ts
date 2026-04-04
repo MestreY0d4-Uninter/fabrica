@@ -9,6 +9,7 @@ import { resolveStackEnvironmentContract } from "./contracts.js";
 import { getProjectEnvironmentState } from "./state.js";
 
 const STALE_PROVISIONING_WINDOW_MS = 10 * 60 * 1000;
+const FAILED_RETRY_DELAY_MS = 60 * 1000;
 
 function projectEnvironmentStateFor(
   project: Project,
@@ -35,6 +36,7 @@ export async function ensureEnvironmentReady(opts: {
 }): Promise<{ ready: boolean; state: ProjectEnvironmentState }> {
   const contract = resolveStackEnvironmentContract(opts.stack);
   const current = getProjectEnvironmentState(opts.project, opts.stack);
+  const retryAtMs = current.nextProvisionRetryAt ? Date.parse(current.nextProvisionRetryAt) : Number.NaN;
 
   if (current.status === "ready") {
     return { ready: true, state: current };
@@ -47,6 +49,15 @@ export async function ensureEnvironmentReady(opts: {
     const provisioningIsFresh = Number.isFinite(provisioningStartedAt)
       && (Date.now() - provisioningStartedAt) < STALE_PROVISIONING_WINDOW_MS;
     if (provisioningIsFresh) {
+      await auditLog(opts.workspaceDir, "environment_bootstrap_blocked", {
+        projectSlug: opts.projectSlug,
+        stack: opts.stack,
+        mode: opts.mode,
+        status: current.status,
+        reason: "provisioning_in_progress",
+        provisioningStartedAt: current.provisioningStartedAt ?? null,
+        contractVersion: current.contractVersion ?? contract.version,
+      }).catch(() => {});
       return { ready: false, state: current };
     }
     await auditLog(opts.workspaceDir, "environment_bootstrap_retry_scheduled", {
@@ -60,8 +71,19 @@ export async function ensureEnvironmentReady(opts: {
   if (
     current.status === "failed" &&
     current.nextProvisionRetryAt &&
-    Date.parse(current.nextProvisionRetryAt) > Date.now()
+    Number.isFinite(retryAtMs) &&
+    retryAtMs > Date.now()
   ) {
+    await auditLog(opts.workspaceDir, "environment_bootstrap_blocked", {
+      projectSlug: opts.projectSlug,
+      stack: opts.stack,
+      mode: opts.mode,
+      status: current.status,
+      reason: "retry_backoff_active",
+      blockedUntil: current.nextProvisionRetryAt,
+      lastProvisionError: current.lastProvisionError ?? null,
+      contractVersion: current.contractVersion ?? contract.version,
+    }).catch(() => {});
     return { ready: false, state: current };
   }
 
@@ -76,6 +98,8 @@ export async function ensureEnvironmentReady(opts: {
   await auditLog(opts.workspaceDir, "environment_bootstrap_started", {
     projectSlug: opts.projectSlug,
     stack: opts.stack,
+    mode: opts.mode,
+    previousStatus: current.status,
     contractVersion: contract.version,
   }).catch(() => {});
 
@@ -110,7 +134,7 @@ export async function ensureEnvironmentReady(opts: {
   }));
 
   if (!result.ready) {
-    const nextRetryAt = new Date(Date.now() + 60_000).toISOString();
+    const nextRetryAt = new Date(Date.now() + FAILED_RETRY_DELAY_MS).toISOString();
     const state = projectEnvironmentStateFor(opts.project, opts.stack, {
       status: "failed",
       stack: opts.stack,
@@ -132,8 +156,11 @@ export async function ensureEnvironmentReady(opts: {
     await auditLog(opts.workspaceDir, "environment_bootstrap_retry_scheduled", {
       projectSlug: opts.projectSlug,
       stack: opts.stack,
+      mode: opts.mode,
       nextRetryAt,
+      retryDelayMs: FAILED_RETRY_DELAY_MS,
       reason: state.lastProvisionError ?? "environment_bootstrap_failed",
+      contractVersion: state.contractVersion ?? contract.version,
     }).catch(() => {});
 
     return { ready: false, state };
@@ -162,6 +189,9 @@ export async function ensureEnvironmentReady(opts: {
   await auditLog(opts.workspaceDir, "environment_ready_confirmed", {
     projectSlug: opts.projectSlug,
     stack: opts.stack,
+    mode: opts.mode,
+    previousStatus: current.status,
+    lastProvisionedAt: provisionedAt,
     contractVersion: contract.version,
   }).catch(() => {});
 

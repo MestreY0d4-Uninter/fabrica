@@ -498,6 +498,50 @@ describe("telegram bootstrap hook", () => {
     expect(session?.error).toBe("missing_projects_forum_chat");
   });
 
+  it("keeps main bootstrap handling active when genesis exists but the official forum config is missing", async () => {
+    const api = {
+      runtime: {
+        config: {
+          loadConfig: () => ({ agents: { list: [{ id: "main" }, { id: "genesis" }] } }),
+        },
+      },
+      on: vi.fn((name, fn) => {
+        if (name === "message_received") handler = fn;
+      }),
+    } as unknown as OpenClawPluginApi;
+
+    const ctxMissingForum = {
+      ...ctx,
+      pluginConfig: {
+        telegram: {
+          bootstrapDmEnabled: true,
+        },
+      },
+    } as any;
+
+    registerTelegramBootstrapHook(api, ctxMissingForum);
+    expect(handler).toBeTypeOf("function");
+
+    await handler?.(
+      {
+        content: [
+          "Crie e registre um novo projeto.",
+          "Project name: demo-cli",
+          "Stack: python-cli",
+          "Idea:",
+          "Uma CLI para gerar senhas.",
+        ].join("\n"),
+        metadata: {},
+      },
+      { channelId: "telegram", conversationId: "6951571380" },
+    );
+
+    await vi.waitFor(() => expect(sendMessageTelegram).toHaveBeenCalled(), { timeout: 2000 });
+    const session = await readTelegramBootstrapSession(workspaceDir, "6951571380");
+    expect(session?.status).toBe("failed");
+    expect(session?.error).toBe("missing_projects_forum_chat");
+  });
+
   it("writes a failed bootstrap session when the inferred slug already exists", async () => {
     const api = {
       on: vi.fn((name, fn) => {

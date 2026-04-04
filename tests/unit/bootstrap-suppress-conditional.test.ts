@@ -32,7 +32,12 @@ function makeApi(agents: Array<{ id: string }>) {
 function makeCtx() {
   return {
     config: {},
-    pluginConfig: { bootstrapDmEnabled: false },
+    pluginConfig: {
+      telegram: {
+        bootstrapDmEnabled: true,
+        projectsForumChatId: "-1003709213169",
+      },
+    },
     runtime: null,
   };
 }
@@ -48,7 +53,19 @@ describe("registerTelegramBootstrapHook — conditional suppress", () => {
     expect(api._onCalls).toContain("message_received");
   });
 
-  it("registers NO hooks when genesis agent exists (genesis handles DMs)", () => {
+  it("keeps hooks active when genesis exists but the official forum config is missing", () => {
+    const api = makeApi([{ id: "main" }, { id: "genesis" }]);
+    const ctx = makeCtx();
+    delete ctx.pluginConfig.telegram.projectsForumChatId;
+
+    registerTelegramBootstrapHook(api as any, ctx as any);
+
+    expect(api._onCalls).toContain("before_prompt_build");
+    expect(api._onCalls).toContain("message_sending");
+    expect(api._onCalls).toContain("message_received");
+  });
+
+  it("registers NO hooks when genesis exists and the official DM bootstrap flow is configured", () => {
     const api = makeApi([{ id: "main" }, { id: "genesis" }]);
 
     registerTelegramBootstrapHook(api as any, makeCtx() as any);

@@ -62,6 +62,30 @@ describe("doctor — healthy workspace", () => {
     expect(result.checks.length).toBeGreaterThan(0);
     expect(result.checks.every(c => c.severity === "ok")).toBe(true);
   });
+
+  it("warns when Telegram DM bootstrap is implicitly active but projectsForumChatId is missing", async () => {
+    await createValidWorkspace(tmpDir);
+    const result = await runDoctor({
+      workspacePath: tmpDir,
+      pluginConfig: { telegram: {} },
+    });
+
+    const check = result.checks.find(c => c.name === "config:telegram-bootstrap");
+    expect(check?.severity).toBe("warn");
+    expect(check?.message).toContain("active by default");
+  });
+
+  it("reports Telegram DM bootstrap as disabled only when explicitly set to false", async () => {
+    await createValidWorkspace(tmpDir);
+    const result = await runDoctor({
+      workspacePath: tmpDir,
+      pluginConfig: { telegram: { bootstrapDmEnabled: false } },
+    });
+
+    const check = result.checks.find(c => c.name === "config:telegram-bootstrap");
+    expect(check?.severity).toBe("ok");
+    expect(check?.message).toContain("bootstrapDmEnabled=false");
+  });
 });
 
 // ---------------------------------------------------------------------------

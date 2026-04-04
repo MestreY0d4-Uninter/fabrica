@@ -142,16 +142,19 @@ Call \`setup\` with the collected answers:
 After setup completes, explain the current operating model:
 
 📱 **Telegram Guidance:**
-Fabrica uses:
+Fabrica uses the following official path:
 1. **DM with the bot** for new-project bootstrap and short clarifications
 2. **One forum group for projects** with **one topic per project**
-3. **One separate ops group** for health/cron/status
 
-**Recommended Setup:**
+**Minimum recommended setup:**
 1. Keep the bot reachable in DM
 2. Add the bot to the projects forum group
 3. Ensure the bot can create/manage topics there
-4. Keep cron/ops notifications in a separate group
+4. Set 'plugins.entries.fabrica.config.telegram.projectsForumChatId' to that forum group ID
+
+**Optional / advanced:**
+- 'projectsForumAccountId' if a specific Telegram account should own forum actions
+- 'opsChatId' only if you want a separate ops-only route; it is not required for the core product flow
 
 **Step 5: Project Registration**
 Explain that the canonical path for new projects is:
@@ -168,10 +171,10 @@ Manual \`project_register\` remains available for admin recovery and exceptional
 **Step 6: Workflow Overview**
 After project registration, briefly tell the user about their active workflow:
 
-- **Review policy**: agent for autonomous DM-created projects — PRs flow through Fabrica review by default.
-- **Test phase**: skipped by default — the testing step is in the workflow but issues bypass it automatically. To enable testing for a specific issue, remove the \`test:skip\` label. To enable globally, set \`testPolicy: agent\` in workflow.yaml.
-- **Customization**: They can change the review policy (human/agent/auto), enable testing (testPolicy: agent), or override settings per project. Point them to \`workflow.yaml\` in the Fabrica workspace data directory.
-- Say: "Autonomous projects created from DM use **agent review** and **testing skipped** by default. You can enable testing per-issue by removing the \`test:skip\` label, or globally by setting \`testPolicy: agent\` in your workflow.yaml."
+- **Review policy**: autonomous DM-created projects use **agent review** by default as a quality guardrail.
+- **Test phase**: the current workflow still defaults to 'testPolicy: skip' unless explicitly enabled. Explain this as the current operational default, not the quality ideal of the product.
+- **Customization**: They can change the review policy ('human', 'agent', 'skip'), enable testing ('testPolicy: agent'), or override settings per project. Point them to 'workflow.yaml' in the Fabrica workspace data directory.
+- Say: "Autonomous projects created from DM use **agent review** by default. Testing is still skipped by default in the current workflow unless you enable it, so if you need stricter QA by default you should change 'testPolicy' in your workflow.yaml."
 
 ## Guidelines
 - Be conversational and friendly. Ask one question at a time.

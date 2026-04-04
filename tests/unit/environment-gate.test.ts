@@ -44,7 +44,7 @@ describe("projectTick environment gate", () => {
       expect(ensureEnvironmentReady).toHaveBeenCalledTimes(1);
       expect(dispatchTask).not.toHaveBeenCalled();
       expect(result.skipped).toContainEqual(
-        expect.objectContaining({ role: "developer", reason: "environment_not_ready" }),
+        expect.objectContaining({ role: "developer", reason: "environment_provisioning_in_progress" }),
       );
     } finally {
       await h.cleanup();
@@ -106,6 +106,26 @@ describe("projectTick environment gate", () => {
         mode: "tester",
         stack: "python-cli",
       }));
+      expect((await projectTick({
+        workspaceDir: h.workspaceDir,
+        projectSlug: h.project.slug,
+        targetRole: "tester",
+        provider: h.provider,
+        workflow: h.workflow,
+        runCommand: h.runCommand,
+        ensureEnvironmentReady: vi.fn().mockResolvedValue({
+          ready: false,
+          state: {
+            status: "failed",
+            stack: "python-cli",
+            contractVersion: "python@v1",
+            lastProvisionError: "missing_pyproject_or_requirements",
+            nextProvisionRetryAt: "2026-04-02T12:00:00.000Z",
+          },
+        }),
+      })).skipped).toContainEqual(
+        expect.objectContaining({ role: "tester", reason: "environment_retry_backoff_active" }),
+      );
     } finally {
       await h.cleanup();
     }
@@ -150,7 +170,7 @@ describe("projectTick environment gate", () => {
       expect(dispatchTask).not.toHaveBeenCalled();
       expect(runCommand).not.toHaveBeenCalled();
       expect(result.skipped).toContainEqual(
-        expect.objectContaining({ role: "developer", reason: "environment_not_ready" }),
+        expect.objectContaining({ role: "developer", reason: "environment_provisioning_in_progress" }),
       );
     } finally {
       await h.cleanup();

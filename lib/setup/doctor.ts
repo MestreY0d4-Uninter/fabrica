@@ -16,6 +16,7 @@ import { loadConfig } from "../config/index.js";
 import { getAllRoleIds } from "../roles/index.js";
 import type { ProjectsData } from "../projects/types.js";
 import { resolveGitHubWebhookSecret } from "../github/config-credentials.js";
+import { readFabricaTelegramConfig } from "../telegram/config.js";
 // ensureDefaultFiles is imported lazily to avoid triggering template loading
 // at import time (templates resolve paths relative to dist/, not lib/setup/).
 
@@ -237,19 +238,21 @@ async function checkConfigLoads(workspacePath: string): Promise<CheckResult> {
 }
 
 function checkTelegramBootstrapConfig(pluginConfig: Record<string, unknown>): CheckResult {
-  const telegram = (pluginConfig as any)?.telegram;
-  if (!telegram?.bootstrapDmEnabled) {
+  const rawTelegram = ((pluginConfig as any)?.telegram ?? {}) as Record<string, unknown>;
+  const telegram = readFabricaTelegramConfig(pluginConfig);
+
+  if (rawTelegram.bootstrapDmEnabled === false) {
     return {
       name: "config:telegram-bootstrap",
       severity: "ok",
-      message: "Telegram DM bootstrap is disabled (bootstrapDmEnabled not set)",
+      message: "Telegram DM bootstrap is disabled (bootstrapDmEnabled=false)",
     };
   }
-  if (!telegram?.projectsForumChatId) {
+  if (!telegram.projectsForumChatId) {
     return {
       name: "config:telegram-bootstrap",
       severity: "warn",
-      message: "Telegram DM bootstrap is enabled (bootstrapDmEnabled=true) but projectsForumChatId is not configured — DM bootstrap will fail at runtime",
+      message: "Telegram DM bootstrap is active by default but projectsForumChatId is not configured in plugins.entries.fabrica.config.telegram — the official DM → topic flow will fail at runtime",
     };
   }
   return {

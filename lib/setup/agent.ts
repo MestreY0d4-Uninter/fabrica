@@ -96,10 +96,15 @@ export async function ensureGenesisAgent(
   // Reload config after CLI modified it on disk
   const updatedConfig = runtime.config.loadConfig();
 
-  // Update bindings: remove channel-wide telegram from main (if any)
-  const bindings = ((updatedConfig as any).bindings ?? []).filter(
-    (b: any) => !(b.match?.channel === "telegram" && !b.match?.peer && b.agentId === "main"),
-  );
+  // Update bindings.
+  // Only remove main's channel-wide telegram binding when we have an explicit
+  // forum group to re-bind main to. Otherwise preserve the existing main binding
+  // so setup does not silently steal Telegram traffic from the primary agent.
+  const bindings = ((updatedConfig as any).bindings ?? []).filter((b: any) => {
+    const isMainChannelWideTelegram = b.match?.channel === "telegram" && !b.match?.peer && b.agentId === "main";
+    if (!isMainChannelWideTelegram) return true;
+    return !opts?.forumGroupId;
+  });
 
   // Ensure genesis has channel-wide telegram binding
   if (!bindings.some((b: any) => b.agentId === "genesis" && b.match?.channel === "telegram" && !b.match?.peer)) {
