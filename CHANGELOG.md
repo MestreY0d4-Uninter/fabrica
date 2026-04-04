@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.16 - 2026-04-04
+
+- Closed the Batch 3 operational integration cycle and prepared the public 0.2.16 release path.
+- Hardened the npm release gate so `npm publish --dry-run` no longer inherits lifecycle `dry-run` state into nested lockfile/bootstrap and installability checks.
+- Stabilized release verification around deterministic pack/install smoke behavior, explicit publish-path validation, and canonical OpenClaw binary selection.
+- Normalized package metadata for publish (`repository.url`) and documented a clean install-first operator flow in the distributed package surfaces.
+- Hardened Telegram bootstrap flow test cleanup against transient `ENOTEMPTY` races during temporary workspace teardown.
+
 ## 0.2.15 - 2026-04-03
 
 - Hardened Telegram DM intake around durable `pending_classify` / `classifying` recovery, newer-attempt ownership, and explicit late-classify reconciliation.
