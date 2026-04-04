@@ -50,7 +50,7 @@ describe("verify-installability script", () => {
     expect(exec).toHaveBeenNthCalledWith(
       2,
       "openclaw",
-      ["--profile", "fabrica-install-smoke-999", "plugins", "install", "pkg.tgz"],
+      ["--profile", "fabrica-install-smoke-999", "plugins", "install", "--dangerously-force-unsafe-install", "pkg.tgz"],
       { timeoutMs: 7000 }
     );
     expect(exec).toHaveBeenNthCalledWith(
