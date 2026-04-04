@@ -29,8 +29,18 @@ function failCommand(command, args, status, output) {
   );
 }
 
+function resolveOpenclawBinary() {
+  const lookup = spawnSync("bash", ["-lc", "which -a openclaw | tail -1"], {
+    encoding: "utf8",
+    timeout: DEFAULT_TIMEOUT_MS,
+  });
+  const resolved = `${lookup.stdout ?? ""}`.trim();
+  return resolved || "openclaw";
+}
+
 export function executeExternal(command, args, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-  const result = spawnSync(command, args, {
+  const executable = command === "openclaw" ? resolveOpenclawBinary() : command;
+  const result = spawnSync(executable, args, {
     encoding: "utf8",
     timeout: timeoutMs,
   });
