@@ -1,11 +1,10 @@
 import pino, { type Logger as PinoLogger, stdSerializers } from "pino";
-import { createRequire } from "node:module";
+import pinoPretty from "pino-pretty";
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { createExecutionId, getCorrelationContext } from "./context.js";
 
 export type FabricaLogger = PinoLogger;
 
-const require = createRequire(import.meta.url);
 let prettyFallbackWarned = false;
 
 function warnPrettyFallback(error: unknown) {
@@ -15,25 +14,15 @@ function warnPrettyFallback(error: unknown) {
   console.warn(`[fabrica] pretty logging unavailable, falling back to structured logs: ${reason}`);
 }
 
-function createTransport() {
+function createDestination(destination?: pino.DestinationStream) {
+  if (destination) return destination;
   if (process.env.LOG_PRETTY !== "1") return undefined;
 
-  let target: string;
   try {
-    target = require.resolve("pino-pretty");
-  } catch (error) {
-    warnPrettyFallback(error);
-    return undefined;
-  }
-
-  try {
-    return pino.transport({
-      target,
-      options: {
-        colorize: true,
-        translateTime: "SYS:standard",
-        ignore: "pid,hostname",
-      },
+    return pinoPretty({
+      colorize: true,
+      translateTime: "SYS:standard",
+      ignore: "pid,hostname",
     });
   } catch (error) {
     warnPrettyFallback(error);
@@ -42,6 +31,7 @@ function createTransport() {
 }
 
 export function createFabricaLogger(destination?: pino.DestinationStream): FabricaLogger {
+  const resolvedDestination = createDestination(destination);
   return pino({
   name: "fabrica",
   level: process.env.LOG_LEVEL ?? "info",
@@ -90,7 +80,7 @@ export function createFabricaLogger(destination?: pino.DestinationStream): Fabri
       spanId: spanContext?.spanId,
     };
   },
-  }, destination ?? createTransport());
+  }, resolvedDestination);
 }
 
 const rootLogger = createFabricaLogger();
