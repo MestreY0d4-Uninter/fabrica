@@ -46,7 +46,13 @@ describe("verify-installability script", () => {
     });
 
     expect(exec).toHaveBeenCalledTimes(4);
-    expect(exec).toHaveBeenNthCalledWith(1, "npm", ["pack", "--json"], { timeoutMs: 7000 });
+    expect(exec).toHaveBeenNthCalledWith(1, "npm", ["pack", "--json"], {
+      timeoutMs: 7000,
+      env: expect.objectContaining({ PATH: expect.any(String) }),
+    });
+    expect(exec.mock.calls[0][2].env.npm_config_dry_run).toBeUndefined();
+    expect(exec.mock.calls[0][2].env.npm_lifecycle_event).toBeUndefined();
+    expect(exec.mock.calls[0][2].env.npm_lifecycle_script).toBeUndefined();
     expect(exec).toHaveBeenNthCalledWith(
       2,
       "openclaw",

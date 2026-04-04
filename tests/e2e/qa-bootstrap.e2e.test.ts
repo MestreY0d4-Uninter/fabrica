@@ -10,6 +10,14 @@ import type { Spec } from "../../lib/intake/types.js";
 const execFileAsync = promisify(execFile);
 const tempDirs: string[] = [];
 
+function npmLifecycleNeutralEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const nextEnv = { ...env };
+  delete nextEnv.npm_config_dry_run;
+  delete nextEnv.npm_lifecycle_event;
+  delete nextEnv.npm_lifecycle_script;
+  return nextEnv;
+}
+
 const baseSpec: Spec = {
   title: "E2E bootstrap",
   type: "feature",
@@ -43,7 +51,7 @@ async function runQa(repoPath: string, env: NodeJS.ProcessEnv): Promise<{ stdout
   try {
     return await execFileAsync("bash", ["scripts/qa.sh"], {
       cwd: repoPath,
-      env,
+      env: npmLifecycleNeutralEnv(env),
       maxBuffer: 10 * 1024 * 1024,
     });
   } catch (error: any) {
@@ -137,7 +145,9 @@ describe("sum", () => {
 
     await execFileAsync("npm", ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"], {
       cwd: repoPath,
+      env: npmLifecycleNeutralEnv(),
     });
+    await expect(fs.access(path.join(repoPath, "package-lock.json"))).resolves.toBeUndefined();
 
     const qa = generateQaContract({ spec: baseSpec, stack: "express" });
     await writeExecutable(path.join(repoPath, "scripts", "qa.sh"), qa.script_content);

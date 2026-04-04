@@ -48,7 +48,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/MestreY0d4-Uninter/fabrica.git"
+    "url": "git+https://github.com/MestreY0d4-Uninter/fabrica.git"
   },
   "homepage": "https://github.com/MestreY0d4-Uninter/fabrica#readme",
   "bugs": {

@@ -38,11 +38,20 @@ function resolveOpenclawBinary() {
   return resolved || "openclaw";
 }
 
-export function executeExternal(command, args, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+function neutralizeNpmLifecycleEnv(env = process.env) {
+  const nextEnv = { ...env };
+  delete nextEnv.npm_config_dry_run;
+  delete nextEnv.npm_lifecycle_event;
+  delete nextEnv.npm_lifecycle_script;
+  return nextEnv;
+}
+
+export function executeExternal(command, args, { timeoutMs = DEFAULT_TIMEOUT_MS, env = process.env } = {}) {
   const executable = command === "openclaw" ? resolveOpenclawBinary() : command;
   const result = spawnSync(executable, args, {
     encoding: "utf8",
     timeout: timeoutMs,
+    env,
   });
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
 
@@ -69,7 +78,10 @@ export function verifyInstallabilitySmoke({
 
   try {
     const packArgs = ["pack", "--json"];
-    const packResult = exec("npm", packArgs, { timeoutMs });
+    const packResult = exec("npm", packArgs, {
+      timeoutMs,
+      env: neutralizeNpmLifecycleEnv(),
+    });
     if (packResult.status !== 0) {
       failCommand("npm", packArgs, packResult.status, packResult.output);
     }
