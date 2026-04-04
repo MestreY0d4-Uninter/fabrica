@@ -30,16 +30,10 @@ function failCommand(command, args, status, output) {
 }
 
 export function executeExternal(command, args, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-  const isOpenclaw = command === "openclaw";
-  const result = isOpenclaw
-    ? spawnSync("bash", ["-lc", buildShellCommand(command, args)], {
-        encoding: "utf8",
-        timeout: timeoutMs,
-      })
-    : spawnSync(command, args, {
-        encoding: "utf8",
-        timeout: timeoutMs,
-      });
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+    timeout: timeoutMs,
+  });
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
 
   if (result.error?.code === "ETIMEDOUT") {
