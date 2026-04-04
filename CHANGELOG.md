@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.17 - 2026-04-04
+
+- Removed bundled `pino` / `thread-stream` worker artifacts from the distributed plugin package so OpenClaw install security scanning no longer blocks Fabrica on `new Function(...)` inside generated worker bundles.
+- Preserved opt-in pretty logging by switching `LOG_PRETTY=1` to a direct `pino-pretty` stream instead of worker-thread transport wiring.
+- Tightened release/installability validation around the real published artifact so the package that passes `npm publish --dry-run` matches the package operators install via `openclaw plugins install @mestreyoda/fabrica`.
+
 ## 0.2.16 - 2026-04-04
 
 - Closed the Batch 3 operational integration cycle and prepared the public 0.2.16 release path.
