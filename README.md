@@ -120,6 +120,8 @@ The plugin should load immediately after install, without manual remediation.
 openclaw plugins inspect fabrica
 ```
 
+If OpenClaw warns that `plugins.allow` is empty and non-bundled plugins may auto-load, that is a host trust-policy warning, not a Fabrica install failure. Fabrica can be installed and loadable while the OpenClaw operator still has to decide whether to keep open discovery or set an explicit trusted plugin list in `plugins.allow`.
+
 **4. Configure Fabrica for a workspace**:
 
 ```bash
