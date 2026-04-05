@@ -24,20 +24,25 @@ Read the comments carefully — they often contain clarifications, decisions, or
 
 ### 1. Use the assigned worktree
 
-**NEVER work in the main checkout.** Use the assigned git worktree for this task. If it does not already exist, create it as a sibling to the repo:
+**NEVER work in the main checkout.** The task message includes a `Repo:` / `Execution path:` line with the canonical repository path for this project. Start there first. If that path is missing, inaccessible, or points somewhere unexpected, stop and return `Work result: BLOCKED` instead of creating the project under another workspace.
 
 ```bash
-# Example: repo is at ~/git/myproject
-# Worktree goes to ~/git/myproject.worktrees/feature/123-add-auth
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+# Example: task message says Repo: /home/ubuntu/git/acme/myproject
+REPO_ROOT="/absolute/path/from-task-message"
+cd "$REPO_ROOT"
 BRANCH="feature/<issue-id>-<slug>"
 WORKTREE="${REPO_ROOT}.worktrees/${BRANCH}"
-git worktree add "$WORKTREE" -b "$BRANCH"
-cd "$WORKTREE"
+if git worktree list --porcelain | grep -Fq "worktree ${WORKTREE}"; then
+  cd "$WORKTREE"
+else
+  git worktree add "$WORKTREE" -b "$BRANCH"
+  cd "$WORKTREE"
+fi
 ```
 
 The `.worktrees/` directory sits NEXT TO the repo folder (not inside it). This keeps the main checkout clean for the orchestrator and other workers. If the assigned worktree already exists from a previous task on the same branch, verify it's clean and reuse it.
-Once you are in the assigned worktree, stay there for the rest of the task and do not switch back to the main checkout.
+
+Never create or implement the project under `~/.openclaw/workspace/<slug>` unless the task message explicitly says that directory is the canonical repo path. Once you are in the assigned worktree, stay there for the rest of the task and do not switch back to the main checkout.
 
 ### 2. Implement the changes
 
@@ -133,9 +138,11 @@ PR_NUM=$(gh pr list --head "$BRANCH" --json number -q '.[0].number')
 QA_RAW=$(bash scripts/qa.sh 2>&1); QA_EXIT=$?
 # MANDATORY: sanitize before embedding in PR — strip lines with tokens/keys/env vars/host paths
 QA_OUTPUT=$(printf '%s' "$QA_RAW" | grep -v -iE '(TOKEN|SECRET|_KEY|PASSWORD|CREDENTIAL|PRIVATE|AUTH)=' | grep -v -E '(ghp_|gho_|github_pat_|sk-|xox[bprs]-|AIza|AKIA|glpat-)' | grep -v -E '^declare -x ' | grep -v -E '(/home/|~/.openclaw/)' | head -200)
-CURRENT_BODY=$(gh pr view "$PR_NUM" --json body -q '.body')
+REPO_SLUG=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
+CURRENT_BODY=$(gh api "repos/$REPO_SLUG/pulls/$PR_NUM" --jq '.body')
 BODY_NO_QA=$(printf '%s' "$CURRENT_BODY" | perl -0pe 's/\n## QA Evidence\b[\s\S]*?(?=\n##\s|\z)//g')
-gh pr edit "$PR_NUM" --body "$(printf '%s\n\n## QA Evidence\n\n```\n%s\n```\n\nExit code: %d\n' "$BODY_NO_QA" "$QA_OUTPUT" "$QA_EXIT")"
+NEW_BODY=$(printf '%s\n\n## QA Evidence\n\n```\n%s\n```\n\nExit code: %d\n' "$BODY_NO_QA" "$QA_OUTPUT" "$QA_EXIT")
+gh api --method PATCH "repos/$REPO_SLUG/pulls/$PR_NUM" -f body="$NEW_BODY" >/dev/null
 ```
 
 **NEVER bypass the sanitization step.** Never embed raw, unfiltered command output in PR descriptions.

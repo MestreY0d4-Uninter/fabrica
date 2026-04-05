@@ -89,4 +89,23 @@ describe("buildTaskMessage", () => {
     expect(message).toContain("Work result: BLOCKED");
     expect(message).not.toContain("MUST invoke the `work_finish`");
   });
+
+  it("includes the canonical execution path for local repositories", () => {
+    const message = buildTaskMessage({
+      projectName: "demo",
+      channelId: "demo",
+      role: "developer",
+      issueId: 9,
+      issueTitle: "Implement locally",
+      issueDescription: "Use the registered repo path",
+      issueUrl: "https://example.com/issues/9",
+      repo: "/home/ubuntu/git/acme/demo",
+      baseBranch: "main",
+    });
+
+    expect(message).toContain("Repo: /home/ubuntu/git/acme/demo | Branch: main");
+    expect(message).toContain("Execution path: /home/ubuntu/git/acme/demo");
+    expect(message).toContain("Start by changing into the canonical repo path above");
+    expect(message).not.toContain("repository workspace hidden");
+  });
 });

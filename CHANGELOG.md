@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.18 - 2026-04-05
+
+- Fixed developer completion validation to respect the project base branch and prefer the canonical issue-linked PR when the main checkout branch is the configured base branch.
+- Added active regression coverage for base-branch PR validation, including custom base branch names and retargeted branch PR protection.
+- Fixed developer dispatch context to pass the canonical local repository path into worker task messages instead of degrading to repo remote or slug-only context.
+- Exposed the canonical execution path in worker task messages and aligned the developer prompt so workers must start from the registered repo path instead of silently creating projects under `~/.openclaw/workspace/<slug>`.
+- Normalized worker-completion recovery to use the workflow feedback queue label instead of hardcoding `To Improve`, and refreshed the associated unit coverage.
+
 ## 0.2.17 - 2026-04-04
 
 - Removed bundled `pino` / `thread-stream` worker artifacts from the distributed plugin package so OpenClaw install security scanning no longer blocks Fabrica on `new Function(...)` inside generated worker bundles.

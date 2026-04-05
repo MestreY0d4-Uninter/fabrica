@@ -47,6 +47,7 @@ vi.mock("../../lib/projects/index.js", () => ({
   requireCanonicalPrSelector: vi.fn(() => ({ prNumber: 1 })),
   emptySlot: vi.fn(() => ({ sessionKey: null, issueId: null })),
   recordIssueLifecycle: mockRecordIssueLifecycle,
+  resolveRepoPath: vi.fn((value: string) => value),
 }));
 vi.mock("../../lib/services/gateway-sessions.js", () => ({
   fetchGatewaySessions: mockFetchGatewaySessions,

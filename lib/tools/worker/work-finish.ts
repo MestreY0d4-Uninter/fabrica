@@ -46,6 +46,16 @@ async function getCurrentBranch(repoPath: string, runCommand: RunCommand): Promi
   return result.stdout.trim();
 }
 
+function isCurrentProjectBaseBranch(branchName: string, baseBranch?: string | null): boolean {
+  const normalizedBranch = branchName.trim().toLowerCase();
+  if (!normalizedBranch) return true;
+
+  const normalizedBaseBranch = baseBranch?.trim().toLowerCase();
+  if (normalizedBaseBranch) return normalizedBranch === normalizedBaseBranch;
+
+  return ["main", "master", "develop", "development", "trunk"].includes(normalizedBranch);
+}
+
 function throwInvalidQaEvidence(
   qaEvidence: QaEvidenceValidation,
   actor: "developer" | "reviewer",
@@ -122,12 +132,21 @@ export async function validatePrExistsForDeveloper(
   workspaceDir: string,
   projectSlug: string,
   issueRuntime?: import("../../projects/types.js").IssueRuntimeState | null,
+  baseBranch?: string | null,
 ): Promise<import("../../providers/provider.js").PrStatus> {
   const logger = getRootLogger().child({ issueId, phase: "work-finish" });
   const branchName = await getCurrentBranch(repoPath, runCommand).catch(() => "");
   try {
-    const branchPr = branchName ? await provider.findOpenPrForBranch(branchName) : null;
-    const prStatus = branchPr ?? await provider.getPrStatus(issueId);
+    const preferIssuePr = isCurrentProjectBaseBranch(branchName, baseBranch);
+    const branchPr = !preferIssuePr
+      ? await provider.findOpenPrForBranch(branchName)
+      : null;
+    const issuePr = await provider.getPrStatus(issueId);
+    const issuePrIsReviewable = !!issuePr.url && issuePr.state !== PrState.MERGED && issuePr.state !== PrState.CLOSED;
+    const branchPrIsReviewable = !!branchPr?.url && branchPr.state !== PrState.MERGED && branchPr.state !== PrState.CLOSED;
+    const prStatus = preferIssuePr
+      ? (issuePrIsReviewable ? issuePr : (branchPr ?? issuePr))
+      : (branchPrIsReviewable ? branchPr : issuePr);
 
     // Developer completion requires an OPEN PR. Historical merged PRs are not enough,
     // otherwise the reviewer/tester pipeline can be re-entered without a reviewable artifact.
@@ -150,7 +169,7 @@ export async function validatePrExistsForDeveloper(
       );
     }
 
-    // url is set and the PR is still open/reviewable.
+    // url is set and the branch-derived PR is still open/reviewable.
     if (branchPr && (!branchPr.linkedIssueIds?.length || !branchPr.linkedIssueIds.includes(issueId))) {
       throw new Error(
         `Cannot mark work_finish(done) with a PR that no longer targets issue #${issueId}.\n\n` +
@@ -464,7 +483,16 @@ export function createWorkFinishTool(ctx: PluginContext) {
       // For developers marking work as done, validate that a PR exists
       let developerPrStatus: import("../../providers/provider.js").PrStatus | undefined;
       if (role === "developer" && result === "done") {
-        developerPrStatus = await validatePrExistsForDeveloper(issueId, repoPath, provider, ctx.runCommand, workspaceDir, project.slug, project.issueRuntime?.[String(issueId)]);
+        developerPrStatus = await validatePrExistsForDeveloper(
+          issueId,
+          repoPath,
+          provider,
+          ctx.runCommand,
+          workspaceDir,
+          project.slug,
+          project.issueRuntime?.[String(issueId)],
+          project.baseBranch,
+        );
         await updateIssueRuntime(workspaceDir, project.slug, issueId, {
           currentPrNodeId: developerPrStatus.nodeId ?? null,
           currentPrNumber: developerPrStatus.number ?? null,

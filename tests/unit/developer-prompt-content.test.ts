@@ -113,6 +113,9 @@ describe("developer prompt anti-pattern checklist", () => {
     expect(worktreeWorkflow).toContain("assigned worktree");
     expect(worktreeWorkflow).toContain("reuse it");
     expect(worktreeWorkflow).toContain("verify it's clean");
+    expect(worktreeWorkflow).toContain("Repo:` / `Execution path:`");
+    expect(worktreeWorkflow).toContain("Work result: BLOCKED");
+    expect(worktreeWorkflow).toContain("~/.openclaw/workspace/<slug>");
     expect(worktreeWorkflow).not.toContain("fresh worktree");
   });
 

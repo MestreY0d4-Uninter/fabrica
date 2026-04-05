@@ -34,14 +34,11 @@ export function buildTaskMessage(opts: {
   /** True when metadata.needs_human_security is set — injects a security review warning. */
   needsHumanSecurity?: boolean;
 }): string {
-  const sanitizeRepoContext = (value: string) =>
-    value.startsWith("/") || value.startsWith("~/") ? "[repository workspace hidden]" : value;
-
   const {
     projectName, channelId, role, issueId, issueTitle,
     issueDescription, issueUrl, repo, baseBranch,
   } = opts;
-  const repoDisplay = sanitizeRepoContext(repo);
+  const repoDisplay = repo;
 
   const isFeedbackCycle = !!opts.prFeedback;
 
@@ -119,6 +116,8 @@ export function buildTaskMessage(opts: {
     ``,
     `Repo: ${repoDisplay} | Branch: ${baseBranch} | ${issueUrl}`,
     `Project: ${projectName} | Channel: ${channelId}`,
+    `Execution path: ${repoDisplay}`,
+    `Start by changing into the canonical repo path above before creating or reusing a worktree. Do not create or implement the project under ~/.openclaw/workspace unless the repo path itself points there.`,
   );
 
   parts.push(...buildCompletionContract(role));
@@ -142,14 +141,11 @@ export function buildConflictFixMessage(opts: {
   resolvedRole?: ResolvedRoleConfig;
   prFeedback: PrFeedback;
 }): string {
-  const sanitizeRepoContext = (value: string) =>
-    value.startsWith("/") || value.startsWith("~/") ? "[repository workspace hidden]" : value;
-
   const {
     projectName, channelId, role, issueId, issueTitle,
     issueUrl, repo, baseBranch, prFeedback,
   } = opts;
-  const repoDisplay = sanitizeRepoContext(repo);
+  const repoDisplay = repo;
 
   const parts = [
     `${role.toUpperCase()} task for project "${projectName}" — Issue #${issueId}`,
@@ -165,6 +161,8 @@ export function buildConflictFixMessage(opts: {
     ``,
     `Repo: ${repoDisplay} | Branch: ${baseBranch} | ${issueUrl}`,
     `Project: ${projectName} | Channel: ${channelId}`,
+    `Execution path: ${repoDisplay}`,
+    `Start by changing into the canonical repo path above before reusing the PR branch or creating its worktree. Do not resolve the issue inside ~/.openclaw/workspace unless the repo path itself points there.`,
   );
 
   parts.push(...buildCompletionContract(role));

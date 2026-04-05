@@ -15,6 +15,7 @@ import {
 } from "../projects/index.js";
 import { parseFabricaSessionKey } from "../dispatch/bootstrap-hook.js";
 import { executeCompletion } from "./pipeline.js";
+import { getQueueLabels, isFeedbackState } from "../workflow/index.js";
 import { extractWorkerResultFromMessages, type WorkerResult, type WorkerRole } from "./worker-result.js";
 import { validatePrExistsForDeveloper } from "../tools/worker/work-finish.js";
 import { applyTesterInfraFailureCompletion, hasCurrentDispatchAlreadyCompleted, resolveWorkerSlot } from "./worker-completion-shared.js";
@@ -530,6 +531,7 @@ async function defaultValidateDeveloperDone(opts: {
   workspaceDir: string;
   projectSlug: string;
   issueRuntime?: ReturnType<typeof getIssueRuntime>;
+  baseBranch?: string | null;
 }): Promise<DeveloperDoneValidationResult> {
   try {
     const prStatus = await validatePrExistsForDeveloper(
@@ -540,6 +542,7 @@ async function defaultValidateDeveloperDone(opts: {
       opts.workspaceDir,
       opts.projectSlug,
       opts.issueRuntime,
+      opts.baseBranch,
     );
     return { ok: true, prStatus };
   } catch (error) {
@@ -669,17 +672,62 @@ export async function applyWorkerResult(opts: {
       workspaceDir: opts.workspaceDir,
       projectSlug: context.projectSlug,
       issueRuntime: context.issueRuntime,
+      baseBranch: context.project.baseBranch,
     });
     if (!validation.ok) {
+      const validationReason = validation.reason ?? "developer_validation_failed";
+      const feedbackQueueLabel = getQueueLabels(workflow, "developer")
+        .find((label) => isFeedbackState(workflow, label)) ?? "To Improve";
       await auditLog(opts.workspaceDir, "worker_completion_skipped", {
         sessionKey: context.project.workers[context.parsed.role]?.levels?.[context.slotLevel]?.[context.slotIndex]?.sessionKey ?? null,
         projectSlug: context.projectSlug,
         issueId: context.issueId,
         role: context.parsed.role,
         result: opts.result.value,
-        reason: validation.reason ?? "developer_validation_failed",
+        reason: validationReason,
       }).catch(() => {});
-      return { applied: false, reason: validation.reason ?? "developer_validation_failed" };
+      await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
+        inconclusiveCompletionAt: new Date().toISOString(),
+        inconclusiveCompletionReason: validationReason,
+      }).catch(() => {});
+      await executeCompletion({
+        workspaceDir: opts.workspaceDir,
+        projectSlug: context.projectSlug,
+        role: context.parsed.role,
+        result: "blocked",
+        issueId: context.issueId,
+        summary: `Automatic recovery: developer reported DONE but completion validation failed.\n\n${validationReason}`,
+        provider,
+        repoPath,
+        projectName: context.project.name,
+        channels: context.project.channels,
+        runtime: opts.runtime as never,
+        workflow,
+        level: context.slotLevel,
+        slotIndex: context.slotIndex,
+        overrideToLabel: feedbackQueueLabel,
+        overrideReason: validationReason,
+        runCommand: opts.runCommand,
+      });
+      await recordIssueLifecycle({
+        workspaceDir: opts.workspaceDir,
+        slug: context.projectSlug,
+        issueId: context.issueId,
+        stage: "session_completed",
+        sessionKey: context.sessionKey,
+        details: { role: context.parsed.role, result: "blocked", source: "agent_end_recovery", reason: validationReason },
+      }).catch(() => {});
+      await auditLog(opts.workspaceDir, "worker_completion_applied", {
+        sessionKey: context.sessionKey,
+        projectSlug: context.projectSlug,
+        issueId: context.issueId,
+        role: context.parsed.role,
+        result: "BLOCKED",
+        source: "agent_end_recovery",
+        recoveredTo: "To Improve",
+        reason: validationReason,
+      }).catch(() => {});
+      return { applied: true };
     }
     validatedPrStatus = validation.prStatus;
     await persistDeveloperPrBinding({

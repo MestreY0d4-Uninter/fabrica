@@ -20,6 +20,7 @@ import {
   requireCanonicalPrSelector,
   emptySlot,
   recordIssueLifecycle,
+  resolveRepoPath,
 } from "../projects/index.js";
 import { resolveModel } from "../roles/index.js";
 import { notify, getNotificationConfig } from "./notify.js";
@@ -234,7 +235,7 @@ export async function dispatchTask(
   // Native fix for Patch 1: use slug as primary identifier (not channelId)
   const primaryChannelId = project.slug;
   const isConflictFix = prFeedback?.reason === "merge_conflict";
-  const repoContext = project.repoRemote?.replace(/\.git$/, "") ?? project.slug;
+  const repoContext = project.repo ? resolveRepoPath(project.repo) : (project.repoRemote?.replace(/\.git$/, "") || project.slug);
   const taskMessage = isConflictFix && prFeedback
     ? buildConflictFixMessage({
         projectName: project.name, channelId: primaryChannelId, role, issueId,

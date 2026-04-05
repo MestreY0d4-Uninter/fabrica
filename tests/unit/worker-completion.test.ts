@@ -188,7 +188,7 @@ describe("worker-completion", () => {
     );
   });
 
-  it("records skipped completion when developer DONE lacks proof", async () => {
+  it("auto-recovers developer DONE without proof back into the feedback queue", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 
     const result = await handleWorkerAgentEnd({
@@ -199,8 +199,18 @@ describe("worker-completion", () => {
       validateDeveloperDone: vi.fn().mockResolvedValue({ ok: false, reason: "missing_pr" }),
     });
 
-    expect(result).toMatchObject({ applied: false, reason: "missing_pr" });
-    expect(mockExecuteCompletion).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ applied: true });
+    expect(mockExecuteCompletion).toHaveBeenCalledOnce();
+    expect(mockExecuteCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectSlug: "demo",
+        role: "developer",
+        result: "blocked",
+        issueId: 7,
+        overrideToLabel: "To Improve",
+        overrideReason: "missing_pr",
+      }),
+    );
   });
 
   it("records inconclusive completion when observable worker activity lacks the final result line", async () => {
