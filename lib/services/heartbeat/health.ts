@@ -322,6 +322,8 @@ export async function checkWorkerHealth(opts: {
   executionContractRecoveryWindowMs?: number;
   /** Command runner used for timeline notifications when runtime is unavailable. */
   runCommand?: RunCommand;
+  /** Emit a progress warning / recovery if a worker stays active too long without a reviewable artifact. */
+  stallTimeoutMinutes?: number;
   /** Optional notification config for per-event suppression. */
   notificationConfig?: NotificationConfig;
 }): Promise<HealthFix[]> {
@@ -334,6 +336,7 @@ export async function checkWorkerHealth(opts: {
     completionRecoveryWindowMs = COMPLETION_RECOVERY_WINDOW_MS,
     executionContractRecoveryWindowMs = EXECUTION_CONTRACT_RECOVERY_WINDOW_MS,
     runCommand,
+    stallTimeoutMinutes = 25,
     notificationConfig,
   } = opts;
 
@@ -929,9 +932,145 @@ export async function checkWorkerHealth(opts: {
         continue;
       }
 
-      // Case 3: Active with correct label and alive session — check for staleness
+      // Case 3: Active with correct label and alive session — warn/recover if a developer keeps working
+      // for too long without a reviewable artifact, then fall back to the coarse stale-worker safety net.
       if (slot.active && slot.startTime && sessionKey && sessions && sessionAlive) {
-        const hours = (Date.now() - new Date(slot.startTime).getTime()) / 3_600_000;
+        const startedAtMs = new Date(slot.startTime).getTime();
+        const minutesActive = (Date.now() - startedAtMs) / 60_000;
+        const hours = minutesActive / 60;
+        let hasReviewableArtifact = Boolean(
+          issueRuntime?.currentPrNumber ||
+          issueRuntime?.currentPrUrl ||
+          issueRuntime?.artifactOfRecord?.prNumber,
+        );
+        if (!hasReviewableArtifact && issueIdNum) {
+          try {
+            const prStatus = await provider.getPrStatus(issueIdNum);
+            hasReviewableArtifact = Boolean(
+              prStatus.url &&
+              prStatus.state !== PrState.MERGED &&
+              prStatus.state !== PrState.CLOSED &&
+              prStatus.currentIssueMatch !== false,
+            );
+          } catch {
+            // Best-effort only — fall back to cached runtime state if provider lookup fails.
+          }
+        }
+
+        if (
+          role === "developer" &&
+          issue &&
+          issueIdNum &&
+          !hasReviewableArtifact &&
+          minutesActive >= Math.max(5, Math.floor(stallTimeoutMinutes / 2)) &&
+          !issueRuntime?.progressNotifiedAt
+        ) {
+          const channel = project.channels?.[0];
+          await notify(
+            {
+              type: "workerProgress",
+              project: project.name,
+              issueId: issueIdNum,
+              issueUrl: issue.web_url,
+              issueTitle: issue.title,
+              role,
+              level,
+              minutesActive: Math.round(minutesActive),
+              summary: "Still iterating on implementation/QA without a PR yet.",
+              dispatchCycleId: slot.dispatchCycleId ?? issueRuntime?.lastDispatchCycleId ?? null,
+              dispatchRunId: slot.dispatchRunId ?? issueRuntime?.dispatchRunId ?? null,
+            },
+            {
+              workspaceDir,
+              config: notificationConfig,
+              target: channel
+                ? {
+                    channelId: channel.channelId,
+                    channel: channel.channel,
+                    accountId: channel.accountId,
+                    messageThreadId: channel.messageThreadId,
+                  }
+                : undefined,
+              runCommand,
+            },
+          ).catch(() => {});
+          await updateIssueRuntime(workspaceDir, projectSlug, issueIdNum, {
+            progressNotifiedAt: new Date().toISOString(),
+            lastSessionKey: sessionKey,
+          }).catch(() => {});
+        }
+
+        if (
+          role === "developer" &&
+          issue &&
+          issueIdNum &&
+          !hasReviewableArtifact &&
+          minutesActive >= stallTimeoutMinutes
+        ) {
+          const fix: HealthFix = {
+            issue: {
+              type: "completion_recovery_exhausted",
+              severity: "critical",
+              project: project.name,
+              projectSlug,
+              role,
+              level,
+              sessionKey,
+              issueId: slot.issueId,
+              slotIndex,
+              message: `${role.toUpperCase()} ${level}[${slotIndex}] active for ${Math.round(minutesActive)}m without a PR or terminal result`,
+            },
+            fixed: false,
+          };
+          if (autoFix) {
+            const channel = project.channels?.[0];
+            await notify(
+              {
+                type: "workerRecoveryExhausted",
+                project: project.name,
+                issueId: issueIdNum,
+                issueUrl: issue.web_url,
+                issueTitle: issue.title,
+                role,
+                detail: `No PR or canonical completion after ${Math.round(minutesActive)} minutes of active work. Re-queueing for a fresh attempt.`,
+                nextState: slotQueueLabel,
+                dispatchCycleId: slot.dispatchCycleId ?? issueRuntime?.lastDispatchCycleId ?? null,
+                dispatchRunId: slot.dispatchRunId ?? issueRuntime?.dispatchRunId ?? null,
+              },
+              {
+                workspaceDir,
+                config: notificationConfig,
+                target: channel
+                  ? {
+                      channelId: channel.channelId,
+                      channel: channel.channel,
+                      accountId: channel.accountId,
+                      messageThreadId: channel.messageThreadId,
+                    }
+                  : undefined,
+                runCommand,
+              },
+            ).catch(() => {});
+            await revertLabel(fix, expectedLabel, slotQueueLabel);
+            if (!fix.labelRevertFailed) {
+              await deactivateSlot();
+              await updateIssueRuntime(workspaceDir, projectSlug, issueIdNum, {
+                inconclusiveCompletionAt: new Date().toISOString(),
+                inconclusiveCompletionReason: "stalled_without_artifact",
+                progressNotifiedAt: null,
+              }).catch(() => {});
+              fix.fixed = true;
+              await auditHealthFixApplied(workspaceDir, fix, {
+                action: "requeue_issue",
+                fromLabel: expectedLabel,
+                toLabel: slotQueueLabel,
+              });
+            }
+          }
+          fixes.push(fix);
+          continue;
+        }
+
         if (hours > staleWorkerHours) {
           const fix: HealthFix = {
             issue: {

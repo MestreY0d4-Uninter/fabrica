@@ -127,8 +127,19 @@ function stringifyAnswerRecord(record: Record<string, unknown>): GenesisAnswers 
   return normalized;
 }
 
-function deriveProjectName(repoUrl: string | null, projectName: string | null): string | null {
+function extractExplicitProjectName(text: string | null): string | null {
+  if (!text) return null;
+  const fieldMatch = text.match(/(?:^|[\n.,;!?]\s*)(?:project name|repo name|repository name|nome do projeto)\s*:\s*([a-z0-9][a-z0-9-]{1,63})\b/i);
+  if (fieldMatch?.[1]) return fieldMatch[1].trim().toLowerCase();
+  const inlineMatch = text.match(/\b(?:called|named|chamado)\s+[`"'“”‘’]?([a-z0-9][a-z0-9-]{1,63})[`"'“”‘’]?(?=$|[\s.,!?;:])/i);
+  if (inlineMatch?.[1]) return inlineMatch[1].trim().toLowerCase();
+  return null;
+}
+
+function deriveProjectName(repoUrl: string | null, projectName: string | null, freeText?: string | null): string | null {
   if (projectName) return projectName;
+  const parsedFromText = extractExplicitProjectName(freeText ?? null);
+  if (parsedFromText) return parsedFromText;
   if (!repoUrl) return null;
   const sanitized = repoUrl.replace(/\/+$/, "");
   const lastSegment = sanitized.split("/").pop();
@@ -241,10 +252,16 @@ export function normalizeGenesisRequest(
   }
 
   const repoUrl = normalizeOptionalString(params.repo_url) ?? existingPayload?.metadata.repo_url ?? null;
+  const freeTextProjectSource =
+    normalizeOptionalString(params.idea) ??
+    normalizeOptionalString(params.command) ??
+    existingPayload?.raw_idea ??
+    null;
   const projectName =
     deriveProjectName(
       repoUrl,
       normalizeOptionalString(params.project_name) ?? existingPayload?.metadata.project_name ?? null,
+      freeTextProjectSource,
     );
   const answersJson = {
     ...(existingPayload?.metadata.answers_json ?? {}),

@@ -292,6 +292,7 @@ export async function dispatchTask(
     inconclusiveCompletionAt: null,
     inconclusiveCompletionReason: null,
     sessionCompletedAt: null,
+    progressNotifiedAt: null,
     lastSessionKey: sessionKey,
   }).catch((err) => {
     auditLog(workspaceDir, "dispatch_warning", { step: "record_dispatch_requested", issue: issueId, err: String(err) }).catch(() => {});

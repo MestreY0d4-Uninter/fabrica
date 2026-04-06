@@ -215,6 +215,12 @@ function inferProjectSlug(text: string): string | undefined {
   return slug || undefined;
 }
 
+function normalizeProjectNameCandidate(value: string | undefined): string | undefined {
+  const normalized = normalizeText(value);
+  if (!normalized) return undefined;
+  return inferProjectSlug(normalized) ?? undefined;
+}
+
 function normalizeText(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
@@ -241,7 +247,7 @@ function detectStackHint(text: string): string | undefined {
 
 function parseField(text: string, labels: string[]): string | undefined {
   for (const label of labels) {
-    const regex = new RegExp(`^\\s*${label}\\s*:\\s*(.+)$`, "im");
+    const regex = new RegExp(`(?:^|[\\n.,;!?]\\s*)${label}\\s*:\\s*(.+)$`, "im");
     const match = text.match(regex);
     if (match?.[1]) return normalizeText(match[1]);
   }
@@ -255,14 +261,14 @@ function parseIdeaBlock(text: string): string | undefined {
 
 function parseExplicitProjectName(text: string): string | undefined {
   const match = text.match(/\b(?:called|named|chamado)\s+[`"'“”‘’]?([a-z0-9][a-z0-9-]{1,63})[`"'“”‘’]?(?=$|[\s.,!?;:])/i);
-  return match?.[1]?.toLowerCase();
+  return normalizeProjectNameCandidate(match?.[1]?.toLowerCase());
 }
 
 function parseBootstrapRequest(text: string): BootstrapRequest {
   const repoUrl = parseField(text, ["repository url", "repo url", "reposit[oó]rio url", "github repo"]);
   const rawIdea = parseIdeaBlock(text) ?? text.trim();
   const projectName =
-    parseField(text, ["project name", "nome do projeto", "repo name", "repository name"])
+    normalizeProjectNameCandidate(parseField(text, ["project name", "nome do projeto", "repo name", "repository name"]))
     ?? parseExplicitProjectName(text);
   const repoPath = parseField(text, ["local repository path", "repo path", "caminho local", "local path"]);
   const explicitStack = parseField(text, ["stack", "framework", "linguagem"]);
@@ -527,29 +533,32 @@ function parseClarificationResponse(text: string, session: TelegramBootstrapSess
       // User wants auto-generation — derive slug from rawIdea, fallback to timestamp slug
       return { recognized: true, projectName: inferProjectSlug(session.rawIdea) ?? `project-${Date.now()}`, stackHint: session.stackHint ?? undefined };
     }
-    const nameField = parseField(text, ["project name", "nome do projeto", "nome", "name"]);
+    const nameField = normalizeProjectNameCandidate(parseField(text, ["project name", "nome do projeto", "nome", "name"]));
     if (nameField) {
       return { recognized: true, projectName: nameField, stackHint: session.stackHint ?? undefined };
     }
-    if (trimmed.length > 0 && trimmed.length <= 64) {
-      return { recognized: true, projectName: trimmed, stackHint: session.stackHint ?? undefined };
+    const normalizedInlineName = trimmed.length <= 64
+      ? normalizeProjectNameCandidate(trimmed)
+      : undefined;
+    if (normalizedInlineName) {
+      return { recognized: true, projectName: normalizedInlineName, stackHint: session.stackHint ?? undefined };
     }
     return { recognized: false };
   }
 
   // Try structured field format first (e.g. "Stack: python-cli")
+  const projectNameFromField = normalizeProjectNameCandidate(parseField(text, ["project name", "nome do projeto", "nome", "name"]));
+  const nameItMatch = !projectNameFromField ? text.match(/(?:name|call|chamar?)\s+(?:it\s+)?([\w-]{2,64})/i) : null;
+  const inlineName = projectNameFromField ?? normalizeProjectNameCandidate(nameItMatch?.[1]);
+
   const stackField = parseField(text, ["stack", "framework", "linguagem", "language"]);
   if (stackField) {
     const normalizedStack = normalizeStackHint(stackField) || detectStackHint(stackField) || stackField;
-    return { recognized: true, stackHint: normalizedStack };
+    return { recognized: true, stackHint: normalizedStack, projectName: inlineName };
   }
   // Try direct stack hint detection on the whole message
   const detectedStack = detectStackHint(text);
   if (detectedStack) {
-    // Also try to extract inline project name (e.g. "Node.js, name it disk-usage-cli")
-    const projectNameFromField = parseField(text, ["project name", "nome do projeto", "nome", "name"]);
-    const nameItMatch = !projectNameFromField ? text.match(/(?:name|call|chamar?)\s+(?:it\s+)?([\w-]{2,64})/i) : null;
-    const inlineName = projectNameFromField ?? (nameItMatch ? (nameItMatch[1].toLowerCase().replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-") || undefined) : undefined);
     return { recognized: true, stackHint: detectedStack, projectName: inlineName };
   }
   // Detect bare language names as stack hints
@@ -849,7 +858,7 @@ async function handleTelegramBootstrapDmMessage(
         conversationId,
         rawIdea: content,
         stackHint: parsed.stackHint ?? undefined,
-        projectName: parsed.projectSlug ?? undefined,
+        projectName: parsed.projectName ?? parsed.projectSlug ?? undefined,
         status: "clarifying",
         pendingClarification: "scope",
         language,

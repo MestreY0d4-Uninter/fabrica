@@ -57,14 +57,14 @@ export function detectRawIdeaComplexity(rawIdea: string): { floor: TriageEffort 
 
   // Multi-subsystem indicators
   const subsystemPatterns: Array<[RegExp, string]> = [
-    [/\b(worker|background.?job|queue|celery|bull|sidekiq|task.?runner)\b/i, "background-worker"],
+    [/\b(worker|background.?job|background process|background service|background worker|queue|celery|bull|sidekiq|task.?runner|scheduler|job processor)\b/i, "background-worker"],
     [/\b(websocket|server.?sent|sse|real.?time|realtime|socket\.io|push.?notif)\b/i, "realtime"],
-    [/\b(auth|oauth|jwt|login|register|session|user.?account|signup)\b/i, "auth"],
-    [/\b(notif|alert|email|sms|webhook|subscription|subscribe)\b/i, "notifications"],
-    [/\b(database|banco|db|postgres|mysql|mongodb|redis|sqlite|orm)\b/i, "database"],
+    [/\b(auth|oauth|jwt|login|register|session|user.?account|signup|role-based access|rbac|permission[s]?)\b/i, "auth"],
+    [/\b(notif|notification[s]?|alert[s]?|email|sms|webhook|subscription|subscribe|reminder[s]?|escalation[s]?)\b/i, "notifications"],
+    [/\b(database|banco|db|postgres|mysql|mongodb|redis|sqlite|orm|audit history|audit log|activity history)\b/i, "database"],
     [/\b(api\s+rest|rest\s+api|endpoint|rota|route|graphql|grpc)\b/i, "api-layer"],
     [/\b(docker|kubernetes|k8s|deploy|ci|cd|pipeline)\b/i, "infra"],
-    [/\b(dashboard|frontend|interface|ui|tela|p[aá]gina)\b/i, "frontend"],
+    [/\b(dashboard|frontend|interface|ui|tela|p[aá]gina|admin view|admin panel|admin console)\b/i, "frontend"],
   ];
 
   for (const [regex, label] of subsystemPatterns) {

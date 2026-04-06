@@ -252,6 +252,133 @@ describe("checkWorkerHealth", () => {
     });
   });
 
+  it("emits a workerProgress notification for long-running developer work without a PR", async () => {
+    h = await createTestHarness({
+      workers: {
+        developer: {
+          active: true,
+          issueId: "42",
+          sessionKey: "agent:main:subagent:test-project-developer-medior-ada",
+          level: "medior",
+          startTime: new Date(Date.now() - 15 * 60_000).toISOString(),
+          previousLabel: "To Do",
+        },
+      },
+    });
+    h.provider.seedIssue({ iid: 42, title: "Long running task", labels: ["Doing"] });
+
+    const data = await h.readProjects();
+    data.projects[h.project.slug]!.issueRuntime = {
+      "42": {
+        dispatchRequestedAt: new Date(Date.now() - 16 * 60_000).toISOString(),
+        agentAcceptedAt: new Date(Date.now() - 15 * 60_000).toISOString(),
+        firstWorkerActivityAt: new Date(Date.now() - 14 * 60_000).toISOString(),
+        lastSessionKey: "agent:main:subagent:test-project-developer-medior-ada",
+      },
+    };
+    await writeProjects(h.workspaceDir, data);
+
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-medior-ada",
+        {
+          key: "agent:main:subagent:test-project-developer-medior-ada",
+          updatedAt: Date.now() - 30_000,
+          percentUsed: 0.4,
+        },
+      ],
+    ]);
+
+    const fixes = await checkWorkerHealth({
+      workspaceDir: h.workspaceDir,
+      projectSlug: h.project.slug,
+      project: (await h.readProjects()).projects[h.project.slug]!,
+      role: "developer",
+      autoFix: true,
+      provider: h.provider,
+      sessions,
+      staleWorkerHours: 999,
+      stallTimeoutMinutes: 20,
+    });
+
+    expect(fixes).toHaveLength(0);
+
+    const updated = await h.readProjects();
+    expect(updated.projects[h.project.slug]!.issueRuntime?.["42"]?.progressNotifiedAt).toBeTruthy();
+
+    const pending = await getPendingIntents(h.workspaceDir);
+    expect(pending.some((entry) => String(entry.data?.type) === "workerProgress")).toBe(true);
+  });
+
+  it("requeues a developer stuck too long without a PR or terminal result", async () => {
+    h = await createTestHarness({
+      workers: {
+        developer: {
+          active: true,
+          issueId: "42",
+          sessionKey: "agent:main:subagent:test-project-developer-medior-ada",
+          level: "medior",
+          startTime: new Date(Date.now() - 31 * 60_000).toISOString(),
+          previousLabel: "To Improve",
+        },
+      },
+    });
+    h.provider.seedIssue({ iid: 42, title: "Stuck task", labels: ["Doing"] });
+
+    const data = await h.readProjects();
+    data.projects[h.project.slug]!.issueRuntime = {
+      "42": {
+        dispatchRequestedAt: new Date(Date.now() - 32 * 60_000).toISOString(),
+        agentAcceptedAt: new Date(Date.now() - 31 * 60_000).toISOString(),
+        firstWorkerActivityAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+        lastSessionKey: "agent:main:subagent:test-project-developer-medior-ada",
+      },
+    };
+    await writeProjects(h.workspaceDir, data);
+
+    const sessions: SessionLookup = new Map([
+      [
+        "agent:main:subagent:test-project-developer-medior-ada",
+        {
+          key: "agent:main:subagent:test-project-developer-medior-ada",
+          updatedAt: Date.now() - 60_000,
+          percentUsed: 0.55,
+        },
+      ],
+    ]);
+
+    const fixes = await checkWorkerHealth({
+      workspaceDir: h.workspaceDir,
+      projectSlug: h.project.slug,
+      project: (await h.readProjects()).projects[h.project.slug]!,
+      role: "developer",
+      autoFix: true,
+      provider: h.provider,
+      sessions,
+      staleWorkerHours: 999,
+      stallTimeoutMinutes: 20,
+    });
+
+    expect(fixes).toHaveLength(1);
+    expect(fixes[0]?.issue.type).toBe("completion_recovery_exhausted");
+    expect(fixes[0]?.fixed).toBe(true);
+
+    const transitions = h.provider.callsTo("transitionLabel");
+    expect(transitions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          args: { issueId: 42, from: "Doing", to: "To Improve" },
+        }),
+      ]),
+    );
+
+    const updated = await h.readProjects();
+    expect(updated.projects[h.project.slug]!.issueRuntime?.["42"]?.inconclusiveCompletionReason).toBe("stalled_without_artifact");
+
+    const pending = await getPendingIntents(h.workspaceDir);
+    expect(pending.some((entry) => String(entry.data?.type) === "workerRecoveryExhausted")).toBe(true);
+  });
+
   it("does not mark dispatch_unconfirmed after an inconclusive completion already proved worker activity", async () => {
     h = await createTestHarness({
       workers: {

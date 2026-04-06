@@ -8,6 +8,7 @@ import {
   validateDoR,
   determineLevel,
   runTriageLogic,
+  detectRawIdeaComplexity,
 } from "../../lib/intake/lib/triage-logic.js";
 import type { TriageMatrix, TriageInput } from "../../lib/intake/lib/triage-logic.js";
 import matrix from "../../lib/intake/configs/triage-matrix.json";
@@ -42,6 +43,13 @@ describe("calculateEffort", () => {
     expect(calculateEffort(15, 2)).toBe("large");
     // Both within medium bounds
     expect(calculateEffort(5, 5)).toBe("medium");
+  });
+
+  it("floors broad operational prompts upward when multiple subsystems are present", () => {
+    const rawIdea = "Build an incident management platform with alerts, notifications, role-based access, admin view, audit history, and a background process for escalations.";
+    const complexity = detectRawIdeaComplexity(rawIdea);
+    expect(complexity.signals).toEqual(expect.arrayContaining(["background-worker", "auth", "notifications", "database", "frontend"]));
+    expect(calculateEffort(3, 1, rawIdea)).toBe("large");
   });
 });
 

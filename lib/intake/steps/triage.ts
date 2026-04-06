@@ -11,10 +11,50 @@ const _require = createRequire(import.meta.url);
 
 let cachedMatrix: TriageMatrix | null = null;
 
+type DecompositionChildDraft = {
+  title: string;
+  description: string;
+};
+
 function loadMatrix(): TriageMatrix {
   if (cachedMatrix) return cachedMatrix;
   cachedMatrix = _require("../configs/triage-matrix.json") as TriageMatrix;
   return cachedMatrix;
+}
+
+function buildChildDrafts(payload: GenesisPayload, issueNumber: number, effort: Triage["effort"]): DecompositionChildDraft[] {
+  const spec = payload.spec!;
+  const scopeItems = spec.scope_v1.filter((item) => item.trim().length > 0);
+  const maxChildren = effort === "xlarge" ? 4 : 3;
+  const chunkSize = 2;
+  const drafts: DecompositionChildDraft[] = [];
+
+  for (let i = 0; i < scopeItems.length && drafts.length < maxChildren; i += chunkSize) {
+    const slice = scopeItems.slice(i, i + chunkSize);
+    if (slice.length === 0) continue;
+    const childIndex = drafts.length + 1;
+    drafts.push({
+      title: `${spec.title} — Part ${childIndex}`,
+      description: [
+        `## Objective`,
+        spec.objective,
+        "",
+        `## Parent Issue`,
+        `Parent issue: #${issueNumber}`,
+        "",
+        `## This Part`,
+        ...slice.map((item) => `- ${item}`),
+        "",
+        `## Acceptance Criteria`,
+        ...spec.acceptance_criteria.map((item) => `- ${item}`),
+        "",
+        `## Definition of Done`,
+        ...spec.definition_of_done.map((item) => `- ${item}`),
+      ].join("\n"),
+    });
+  }
+
+  return drafts;
 }
 
 export const triageStep: PipelineStep = {
@@ -40,9 +80,9 @@ export const triageStep: PipelineStep = {
       totalRisks: (impact?.risk_areas?.length ?? 0) + (payload.security?.spec_security_notes?.length ?? 0),
       objective: spec.objective,
       rawIdea: payload.raw_idea,
-      acText: spec.acceptance_criteria.join(" "),
-      scopeText: spec.scope_v1.join(" "),
-      oosText: spec.out_of_scope.join(" "),
+      acText: spec.acceptance_criteria.join("\n"),
+      scopeText: spec.scope_v1.join("\n"),
+      oosText: spec.out_of_scope.join("\n"),
       authSignal: payload.metadata?.auth_gate?.signal ?? false,
     }, matrix);
 
@@ -62,8 +102,14 @@ export const triageStep: PipelineStep = {
 
     const allLabels = [decision.priorityLabel, decision.effortLabel];
     if (decision.typeLabel) allLabels.push(decision.typeLabel);
-    if (!decision.readyForDispatch) allLabels.push("needs-human");
+    if (!decision.readyForDispatch || decision.specQualityBlock) allLabels.push("needs-human");
     const uniqueLabels = Array.from(new Set(allLabels.filter(Boolean)));
+
+    const shouldDecompose = decision.readyForDispatch && !decision.specQualityBlock && ["large", "xlarge"].includes(decision.effort);
+    const decompositionDrafts = shouldDecompose ? buildChildDrafts(payload, issue.number, decision.effort) : [];
+    const canDecompose = decompositionDrafts.length >= 2;
+
+    let createdChildIssueNumbers: number[] = [];
 
     if (ctx.createIssueProvider && repoPath) {
       try {
@@ -75,7 +121,36 @@ export const triageStep: PipelineStep = {
           await provider.addLabel(issue.number, label);
         }
 
-        if (decision.readyForDispatch) {
+        if (decision.specQualityBlock) {
+          await provider.addComment(issue.number, [
+            "🚫 Spec quality gate blocked automatic dispatch.",
+            "",
+            "The request needs a stronger objective, more concrete scope items, and verifiable acceptance criteria before creating execution tasks.",
+          ].join("\n"));
+        } else if (canDecompose) {
+          await provider.addLabel(issue.number, "decomposition:parent");
+          const childIssues = [] as Array<{ iid: number; title: string; web_url: string }>;
+          for (const draft of decompositionDrafts) {
+            const child = await provider.createIssue(draft.title, draft.description, initialLabel as StateLabel);
+            childIssues.push({ iid: child.iid, title: child.title, web_url: child.web_url });
+            createdChildIssueNumbers.push(child.iid);
+            for (const label of uniqueLabels) {
+              await provider.addLabel(child.iid, label);
+            }
+            await provider.addLabel(child.iid, "decomposition:child");
+          }
+          await provider.addComment(issue.number, [
+            "## Decomposition Plan",
+            ...childIssues.map((child) => `- [ ] #${child.iid} ${child.title}`),
+          ].join("\n"));
+        } else if (shouldDecompose) {
+          await provider.addLabel(issue.number, "needs-human");
+          await provider.addComment(issue.number, [
+            "⚠️ Automatic decomposition was requested, but the generated spec did not yield at least two independently scoped child tasks.",
+            "",
+            "Refine the scope/acceptance criteria or split the plan manually before dispatch.",
+          ].join("\n"));
+        } else if (decision.readyForDispatch) {
           await provider.transitionLabel(issue.number, initialLabel as StateLabel, decision.targetState as StateLabel);
           const dispatchLabels: string[] = [];
           if (decision.targetState === "To Do" && decision.dispatchLabel) {
@@ -134,8 +209,14 @@ export const triageStep: PipelineStep = {
       project_channel_id: null,
       labels_applied: uniqueLabels,
       issue_number: issue.number,
-      ready_for_dispatch: decision.readyForDispatch && decision.errors.length === 0,
-      errors: decision.errors,
+      ready_for_dispatch: decision.readyForDispatch && decision.errors.length === 0 && !decision.specQualityBlock && !canDecompose,
+      errors: [
+        ...decision.errors,
+        ...(decision.specQualityBlock ? ["spec_quality_block"] : []),
+        ...(shouldDecompose && !canDecompose ? ["decomposition_needs_human"] : []),
+      ],
+      decomposition_mode: canDecompose ? "parent_child" : "none",
+      child_issue_numbers: createdChildIssueNumbers,
     };
 
     ctx.log(`Triage: ${triage.priority}, effort=${triage.effort}, ready=${triage.ready_for_dispatch}`);

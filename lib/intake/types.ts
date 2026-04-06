@@ -249,6 +249,8 @@ export type Triage = {
   issue_number: number;
   ready_for_dispatch: boolean;
   errors: string[];
+  decomposition_mode?: "none" | "parent_child";
+  child_issue_numbers?: number[];
 };
 
 // ---------------------------------------------------------------------------

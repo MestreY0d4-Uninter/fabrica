@@ -169,6 +169,7 @@ export async function performHealthPass(
       workflow: resolvedConfig?.workflow,
       dispatchConfirmTimeoutMs: resolvedConfig?.timeouts?.dispatchConfirmTimeoutMs,
       healthGracePeriodMs: resolvedConfig?.timeouts?.healthGracePeriodMs,
+      stallTimeoutMinutes,
       runCommand,
       notificationConfig: notifyConfig,
     });

@@ -688,6 +688,41 @@ describe("telegram bootstrap clarification flow", () => {
     expect(pipelinePayload.metadata.project_name).toBe("disk-usage-cli");
   });
 
+  it("preserves explicit project name when clarification reply contains both stack and named field", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 911,
+          project_slug: "task-manager-api",
+          project_name: "task-manager-api",
+        },
+      },
+    });
+
+    await handler?.(
+      {
+        content: "I need a task management API where users can register, login, create projects, assign tasks, and receive overdue reminders.",
+        metadata: {},
+      },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    expect(sendMessageTelegram).toHaveBeenCalledTimes(2);
+    sendMessageTelegram.mockClear();
+
+    await handler?.(
+      { content: "Python/FastAPI, PostgreSQL, JWT auth. Project name: task-manager-api", metadata: {} },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    const pipelinePayload = mockRunPipeline.mock.calls[0]?.[0];
+    expect(pipelinePayload.metadata.stack_hint).toBe("fastapi");
+    expect(pipelinePayload.metadata.project_name).toBe("task-manager-api");
+  });
+
   it("continueBootstrap generates fallback slug when rawIdea empty and name was already asked (Bug J level 2)", async () => {
     // Seed a session with pendingClarification: "name" so level 2 guard fires
     // when continueBootstrap is called with projectName: null and rawIdea that

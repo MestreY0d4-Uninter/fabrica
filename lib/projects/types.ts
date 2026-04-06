@@ -40,6 +40,7 @@ export type IssueRuntimeState = {
   inconclusiveCompletionAt?: string | null;
   inconclusiveCompletionReason?: string | null;
   sessionCompletedAt?: string | null;
+  progressNotifiedAt?: string | null;
   artifactOfRecord?: {
     prNumber: number;
     headSha?: string | null;

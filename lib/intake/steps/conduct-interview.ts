@@ -12,6 +12,38 @@ const LlmResponseSchema = z.object({
 }).passthrough();
 
 /** Type-aware deterministic defaults when LLM fails. */
+function deriveFeatureScopeFromRawIdea(rawIdea: string): string[] {
+  const text = rawIdea.toLowerCase();
+  const scope: string[] = [];
+  const add = (item: string) => {
+    if (!scope.includes(item)) scope.push(item);
+  };
+
+  if (/\b(auth|oauth|jwt|login|register|session|role-based access|rbac|permissions?)\b/i.test(text)) {
+    add("Implement authentication, authorization, and role-aware access rules");
+  }
+  if (/\b(incident|project|task|owner|assign|timeline|status|update)s?\b/i.test(text)) {
+    add("Implement the core domain workflows and CRUD endpoints for the main entities");
+  }
+  if (/\b(alert|alerts|notif|notification|notifications|reminder|reminders|escalation|escalations)\b/i.test(text)) {
+    add("Implement notifications, reminders, and escalation flows for key events");
+  }
+  if (/\b(background process|background worker|worker|queue|job|celery|bull|sidekiq|scheduler)\b/i.test(text)) {
+    add("Implement the background processing pipeline required for asynchronous work");
+  }
+  if (/\b(admin view|admin panel|admin console|dashboard|audit history|audit log|activity history)\b/i.test(text)) {
+    add("Implement administrative visibility and audit/history capabilities for operators");
+  }
+
+  if (scope.length < 3) {
+    add("Implement the primary user workflow described in the request");
+    add("Expose the key interactions needed to operate the system end to end");
+    add("Add validation and persistence rules for the main business flow");
+  }
+
+  return scope.slice(0, 5);
+}
+
 function fallbackSpecData(type: string, rawIdea: string): SpecData {
   const title = rawIdea.slice(0, 120);
   const base: SpecData = {
@@ -40,7 +72,12 @@ function fallbackSpecData(type: string, rawIdea: string): SpecData {
       base.acceptance_criteria = ["Infrastructure change applied and verified"];
       break;
     default: // feature
-      base.acceptance_criteria = ["Feature works as described in the objective"];
+      base.scope_v1 = deriveFeatureScopeFromRawIdea(rawIdea);
+      base.acceptance_criteria = [
+        "The primary workflow works end to end as requested",
+        "Role, validation, or delivery constraints from the request are enforced",
+        "The asynchronous/background behavior works for the main operational path",
+      ];
   }
 
   return base;

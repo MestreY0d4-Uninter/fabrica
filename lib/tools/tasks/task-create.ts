@@ -16,6 +16,7 @@ import { log as auditLog } from "../../audit.js";
 import { findPrimaryChannel } from "../../projects/index.js";
 import { loadConfig } from "../../config/index.js";
 import { requireWorkspaceDir, resolveProjectFromContext, resolveProvider, autoAssignOwnerLabel, applyNotifyLabel } from "../helpers.js";
+import { updateIssueRuntime } from "../../projects/index.js";
 
 export function createTaskCreateTool(ctx: PluginContext) {
   return (toolCtx: ToolContext) => ({
@@ -47,6 +48,10 @@ export function createTaskCreateTool(ctx: PluginContext) {
           type: "boolean",
           description: "If true, immediately pick up this issue for DEV after creation. Defaults to false.",
         },
+        parentIssueId: {
+          type: "number",
+          description: "Optional parent/epic issue ID when creating a child task as part of a decomposition plan.",
+        },
       },
     },
 
@@ -55,6 +60,7 @@ export function createTaskCreateTool(ctx: PluginContext) {
       const description = (params.description as string) ?? "";
       const assignees = (params.assignees as string[] | undefined) ?? [];
       const pickup = (params.pickup as boolean) ?? false;
+      const parentIssueId = Number.isFinite(params.parentIssueId) ? Number(params.parentIssueId) : null;
       const workspaceDir = requireWorkspaceDir(toolCtx);
 
       const { project, route } = await resolveProjectFromContext(workspaceDir, toolCtx, params.channelId as string | undefined);
@@ -64,7 +70,12 @@ export function createTaskCreateTool(ctx: PluginContext) {
         "Planning";
       const { provider, type: providerType } = await resolveProvider(project, ctx.runCommand);
 
-      const issue = await provider.createIssue(title, description, label, assignees);
+      let body = description;
+      if (parentIssueId) {
+        body = `${description}${description.trim().length > 0 ? "\n\n" : ""}Parent issue: #${parentIssueId}`;
+      }
+
+      const issue = await provider.createIssue(title, body, label, assignees);
 
       // Mark as system-managed (best-effort).
       provider.reactToIssue(issue.iid, "eyes").catch(() => {});
@@ -83,9 +94,25 @@ export function createTaskCreateTool(ctx: PluginContext) {
       // Auto-assign owner label to this instance (best-effort).
       autoAssignOwnerLabel(workspaceDir, provider, issue.iid, project).catch(() => {});
 
+      if (parentIssueId) {
+        await updateIssueRuntime(workspaceDir, project.slug, issue.iid, {
+          parentIssueId,
+        }).catch(() => {});
+        const parentRuntime = project.issueRuntime?.[String(parentIssueId)] ?? {};
+        const previousChildren = Array.isArray(parentRuntime.childIssueIds) ? parentRuntime.childIssueIds : [];
+        await updateIssueRuntime(workspaceDir, project.slug, parentIssueId, {
+          childIssueIds: [...new Set([...previousChildren, issue.iid])],
+        }).catch(() => {});
+        provider.addComment(
+          parentIssueId,
+          `📌 Child task created: [#${issue.iid}: ${issue.title}](${issue.web_url})`,
+        ).catch(() => {});
+      }
+
       await auditLog(workspaceDir, "task_create", {
         project: project.name, issueId: issue.iid,
         title, label, provider: providerType, pickup,
+        parentIssueId,
       });
 
       const hasBody = description && description.trim().length > 0;

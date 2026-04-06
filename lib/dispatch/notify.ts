@@ -5,6 +5,7 @@
  *
  * Event types:
  * - workerStart: Worker spawned/resumed for a task (→ project group)
+ * - workerProgress: Worker is active but still iterating without a reviewable artifact (→ project group)
  * - workerComplete: Worker completed task (→ project group)
  * - reviewNeeded: Issue needs review — human or agent (→ project group)
  * - reviewRejected: Reviewer rejected the PR/issue (→ project group)
@@ -45,6 +46,20 @@ export type NotifyEvent =
       modelDowngraded?: boolean;
       originalModel?: string;
       effectiveModel?: string;
+      dispatchCycleId?: string | null;
+      dispatchRunId?: string | null;
+    }
+  | {
+      type: "workerProgress";
+      project: string;
+      issueId: number;
+      issueUrl: string;
+      issueTitle: string;
+      role: string;
+      level?: string;
+      name?: string;
+      summary?: string;
+      minutesActive?: number;
       dispatchCycleId?: string | null;
       dispatchRunId?: string | null;
     }
@@ -236,6 +251,18 @@ export function buildMessage(event: NotifyEvent): string {
       if (event.modelDowngraded && event.originalModel && event.effectiveModel) {
         msg += `\n⚠️ Modelo: ${event.originalModel} → ${event.effectiveModel}`;
       }
+      return msg;
+    }
+
+    case "workerProgress": {
+      const worker = formatWorkerString(event.role, {
+        name: event.name,
+        level: event.level,
+      });
+      let msg = `⏳ ${worker} still working on #${event.issueId}: ${event.issueTitle}`;
+      if (event.summary) msg += `\n${event.summary}`;
+      if (event.minutesActive != null) msg += `\n🕒 Active for ${event.minutesActive} min`;
+      msg += `\n📋 [Issue #${event.issueId}](${event.issueUrl})`;
       return msg;
     }
 

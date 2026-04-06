@@ -123,6 +123,17 @@ describe("normalizeGenesisRequest", () => {
     expect(normalized.answers.f3).toContain("init");
     expect(normalized.answers.extra).toBe("7");
   });
+
+  it("extracts explicit project_name from free-text genesis ideas when structured project_name is absent", () => {
+    const normalized = normalizeGenesisRequest({
+      phase: "discover",
+      idea: "Python/FastAPI, PostgreSQL, JWT auth. Project name: incident-hub",
+      stack: "fastapi",
+    });
+
+    expect(normalized.metadata.project_name).toBe("incident-hub");
+    expect(normalized.rawIdea).toBe("Python/FastAPI, PostgreSQL, JWT auth. Project name: incident-hub");
+  });
 });
 
 describe("genesis tool", () => {

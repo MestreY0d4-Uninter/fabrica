@@ -37,7 +37,7 @@ export type TimeoutConfig = {
   staleWorkerHours?: number;
   /** Context budget ratio (0-1). Clear session when context exceeds this fraction of the context window. Default: 0.6 */
   sessionContextBudget?: number;
-  /** Minutes of session inactivity before stall detection kicks in. Default: 15 */
+  /** Minutes before a long-running developer session without a reviewable artifact is considered stuck. Default: 25 */
   stallTimeoutMinutes?: number;
   /** Number of attempts to confirm session creation via gateway. Default: 5 */
   sessionConfirmAttempts?: number;
@@ -151,7 +151,7 @@ export type ResolvedTimeouts = {
   staleWorkerHours: number;
   /** Context budget ratio (0-1). Clear session when context exceeds this fraction of the context window. Default: 0.6 */
   sessionContextBudget: number;
-  /** Minutes of session inactivity before stall detection kicks in. Default: 15 */
+  /** Minutes before a long-running developer session without a reviewable artifact is considered stuck. Default: 25 */
   stallTimeoutMinutes: number;
   /** Number of attempts to confirm session creation via gateway. Default: 5 */
   sessionConfirmAttempts: number;
