@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import type { GenesisPayload, StepContext } from "../../lib/intake/types.js";
 import { createTaskStep } from "../../lib/intake/steps/create-task.js";
 import { TestProvider } from "../../lib/testing/test-provider.js";
+import { upsertTelegramBootstrapSession, readTelegramBootstrapSession } from "../../lib/dispatch/telegram-bootstrap-session.js";
 
 describe("createTaskStep", () => {
   it("creates the issue via provider when provider access is available", async () => {
@@ -126,6 +130,72 @@ describe("createTaskStep", () => {
 
     expect(result.issues?.[0]?.number).toBe(1);
     expect(provider.callsTo("createIssue")).toHaveLength(1);
+  });
+
+  it("persists issue metadata back into the telegram bootstrap session when the source is telegram-dm-bootstrap", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-bootstrap-create-task-"));
+    await upsertTelegramBootstrapSession(workspaceDir, {
+      conversationId: "telegram:6951571380",
+      rawIdea: "Build an SRE incident desk",
+      projectName: "sre-incident-desk-v1",
+      stackHint: "fastapi",
+      status: "bootstrapping",
+      bootstrapStep: "awaiting_pipeline",
+      projectSlug: "sre-incident-desk-v1",
+    });
+
+    const provider = new TestProvider();
+    const payload: GenesisPayload = {
+      session_id: "sid-create-task-telegram",
+      timestamp: new Date().toISOString(),
+      step: "register",
+      raw_idea: "Build an SRE incident desk",
+      answers: {},
+      metadata: {
+        source: "telegram-dm-bootstrap",
+        factory_change: false,
+        repo_url: "https://github.com/acme/demo",
+        repo_path: "/tmp/demo",
+        project_slug: "sre-incident-desk-v1",
+        project_name: "sre-incident-desk-v1",
+        stack_hint: "fastapi",
+        channel_id: "telegram:6951571380",
+        message_thread_id: 1861,
+        project_registered: true,
+      },
+      spec: {
+        title: "SRE Incident Desk",
+        type: "feature",
+        objective: "Build an operations desk with incidents, timelines, alerts, permissions, and background escalations.",
+        scope_v1: ["Implement incidents", "Implement timelines", "Implement background escalations"],
+        out_of_scope: [],
+        acceptance_criteria: ["allows operators to create incidents", "processes escalation jobs", "validates role-based access"],
+        definition_of_done: ["Tests green"],
+        constraints: "Use FastAPI",
+        risks: [],
+        delivery_target: "api",
+      },
+      scaffold: {
+        created: true,
+        repo_url: "https://github.com/acme/demo",
+        repo_local: "/tmp/demo",
+        project_slug: "sre-incident-desk-v1",
+      },
+    };
+
+    const ctx: StepContext = {
+      workspaceDir,
+      homeDir: "/tmp/home",
+      log: () => {},
+      runCommand: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+      createIssueProvider: async () => ({ provider, type: "github" }),
+    };
+
+    await createTaskStep.execute(payload, ctx);
+
+    const session = await readTelegramBootstrapSession(workspaceDir, "telegram:6951571380");
+    expect(session?.issueId).toBe(1);
+    expect(session?.issueUrl).toBe("https://example.com/issues/1");
   });
 
   it("does not run before project registration succeeds", () => {

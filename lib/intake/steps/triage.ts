@@ -5,6 +5,7 @@ import type { PipelineStep, GenesisPayload, Triage } from "../types.js";
 import type { StateLabel } from "../../providers/provider.js";
 import { runTriageLogic, type TriageMatrix } from "../lib/triage-logic.js";
 import { loadConfig } from "../../config/index.js";
+import { upsertTelegramBootstrapSession } from "../../dispatch/telegram-bootstrap-session.js";
 
 import { createRequire } from "node:module";
 const _require = createRequire(import.meta.url);
@@ -82,8 +83,9 @@ export const triageStep: PipelineStep = {
       rawIdea: payload.raw_idea,
       acText: spec.acceptance_criteria.join("\n"),
       scopeText: spec.scope_v1.join("\n"),
+      dodText: spec.definition_of_done.join("\n"),
       oosText: spec.out_of_scope.join("\n"),
-      authSignal: payload.metadata?.auth_gate?.signal ?? false,
+      authSignal: /\b(login|register|jwt|oauth|auth|role-based access|rbac|permission)\b/i.test(`${payload.raw_idea} ${spec.objective}`),
     }, matrix);
 
     const repoUrl = payload.scaffold?.repo_url ?? payload.metadata?.repo_url ?? "";
@@ -220,6 +222,29 @@ export const triageStep: PipelineStep = {
     };
 
     ctx.log(`Triage: ${triage.priority}, effort=${triage.effort}, ready=${triage.ready_for_dispatch}`);
+
+    const bootstrapConversationId = payload.metadata?.source === "telegram-dm-bootstrap"
+      ? payload.metadata?.channel_id
+      : null;
+    if (bootstrapConversationId) {
+      await upsertTelegramBootstrapSession(ctx.workspaceDir, {
+        conversationId: String(bootstrapConversationId),
+        rawIdea: payload.raw_idea,
+        projectName: payload.metadata?.project_name ?? null,
+        stackHint: payload.metadata?.stack_hint ?? null,
+        repoUrl: payload.provisioning?.repo_url ?? payload.scaffold?.repo_url ?? payload.metadata?.repo_url ?? null,
+        repoPath: payload.provisioning?.repo_local ?? payload.scaffold?.repo_local ?? payload.metadata?.repo_path ?? null,
+        status: triage.ready_for_dispatch ? "dispatching" : "completed",
+        bootstrapStep: triage.ready_for_dispatch ? "project_ticked" : "completed",
+        projectSlug: payload.metadata?.project_slug ?? payload.scaffold?.project_slug ?? null,
+        issueId: issue.number,
+        issueUrl: issue.url,
+        projectChannelId: triage.project_channel_id ?? payload.metadata?.channel_id ?? null,
+        messageThreadId: payload.metadata?.message_thread_id ?? null,
+        triageReadyForDispatch: triage.ready_for_dispatch,
+        triageErrors: triage.errors,
+      }).catch(() => {});
+    }
 
     return {
       ...payload,

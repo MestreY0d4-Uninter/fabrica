@@ -74,9 +74,9 @@ function fallbackSpecData(type: string, rawIdea: string): SpecData {
     default: // feature
       base.scope_v1 = deriveFeatureScopeFromRawIdea(rawIdea);
       base.acceptance_criteria = [
-        "The primary workflow works end to end as requested",
-        "Role, validation, or delivery constraints from the request are enforced",
-        "The asynchronous/background behavior works for the main operational path",
+        "Allows operators to complete the primary workflow end to end as requested",
+        "Validates and enforces the role, permission, or delivery constraints described in the request",
+        "Processes the asynchronous or background behavior required for the main operational path",
       ];
   }
 

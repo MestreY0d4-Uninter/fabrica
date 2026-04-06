@@ -66,6 +66,7 @@ describe("triage integration", () => {
       rawIdea: "fazer um app",
       acText: "funciona",
       scopeText: "item",
+      dodText: "deploy feito",
       oosText: "",
       authSignal: false,
     };
@@ -74,7 +75,6 @@ describe("triage integration", () => {
   });
 
   it("sets specQualityBlock=false when spec quality passes", () => {
-    // scopeText is used as dod in runTriageLogic, so it must mention "teste"
     const input: TriageInput = {
       type: "feature",
       deliveryTarget: "cli",
@@ -86,7 +86,8 @@ describe("triage integration", () => {
       objective: "Criar um CLI em Python que converte temperaturas entre Celsius, Fahrenheit e Kelvin com validacao de entrada e saida formatada",
       rawIdea: "Criar um CLI em Python que converte temperaturas entre Celsius, Fahrenheit e Kelvin com validacao de entrada e saida formatada",
       acText: "deve aceitar temperatura via argumento\nretorna erro claro para entrada invalida\nvalida que temperatura nao e abaixo do zero absoluto",
-      scopeText: "converter celsius para fahrenheit\nconverter fahrenheit para celsius\nconverter para kelvin com testes automatizados",
+      scopeText: "converter celsius para fahrenheit\nconverter fahrenheit para celsius\nconverter para kelvin",
+      dodText: "todos os testes passando\ncobertura >= 80%\nlint limpo",
       oosText: "",
       authSignal: false,
     };

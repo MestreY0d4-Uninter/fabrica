@@ -4,6 +4,7 @@
 import type { PipelineStep, GenesisPayload, CreatedIssue } from "../types.js";
 import { DEFAULT_WORKFLOW, getLabelColors } from "../../workflow/index.js";
 import { loadConfig } from "../../config/index.js";
+import { upsertTelegramBootstrapSession } from "../../dispatch/telegram-bootstrap-session.js";
 
 /** Build issue body from spec. */
 function buildIssueBody(payload: GenesisPayload): string {
@@ -97,6 +98,28 @@ export const createTaskStep: PipelineStep = {
 
       ctx.log(`Issue created via provider: #${issue.number} — ${issue.url}`);
 
+      const bootstrapConversationId = payload.metadata?.source === "telegram-dm-bootstrap"
+        ? payload.metadata?.channel_id
+        : null;
+      if (bootstrapConversationId) {
+        await upsertTelegramBootstrapSession(ctx.workspaceDir, {
+          conversationId: String(bootstrapConversationId),
+          rawIdea: payload.raw_idea,
+          projectName: payload.metadata?.project_name ?? null,
+          stackHint: payload.metadata?.stack_hint ?? null,
+          repoUrl: repoUrl ?? null,
+          repoPath: repoPath ?? null,
+          status: "dispatching",
+          bootstrapStep: "project_registered",
+          projectSlug: projectSlug ?? null,
+          issueId: issue.number,
+          issueUrl: issue.url,
+          projectChannelId: payload.metadata?.channel_id ?? null,
+          messageThreadId: payload.metadata?.message_thread_id ?? null,
+          projectRegisteredAt: new Date().toISOString(),
+        }).catch(() => {});
+      }
+
       return {
         ...payload,
         step: "create-task",
@@ -135,6 +158,28 @@ export const createTaskStep: PipelineStep = {
     };
 
     ctx.log(`Issue created via compatibility fallback: #${issueNumber} — ${issueUrl}`);
+
+    const bootstrapConversationId = payload.metadata?.source === "telegram-dm-bootstrap"
+      ? payload.metadata?.channel_id
+      : null;
+    if (bootstrapConversationId) {
+      await upsertTelegramBootstrapSession(ctx.workspaceDir, {
+        conversationId: String(bootstrapConversationId),
+        rawIdea: payload.raw_idea,
+        projectName: payload.metadata?.project_name ?? null,
+        stackHint: payload.metadata?.stack_hint ?? null,
+        repoUrl: repoUrl ?? null,
+        repoPath: repoPath ?? null,
+        status: "dispatching",
+        bootstrapStep: "project_registered",
+        projectSlug: projectSlug ?? null,
+        issueId: issue.number,
+        issueUrl: issue.url,
+        projectChannelId: payload.metadata?.channel_id ?? null,
+        messageThreadId: payload.metadata?.message_thread_id ?? null,
+        projectRegisteredAt: new Date().toISOString(),
+      }).catch(() => {});
+    }
 
     return {
       ...payload,

@@ -29,6 +29,7 @@ export type TriageInput = {
   rawIdea: string;
   acText: string;
   scopeText: string;
+  dodText: string;
   oosText: string;
   authSignal: boolean;
 };
@@ -212,7 +213,7 @@ export function runTriageLogic(input: TriageInput, matrix: TriageMatrix): Triage
     objective: input.objective ?? input.rawIdea,
     scopeItems: (input.scopeText ?? "").split("\n").filter((l) => l.trim()),
     acceptanceCriteria: (input.acText ?? "").split("\n").filter((l) => l.trim()),
-    dod: input.scopeText ?? "",
+    dod: input.dodText ?? "",
   });
   const specQualityBlock = specQualityErrors.length > 0;
 

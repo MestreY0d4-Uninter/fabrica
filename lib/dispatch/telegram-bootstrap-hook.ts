@@ -2461,6 +2461,8 @@ async function continueBootstrap(
   const projectChannelId = result.payload.metadata.channel_id ?? telegramConfig.projectsForumChatId;
   const messageThreadId = result.payload.metadata.message_thread_id;
   const projectSlug = result.payload.metadata.project_slug ?? result.payload.scaffold?.project_slug ?? null;
+  const createdIssue = result.payload.issues?.[0] ?? null;
+  const triage = result.payload.triage ?? null;
 
   if (projectChannelId && messageThreadId) {
     const projectRoute = {
@@ -2477,6 +2479,10 @@ async function continueBootstrap(
         bootstrapStep: "project_registered",
         projectName: resolvedProjectName,
         projectSlug: projectSlug ?? undefined,
+        issueId: createdIssue?.number ?? null,
+        issueUrl: createdIssue?.url ?? null,
+        triageReadyForDispatch: triage?.ready_for_dispatch ?? null,
+        triageErrors: triage?.errors ?? null,
         projectRegisteredAt: new Date().toISOString(),
         projectChannelId: String(projectChannelId),
         messageThreadId,
@@ -2493,6 +2499,10 @@ async function continueBootstrap(
         status: "dispatching",
         projectName: resolvedProjectName,
         projectSlug: projectSlug ?? undefined,
+        issueId: createdIssue?.number ?? null,
+        issueUrl: createdIssue?.url ?? null,
+        triageReadyForDispatch: triage?.ready_for_dispatch ?? null,
+        triageErrors: triage?.errors ?? null,
         projectRegisteredAt: new Date().toISOString(),
         projectChannelId: String(projectChannelId),
         messageThreadId,
@@ -2508,6 +2518,10 @@ async function continueBootstrap(
       ...registeredSession,
       projectName: resolvedProjectName,
       projectSlug: projectSlug ?? registeredSession.projectSlug ?? undefined,
+      issueId: createdIssue?.number ?? registeredSession.issueId ?? null,
+      issueUrl: createdIssue?.url ?? registeredSession.issueUrl ?? null,
+      triageReadyForDispatch: triage?.ready_for_dispatch ?? registeredSession.triageReadyForDispatch ?? null,
+      triageErrors: triage?.errors ?? registeredSession.triageErrors ?? null,
       projectRegisteredAt: registeredSession.projectRegisteredAt ?? new Date().toISOString(),
       language: (currentSession?.language ?? "pt"),
     });

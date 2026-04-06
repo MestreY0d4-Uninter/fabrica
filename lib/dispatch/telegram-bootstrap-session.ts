@@ -51,6 +51,9 @@ export type TelegramBootstrapSession = {
   repoPath?: string | null;
   projectSlug?: string | null;
   issueId?: number | null;
+  issueUrl?: string | null;
+  triageReadyForDispatch?: boolean | null;
+  triageErrors?: string[] | null;
   messageThreadId?: number | null;
   projectChannelId?: string | null;
   status: TelegramBootstrapStatus;
@@ -350,6 +353,9 @@ export async function upsertTelegramBootstrapSession(
     error?: string | null;
     projectSlug?: string | null;
     issueId?: number | null;
+    issueUrl?: string | null;
+    triageReadyForDispatch?: boolean | null;
+    triageErrors?: string[] | null;
     messageThreadId?: number | null;
     projectChannelId?: string | null;
     language?: "pt" | "en";
@@ -379,6 +385,9 @@ export async function upsertTelegramBootstrapSession(
   const resolvedRepoPath = resolveNullableField(input.repoPath, existing?.repoPath);
   const resolvedProjectSlug = resolveNullableField(input.projectSlug, existing?.projectSlug);
   const resolvedIssueId = resolveNullableField(input.issueId, existing?.issueId);
+  const resolvedIssueUrl = resolveNullableField(input.issueUrl, existing?.issueUrl);
+  const resolvedTriageReadyForDispatch = resolveNullableField(input.triageReadyForDispatch, existing?.triageReadyForDispatch);
+  const resolvedTriageErrors = input.triageErrors !== undefined ? input.triageErrors : existing?.triageErrors ?? null;
   const resolvedMessageThreadId = resolveNullableField(input.messageThreadId, existing?.messageThreadId);
   const resolvedProjectChannelId = resolveNullableField(input.projectChannelId, existing?.projectChannelId);
   const resolvedAttemptCount = resolveNullableField(input.attemptCount, existing?.attemptCount, 0);
@@ -430,6 +439,9 @@ export async function upsertTelegramBootstrapSession(
     repoPath: resolvedRepoPath,
     projectSlug: resolvedProjectSlug,
     issueId: resolvedIssueId,
+    issueUrl: resolvedIssueUrl,
+    triageReadyForDispatch: resolvedTriageReadyForDispatch,
+    triageErrors: resolvedTriageErrors,
     messageThreadId: resolvedMessageThreadId,
     projectChannelId: resolvedProjectChannelId,
     language: input.language ?? existing?.language,
