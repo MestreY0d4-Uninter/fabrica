@@ -68,7 +68,7 @@ export type TelegramBootstrapSession = {
   topicKickoffSentAt?: string | null;
   projectTickedAt?: string | null;
   completionAckSentAt?: string | null;
-  pendingClarification?: "stack" | "stack_and_name" | "name" | null;
+  pendingClarification?: "stack" | "stack_and_name" | "name" | "scope" | null;
   orphanedArtifacts?: PipelineArtifact[] | null;
   createdAt: string;
   updatedAt: string;
@@ -345,7 +345,7 @@ export async function upsertTelegramBootstrapSession(
     repoUrl?: string | null;
     repoPath?: string | null;
     status: TelegramBootstrapStatus;
-    pendingClarification?: "stack" | "stack_and_name" | "name" | null;
+    pendingClarification?: "stack" | "stack_and_name" | "name" | "scope" | null;
     orphanedArtifacts?: PipelineArtifact[] | null;
     error?: string | null;
     projectSlug?: string | null;

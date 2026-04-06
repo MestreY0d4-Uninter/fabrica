@@ -137,11 +137,65 @@ const BOOTSTRAP_MESSAGES = {
     pt: "Como você quer chamar o projeto? Se preferir, posso escolher um nome.",
     en: "What do you want to name the project? If you prefer, I can pick one.",
   },
+  clarifyScope: {
+    pt: (idea: string) =>
+      `Recebi! Seu pedido envolve vários subsistemas (autenticação, notificações, worker, banco de dados...). Para montar uma spec de qualidade, preciso de algumas definições:\n\n` +
+      `1. **Stack/linguagem**: qual prefere? (Python/FastAPI, Node.js/Express, Go...)\n` +
+      `2. **Banco de dados**: PostgreSQL, MongoDB, Redis, outro?\n` +
+      `3. **Autenticação**: JWT, OAuth2, sessão?\n\n` +
+      `Se preferir deixar a escolha comigo, responda "livre" e eu decido.`,
+    en: (idea: string) =>
+      `Got it! Your request involves multiple subsystems (auth, notifications, background worker, DB...). To produce a quality spec, I need a few decisions:\n\n` +
+      `1. **Stack/language**: which do you prefer? (Python/FastAPI, Node.js/Express, Go...)\n` +
+      `2. **Database**: PostgreSQL, MongoDB, Redis, other?\n` +
+      `3. **Auth**: JWT, OAuth2, session?\n\n` +
+      `If you want me to choose, reply "your call" and I'll decide.`,
+  },
   registered: {
     pt: (name: string, link: string) => `Projeto "${name}" registrado.\nVou continuar o fluxo em ${link}`,
     en: (name: string, link: string) => `Project "${name}" registered.\nI'll continue the flow at ${link}`,
   },
 } as const;
+
+/**
+ * Detect when a request spans multiple subsystems without explicit tech choices.
+ * Returns true when the user should be asked for clarification before registering.
+ *
+ * Criteria:
+ * - 3+ subsystem signals in the rawIdea, AND
+ * - No explicit tech choice for at least one key dimension (DB or auth method), AND
+ * - The user didn't explicitly say "your call" / "livre" (opt-out of clarification)
+ */
+function detectScopeAmbiguity(rawIdea: string, stackHint: string | null | undefined): boolean {
+  const text = rawIdea.toLowerCase();
+
+  // User opted out of clarification
+  if (/\b(livre|free.?choice|your.?call|pode.?escolher|voc[eê].?decide|qualquer)\b/i.test(text)) {
+    return false;
+  }
+
+  // Count subsystem signals
+  const subsystems = [
+    /\b(worker|background.?job|queue|task.?runner|celery|bull)\b/i,
+    /\b(websocket|sse|real.?time|realtime|push.?notif)\b/i,
+    /\b(auth|oauth|jwt|login|register|signup|autenticac)\b/i,
+    /\b(notif|alert|assinatura|subscription|subscribe|email|sms)\b/i,
+    /\b(banco|database|db|postgres|mysql|mongodb|redis|sqlite)\b/i,
+    /\b(api\s+rest|rest\s+api|endpoint|graphql|grpc)\b/i,
+    /\b(dashboard|frontend|interface|ui|tela)\b/i,
+  ];
+  const matchedSubsystems = subsystems.filter(r => r.test(text)).length;
+  if (matchedSubsystems < 3) return false;
+
+  // Check if user gave explicit tech choices for key dimensions
+  const hasExplicitDB = /\b(postgres(ql)?|mysql|mongodb|mongo|redis|sqlite|supabase|dynamodb|cockroach)\b/i.test(text);
+  const hasExplicitAuth = /\b(jwt|oauth2?|basic.?auth|api.?key|session.?based|cookie.?auth)\b/i.test(text);
+  const hasExplicitStack = !!stackHint && !["api", "rest-api", "backend"].includes(stackHint);
+
+  // Ambiguous when at least 2 key dimensions are unspecified
+  const unspecifiedDimensions = [!hasExplicitDB, !hasExplicitAuth, !hasExplicitStack].filter(Boolean).length;
+  return unspecifiedDimensions >= 2;
+}
 
 function inferProjectSlug(text: string): string | undefined {
   let cleaned = text
@@ -782,6 +836,33 @@ async function handleTelegramBootstrapDmMessage(
       language,
     ));
     return;
+  }
+
+  // Scope ambiguity check: even when a stack is (loosely) detected, trigger clarification
+  // when the request spans 3+ subsystems without explicit tech choices.
+  if (detectScopeAmbiguity(content, parsed.stackHint)) {
+    const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
+    // Only ask once — skip if we already asked about scope and the user replied
+    const alreadyAskedScope = existingSession?.pendingClarification === "scope";
+    if (!alreadyAskedScope) {
+      await upsertTelegramBootstrapSession(workspaceDir, {
+        conversationId,
+        rawIdea: content,
+        stackHint: parsed.stackHint ?? undefined,
+        projectName: parsed.projectSlug ?? undefined,
+        status: "clarifying",
+        pendingClarification: "scope",
+        language,
+      });
+      const clarifyMsg = BOOTSTRAP_MESSAGES.clarifyScope[language](content);
+      await sendTelegramText(ctx, rawConversationId, clarifyMsg);
+      return;
+    }
+    // User already answered the scope question — merge their answer as stackHint refinement
+    // and proceed with bootstrap. The answers will flow into conduct-interview via raw_idea context.
+    if (existingSession?.stackHint) {
+      incomingRequest.stackHint = existingSession.stackHint;
+    }
   }
 
   const handled = await runBootstrapPreflightOrFail(

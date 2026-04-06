@@ -47,12 +47,60 @@ export type TriageDecision = {
   specQualityBlock?: boolean;
 };
 
-/** Calculate effort from files changed and AC count. */
-export function calculateEffort(filesChanged: number, acCount: number): TriageEffort {
-  if (filesChanged <= 3 && acCount <= 3) return "small";
-  if (filesChanged <= 10 && acCount <= 7) return "medium";
-  if (filesChanged <= 25 && acCount <= 15) return "large";
-  return "xlarge";
+/**
+ * Detect signals in rawIdea that indicate a multi-subsystem or complex request.
+ * Used to floor the effort estimate when the LLM-generated spec is too thin.
+ */
+export function detectRawIdeaComplexity(rawIdea: string): { floor: TriageEffort | null; signals: string[] } {
+  const text = rawIdea.toLowerCase();
+  const signals: string[] = [];
+
+  // Multi-subsystem indicators
+  const subsystemPatterns: Array<[RegExp, string]> = [
+    [/\b(worker|background.?job|queue|celery|bull|sidekiq|task.?runner)\b/i, "background-worker"],
+    [/\b(websocket|server.?sent|sse|real.?time|realtime|socket\.io|push.?notif)\b/i, "realtime"],
+    [/\b(auth|oauth|jwt|login|register|session|user.?account|signup)\b/i, "auth"],
+    [/\b(notif|alert|email|sms|webhook|subscription|subscribe)\b/i, "notifications"],
+    [/\b(database|banco|db|postgres|mysql|mongodb|redis|sqlite|orm)\b/i, "database"],
+    [/\b(api\s+rest|rest\s+api|endpoint|rota|route|graphql|grpc)\b/i, "api-layer"],
+    [/\b(docker|kubernetes|k8s|deploy|ci|cd|pipeline)\b/i, "infra"],
+    [/\b(dashboard|frontend|interface|ui|tela|p[aá]gina)\b/i, "frontend"],
+  ];
+
+  for (const [regex, label] of subsystemPatterns) {
+    if (regex.test(text)) signals.push(label);
+  }
+
+  // Floor logic: 3+ subsystems = medium floor, 4+ = large floor
+  let floor: TriageEffort | null = null;
+  if (signals.length >= 4) floor = "large";
+  else if (signals.length >= 3) floor = "medium";
+  else if (signals.length >= 2) floor = "medium";
+
+  return { floor, signals };
+}
+
+/** Calculate effort from files changed and AC count, floored by rawIdea complexity signals. */
+export function calculateEffort(filesChanged: number, acCount: number, rawIdea?: string): TriageEffort {
+  let effort: TriageEffort;
+  if (filesChanged <= 3 && acCount <= 3) effort = "small";
+  else if (filesChanged <= 10 && acCount <= 7) effort = "medium";
+  else if (filesChanged <= 25 && acCount <= 15) effort = "large";
+  else effort = "xlarge";
+
+  // Apply complexity floor from rawIdea signals to prevent under-triage of complex prompts
+  // when the LLM-generated spec is thin.
+  if (rawIdea) {
+    const { floor } = detectRawIdeaComplexity(rawIdea);
+    if (floor) {
+      const ORDER: TriageEffort[] = ["small", "medium", "large", "xlarge"];
+      if (ORDER.indexOf(floor) > ORDER.indexOf(effort)) {
+        effort = floor;
+      }
+    }
+  }
+
+  return effort;
 }
 
 /** Calculate priority using the v2 rules matrix. */
@@ -112,7 +160,8 @@ export function validateDoR(input: TriageInput): string[] {
     }
   }
 
-  // Auth gate
+  // Auth gate: detect auth intent from rawIdea OR objective (not just spec-derived texts).
+  // This prevents the gate from being bypassed when the LLM spec minimises auth details.
   let authSignal = input.authSignal;
   if (!authSignal) {
     const signalText = `${input.rawIdea} ${input.objective}`.toLowerCase();
@@ -120,6 +169,9 @@ export function validateDoR(input: TriageInput): string[] {
   }
 
   if (authSignal) {
+    // Evidence must exist in the GENERATED spec (ACs + scope + objective), not rawIdea.
+    // rawIdea is used only for signal detection — if the LLM spec didn't capture auth,
+    // that IS the problem we want to flag.
     const evidenceText = `${input.acText} ${input.scopeText} ${input.objective}`.toLowerCase();
     if (!AUTH_REGEX.test(evidenceText)) {
       errors.push("dor_auth_requirements_missing");
@@ -143,7 +195,7 @@ export function determineLevel(effort: TriageEffort, targetState: string): strin
 
 /** Run full triage logic. */
 export function runTriageLogic(input: TriageInput, matrix: TriageMatrix): TriageDecision {
-  const effort = calculateEffort(input.filesChanged, input.acCount);
+  const effort = calculateEffort(input.filesChanged, input.acCount, input.rawIdea);
   const { priority, label: priorityLabel } = calculatePriority(input.type, effort, input.totalRisks, matrix);
 
   const effortLabel = matrix.effort_rules[effort]?.label ?? `effort:${effort}`;

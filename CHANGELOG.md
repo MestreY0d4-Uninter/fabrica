@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.20 - 2026-04-06
+
+- **Bug fix (clarification):** Added scope-ambiguity detection to the Telegram bootstrap flow. When a request spans 3+ subsystems (auth, notifications, workers, DB...) without explicit tech choices, the bot now asks for clarification before registering the project instead of proceeding with a vague LLM-minimised spec. User can reply "livre"/"your call" to skip and let the bot decide. Closes #1.
+- **Bug fix (work_finish):** `work_finish` now emits a clear, actionable error with exact `git worktree add` and `gh pr create` commands when the developer tries to complete a task while still on the base branch (main/integration/etc.) without any open PR. Replaces the previous misleading `--head main` suggestion. Closes #2.
+- **Bug fix (triage effort):** Effort calculation now applies a complexity floor derived from rawIdea signals. Requests with 4+ subsystem keywords (auth, worker, notifications, realtime...) floor at `effort:large`; 2–3 subsystems floor at `effort:medium`. Prevents complex multi-system features from being classified as `effort:small` when the LLM-generated spec is thin. The auth gate signal detection now also searches rawIdea directly. Closes #3.
+
 ## 0.2.19 - 2026-04-06
 
 - Fixed developer feedback-cycle dispatch so task messages reuse the actual PR branch/worktree instead of always pointing back to the canonical issue branch.
