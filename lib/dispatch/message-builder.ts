@@ -5,6 +5,14 @@ import type { ResolvedRoleConfig } from "../config/index.js";
 import { formatPrContext, formatPrFeedback, type PrContext, type PrFeedback } from "./pr-context.js";
 import { getFallbackEmoji } from "../roles/index.js";
 
+function toBranchSlug(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "task";
+}
+
 /**
  * Build the task message sent to a worker session.
  *
@@ -39,8 +47,11 @@ export function buildTaskMessage(opts: {
     issueDescription, issueUrl, repo, baseBranch,
   } = opts;
   const repoDisplay = repo;
-
   const isFeedbackCycle = !!opts.prFeedback;
+  const branchName = opts.prFeedback?.branchName?.trim()
+    ? opts.prFeedback.branchName.trim()
+    : `feature/${issueId}-${toBranchSlug(projectName)}`;
+  const worktreePath = `${repoDisplay}.worktrees/${branchName}`;
 
   const parts = [
     `${role.toUpperCase()} task for project "${projectName}" — Issue #${issueId}`,
@@ -58,6 +69,18 @@ export function buildTaskMessage(opts: {
       `> When feedback conflicts with the original description, follow the PR feedback.`,
     );
   }
+
+  parts.push(
+    ``,
+    `## Execution Setup (do this before editing files)`,
+    `Repo: ${repoDisplay} | Base branch: ${baseBranch} | ${issueUrl}`,
+    `Execution path: ${repoDisplay}`,
+    `Required branch: ${branchName}`,
+    `Required worktree: ${worktreePath}`,
+    `Before editing any file, create or reuse the required worktree above and work only there.`,
+    `Do not re-initialize or replace the scaffold in the main checkout (for example: do not run npm init, cargo init, uv init, or create a second project skeleton) when the repo already contains scaffolded files. Modify the existing scaffold inside the worktree instead.`,
+    `If the repo path is missing or inaccessible, return the canonical blocked result instead of improvising in ~/.openclaw/workspace.`,
+  );
 
   if (opts.followUpPrRequired) {
     parts.push(
@@ -114,10 +137,7 @@ export function buildTaskMessage(opts: {
 
   parts.push(
     ``,
-    `Repo: ${repoDisplay} | Branch: ${baseBranch} | ${issueUrl}`,
     `Project: ${projectName} | Channel: ${channelId}`,
-    `Execution path: ${repoDisplay}`,
-    `Start by changing into the canonical repo path above before creating or reusing a worktree. Do not create or implement the project under ~/.openclaw/workspace unless the repo path itself points there.`,
   );
 
   parts.push(...buildCompletionContract(role));
@@ -146,6 +166,10 @@ export function buildConflictFixMessage(opts: {
     issueUrl, repo, baseBranch, prFeedback,
   } = opts;
   const repoDisplay = repo;
+  const branchName = prFeedback.branchName?.trim()
+    ? prFeedback.branchName.trim()
+    : `feature/${issueId}-${toBranchSlug(projectName)}`;
+  const worktreePath = `${repoDisplay}.worktrees/${branchName}`;
 
   const parts = [
     `${role.toUpperCase()} task for project "${projectName}" — Issue #${issueId}`,
@@ -159,10 +183,12 @@ export function buildConflictFixMessage(opts: {
 
   parts.push(
     ``,
-    `Repo: ${repoDisplay} | Branch: ${baseBranch} | ${issueUrl}`,
+    `Repo: ${repoDisplay} | Base branch: ${baseBranch} | ${issueUrl}`,
     `Project: ${projectName} | Channel: ${channelId}`,
     `Execution path: ${repoDisplay}`,
-    `Start by changing into the canonical repo path above before reusing the PR branch or creating its worktree. Do not resolve the issue inside ~/.openclaw/workspace unless the repo path itself points there.`,
+    `Required branch: ${branchName}`,
+    `Required worktree: ${worktreePath}`,
+    `Start by changing into the canonical repo path above before reusing the PR branch or creating its worktree. Reuse the exact PR branch named above; do not switch to a new canonical issue branch during a feedback cycle. Do not resolve the issue inside ~/.openclaw/workspace unless the repo path itself points there.`,
   );
 
   parts.push(...buildCompletionContract(role));

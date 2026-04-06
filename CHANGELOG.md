@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.19 - 2026-04-06
+
+- Fixed developer feedback-cycle dispatch so task messages reuse the actual PR branch/worktree instead of always pointing back to the canonical issue branch.
+- Hardened the developer feedback prompt to create a local tracking worktree from the existing PR branch, avoiding detached-head and wrong-branch update flows.
+- Restored node-cli scaffold README setup/run snippets so generated repos document how to install dependencies and run the CLI.
+- Added regression coverage for feedback-cycle branch/worktree messaging while keeping the node-cli scaffold/QA hot path green.
+
 ## 0.2.18 - 2026-04-05
 
 - Fixed developer completion validation to respect the project base branch and prefer the canonical issue-linked PR when the main checkout branch is the configured base branch.

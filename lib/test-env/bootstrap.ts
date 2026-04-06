@@ -75,7 +75,7 @@ const EXPRESS_GATES: QaGateCommands = {
 
 const NODE_CLI_GATES: QaGateCommands = {
   lint: "npm run lint",
-  types: "npm run build -- --noEmit",
+  types: "npm run typecheck",
   security: "npm audit --audit-level=moderate",
   tests: "npm test",
   coverage: "npm run coverage",

@@ -13,8 +13,6 @@ import {
 import { ensureProjectTestEnvironment, supportsGreenfieldScaffold } from "../../test-env/bootstrap.js";
 import { generateQaContract } from "../../quality/qa-contracts.js";
 
-const PYTHON_STACKS = new Set(["python-cli", "fastapi", "flask", "django"]);
-
 export const scaffoldStep: PipelineStep = {
   name: "scaffold",
 
@@ -45,9 +43,10 @@ export const scaffoldStep: PipelineStep = {
           mode: "scaffold",
           runCommand: ctx.runCommand,
         });
-        // Overwrite qa.sh UNCONDITIONALLY — TypeScript version has self-provisioning prelude
-        // that works even if bootstrap failed. Must run BEFORE the early return below.
-        if (scaffold.stack && PYTHON_STACKS.has(scaffold.stack) && payload.spec) {
+        // Overwrite qa.sh UNCONDITIONALLY for every supported scaffold stack.
+        // The generated contract contains the self-provisioning prelude and must be
+        // written before the bootstrap ready check below.
+        if (scaffold.stack && payload.spec) {
           try {
             const contract = generateQaContract({
               spec: payload.spec,

@@ -42,7 +42,7 @@ fi
 
 The `.worktrees/` directory sits NEXT TO the repo folder (not inside it). This keeps the main checkout clean for the orchestrator and other workers. If the assigned worktree already exists from a previous task on the same branch, verify it's clean and reuse it.
 
-Never create or implement the project under `~/.openclaw/workspace/<slug>` unless the task message explicitly says that directory is the canonical repo path. Once you are in the assigned worktree, stay there for the rest of the task and do not switch back to the main checkout.
+Never create or implement the project under `~/.openclaw/workspace/<slug>` unless the task message explicitly says that directory is the canonical repo path. If the repo already contains scaffolded files, do not re-initialize the project with `npm init`, `uv init`, `cargo init`, or a second skeleton generator — keep the existing stack and modify the scaffold inside the assigned worktree. Once you are in the assigned worktree, stay there for the rest of the task and do not switch back to the main checkout.
 
 ### 2. Implement the changes
 
@@ -115,16 +115,16 @@ When your task message includes a **PR Feedback** section, it means a reviewer r
 
 1. Check out the existing branch from the PR (the branch name is in the feedback context)
 2. If a worktree already exists for that branch, `cd` into it
-3. If not, create a worktree from the existing remote branch:
+3. If not, create a local worktree that tracks the existing remote branch:
    ```bash
-   REPO_ROOT="$(git rev-parse --show-toplevel)"
+   REPO_ROOT="/absolute/path/from-task-message"
    BRANCH="<branch-from-pr>"
    WORKTREE="${REPO_ROOT}.worktrees/${BRANCH}"
    git fetch origin "$BRANCH"
-   git worktree add "$WORKTREE" "origin/$BRANCH"
+   git worktree add -b "$BRANCH" "$WORKTREE" "origin/$BRANCH"
    cd "$WORKTREE"
    ```
-4. Address **only** the reviewer's comments — do not re-implement the original issue from scratch
+4. Address **only** the reviewer's comments on that same PR branch — do not switch to a new canonical issue branch and do not re-implement the original issue from scratch
 5. Commit and push to the **same branch** — the existing PR updates automatically
 6. End your response with the canonical developer result line described below
 

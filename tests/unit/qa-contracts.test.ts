@@ -54,8 +54,9 @@ describe("generateQaContract", () => {
   it("generates script with JS tools for node-cli", () => {
     const qc = generateQaContract({ spec: baseSpec, stack: "node-cli" });
     expect(qc.script_content).toContain("npm run lint");
-    expect(qc.script_content).toContain("npm run build -- --noEmit");
+    expect(qc.script_content).toContain("npm run typecheck");
     expect(qc.script_content).toContain("npm test");
+    expect(qc.script_content).toContain("npm run coverage");
     expect(qc.script_content).toContain("npm audit");
     expect(qc.script_content).toContain("node_modules/.bin");
   });

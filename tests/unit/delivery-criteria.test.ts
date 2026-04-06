@@ -30,7 +30,7 @@ describe("getDeliveryCriteria", () => {
 
     const nodeCli = getDeliveryCriteria("node-cli");
     expect(nodeCli.criteria.some(c => c.command.includes("npm run lint"))).toBe(true);
-    expect(nodeCli.criteria.some(c => c.command.includes("npm run build"))).toBe(true);
+    expect(nodeCli.criteria.some(c => c.command.includes("npm run typecheck"))).toBe(true);
     expect(nodeCli.criteria.some(c => c.command.includes("npm audit"))).toBe(true);
 
     const express = getDeliveryCriteria("express");

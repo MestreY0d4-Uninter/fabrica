@@ -348,7 +348,7 @@ $objective
 
 \`\`\`bash
 $(case "$stack" in
-  nextjs|express) echo "npm install" ;;
+  nextjs|express|node-cli) echo "npm install" ;;
   fastapi|flask|django) echo "python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt" ;;
   python-cli) echo "python -m venv .venv && source .venv/bin/activate && pip install -e '.[dev]'" ;;
 esac)
@@ -360,6 +360,7 @@ esac)
 $(case "$stack" in
   nextjs) echo "npm run dev" ;;
   express) echo "npm run dev" ;;
+  node-cli) echo "npm run dev -- \"Hello World CLI\"" ;;
   fastapi) echo "uvicorn app.main:app --reload" ;;
   flask) echo "flask run --debug" ;;
   django) echo "python manage.py runserver" ;;
@@ -460,21 +461,26 @@ scaffold_node_cli() {
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
-    "lint": "eslint src/",
+    "lint": "eslint .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage --coverage.thresholds.lines=80"
   },
   "dependencies": {
     "commander": "^14.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.0.0",
     "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^3.0.0",
     "eslint": "^9.0.0",
-    "typescript": "^5.7.0",
+    "globals": "^15.0.0",
     "tsx": "^4.0.0",
-    "vitest": "^3.0.0",
-    "@vitest/coverage-v8": "^3.0.0"
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.0.0"
   }
 }
 EOF
@@ -489,62 +495,127 @@ EOF
     "module": "ESNext",
     "moduleResolution": "bundler",
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "declaration": true
+    "declaration": true,
+    "types": ["node"]
   },
-  "include": ["src"],
-  "exclude": ["node_modules", "dist", "tests"]
+  "include": ["src", "tests"],
+  "exclude": ["node_modules", "dist"]
 }
 EOF
   FILES_CREATED+=("tsconfig.json")
+
+  cat > eslint.config.mjs <<'EOF'
+import js from '@eslint/js';
+import globals from 'globals';
+import tseslint from 'typescript-eslint';
+
+export default tseslint.config(
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
+  {
+    files: ['src/**/*.ts', 'tests/**/*.ts'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+    rules: {
+      'no-console': 'off',
+    },
+  },
+);
+EOF
+  FILES_CREATED+=("eslint.config.mjs")
 
   mkdir -p src
   cat > src/index.ts <<'EOF'
 #!/usr/bin/env node
 import { Command } from 'commander';
+import { pathToFileURL } from 'node:url';
 
-const program = new Command();
+export function toKebabCase(input: string): string {
+  return input
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase();
+}
 
-program
-  .name(process.env.npm_package_name ?? 'cli')
-  .version(process.env.npm_package_version ?? '0.1.0')
-  .description('CLI tool')
-  .argument('[args...]', 'arguments')
-  .action((args: string[]) => {
-    console.log('Hello from CLI', args.length ? args.join(' ') : '');
-  });
+export function createProgram(): Command {
+  return new Command()
+    .name(process.env.npm_package_name ?? 'cli')
+    .version(process.env.npm_package_version ?? '0.1.0')
+    .description('Convert a text argument to kebab-case')
+    .argument('<text>', 'text to convert')
+    .action((text: string) => {
+      console.log(toKebabCase(text));
+    });
+}
 
-program.parse();
+export function main(argv = process.argv): void {
+  createProgram().parse(argv);
+}
+
+const isDirectRun = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (isDirectRun) {
+  main();
+}
 EOF
   FILES_CREATED+=("src/index.ts")
 
   mkdir -p tests
   cat > tests/main.test.ts <<'EOF'
-import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createProgram, main, toKebabCase } from '../src/index.js';
 
-const cli = resolve(__dirname, '../src/index.ts');
+const cli = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 
-function run(...args: string[]): string {
-  return execFileSync('npx', ['tsx', cli, ...args], {
-    encoding: 'utf-8',
-    env: { ...process.env, NODE_NO_WARNINGS: '1' },
-  }).trim();
-}
+describe('toKebabCase', () => {
+  it('converts text with spaces and casing', () => {
+    expect(toKebabCase('Hello World CLI')).toBe('hello-world-cli');
+    expect(toKebabCase('Some_Mixed Case Text')).toBe('some-mixed-case-text');
+    expect(toKebabCase('  already-kebab  ')).toBe('already-kebab');
+  });
+});
 
-describe('CLI', () => {
-  it('should print hello message', () => {
-    const output = run();
-    expect(output).toContain('Hello from CLI');
+describe('main', () => {
+  const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+  afterEach(() => {
+    logSpy.mockClear();
   });
 
-  it('should show version with --version', () => {
-    const output = run('--version');
+  it('prints the kebab-case output', () => {
+    main(['node', 'hyphenator-cli', 'Hello World Example']);
+    expect(logSpy).toHaveBeenCalledWith('hello-world-example');
+  });
+
+  it('builds a command with metadata', () => {
+    const program = createProgram();
+    expect(program.name()).toBeTruthy();
+    expect(program.description()).toContain('kebab-case');
+  });
+});
+
+describe('CLI smoke', () => {
+  it('shows version with --version', () => {
+    const output = execFileSync('npx', ['tsx', cli, '--version'], {
+      encoding: 'utf-8',
+      env: { ...process.env, NODE_NO_WARNINGS: '1' },
+    }).trim();
+
     expect(output).toMatch(/\d+\.\d+\.\d+/);
   });
 });
@@ -559,23 +630,19 @@ echo "=== QA Gate ==="
 FAIL=0
 
 echo "--- Lint ---"
-npx eslint src/ 2>&1 || { echo "LINT FAILED"; FAIL=1; }
+npm run lint 2>&1 || { echo "LINT FAILED"; FAIL=1; }
 
 echo "--- TypeScript ---"
-npx tsc --noEmit 2>&1 || { echo "TSC FAILED"; FAIL=1; }
+npm run typecheck 2>&1 || { echo "TSC FAILED"; FAIL=1; }
 
 echo "--- Tests ---"
-npx vitest run 2>&1 || { echo "TESTS FAILED"; FAIL=1; }
+npm test 2>&1 || { echo "TESTS FAILED"; FAIL=1; }
 
 echo "--- Coverage (>=80%) ---"
-npx vitest run --coverage --coverage.thresholds.lines=80 2>&1 || { echo "COVERAGE FAILED"; FAIL=1; }
+npm run coverage 2>&1 || { echo "COVERAGE FAILED"; FAIL=1; }
 
-echo "--- Secrets scan ---"
-if grep -rn 'password\s*=\s*"[^"]\+"\|api_key\s*=\s*"[^"]\+"\|secret\s*=\s*"[^"]\+"' --include="*.ts" --include="*.js" src/ 2>/dev/null; then
-  echo "SECRETS FOUND — FAIL"; FAIL=1
-else
-  echo "No hardcoded secrets found"
-fi
+echo "--- Security audit ---"
+npm audit --audit-level=moderate 2>&1 || { echo "AUDIT FAILED"; FAIL=1; }
 
 exit $FAIL
 QAEOF

@@ -94,7 +94,14 @@ describe.sequential("qa bootstrap e2e", () => {
       private: true,
       type: "module",
       scripts: {
+        build: "tsc",
+        typecheck: "tsc --noEmit",
+        lint: "eslint .",
         test: "vitest run",
+        coverage: "vitest run --coverage --coverage.thresholds.lines=80",
+      },
+      dependencies: {
+        commander: "^14.0.0",
       },
       devDependencies: {
         "@eslint/js": "^9.0.0",
@@ -102,6 +109,7 @@ describe.sequential("qa bootstrap e2e", () => {
         "@vitest/coverage-v8": "^3.0.0",
         eslint: "^9.0.0",
         globals: "^15.0.0",
+        tsx: "^4.0.0",
         typescript: "^5.7.0",
         "typescript-eslint": "^8.0.0",
         vitest: "^3.0.0",
@@ -112,11 +120,14 @@ describe.sequential("qa bootstrap e2e", () => {
         target: "ES2022",
         module: "ESNext",
         moduleResolution: "Bundler",
+        rootDir: ".",
+        outDir: "dist",
         strict: true,
+        declaration: true,
         types: ["node"],
       },
-      include: ["src"],
-      exclude: ["tests"],
+      include: ["src", "tests"],
+      exclude: ["node_modules", "dist"],
     }, null, 2));
     await writeFile(path.join(repoPath, "eslint.config.mjs"), `import js from "@eslint/js";
 import globals from "globals";
@@ -132,13 +143,82 @@ export default tseslint.config(
   }
 );
 `);
-    await writeFile(path.join(repoPath, "src", "index.ts"), "export function sum(a: number, b: number): number { return a + b; }\n");
-    await writeFile(path.join(repoPath, "tests", "sum.test.ts"), `import { describe, expect, it } from "vitest";
-import { sum } from "../src/index.js";
+    await writeFile(path.join(repoPath, "src", "index.ts"), `#!/usr/bin/env node
+import { Command } from "commander";
+import { pathToFileURL } from "node:url";
 
-describe("sum", () => {
-  it("adds values", () => {
-    expect(sum(2, 3)).toBe(5);
+export function toKebabCase(input: string): string {
+  return input
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/[\\s_]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+}
+
+export function createProgram(): Command {
+  return new Command()
+    .name("fabrica-e2e-node")
+    .version("0.1.0")
+    .description("Convert text to kebab-case")
+    .argument("<text>")
+    .action((text: string) => {
+      console.log(toKebabCase(text));
+    });
+}
+
+export function main(argv = process.argv): void {
+  createProgram().parse(argv);
+}
+
+const isDirectRun = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (isDirectRun) {
+  main();
+}
+`);
+    await writeFile(path.join(repoPath, "tests", "main.test.ts"), `import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createProgram, main, toKebabCase } from "../src/index.js";
+
+const cli = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+
+describe("toKebabCase", () => {
+  it("converts multiple formats", () => {
+    expect(toKebabCase("Hello World CLI")).toBe("hello-world-cli");
+    expect(toKebabCase("Some_Mixed Case Text")).toBe("some-mixed-case-text");
+  });
+});
+
+describe("main", () => {
+  const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+  afterEach(() => {
+    logSpy.mockClear();
+  });
+
+  it("prints the transformed text", () => {
+    main(["node", "fabrica-e2e-node", "Hello World Example"]);
+    expect(logSpy).toHaveBeenCalledWith("hello-world-example");
+  });
+
+  it("builds program metadata", () => {
+    expect(createProgram().description()).toContain("kebab-case");
+  });
+});
+
+describe("CLI smoke", () => {
+  it("prints version", () => {
+    const output = execFileSync("npx", ["tsx", cli, "--version"], {
+      encoding: "utf-8",
+      env: { ...process.env, NODE_NO_WARNINGS: "1" },
+    }).trim();
+
+    expect(output).toBe("0.1.0");
   });
 });
 `);
@@ -149,7 +229,7 @@ describe("sum", () => {
     });
     await expect(fs.access(path.join(repoPath, "package-lock.json"))).resolves.toBeUndefined();
 
-    const qa = generateQaContract({ spec: baseSpec, stack: "express" });
+    const qa = generateQaContract({ spec: baseSpec, stack: "node-cli" });
     await writeExecutable(path.join(repoPath, "scripts", "qa.sh"), qa.script_content);
 
     const result = await runQa(repoPath, {

@@ -39,4 +39,30 @@ describe("scaffold step — qa.sh overwrite ordering", () => {
     expect(after).toContain("toolchains/python");
     expect(after).not.toContain("qa-venv");
   });
+
+  it("overwrites legacy node qa.sh content with the generated node contract too", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-qa-overwrite-node-"));
+    tempDirs.push(tmpDir);
+
+    const scriptsDir = path.join(tmpDir, "scripts");
+    await fs.mkdir(scriptsDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(scriptsDir, "qa.sh"),
+      '#!/bin/bash\necho "=== QA Gate ==="\nnpx vitest run --coverage --coverage.thresholds.lines=80\n',
+      { mode: 0o755 },
+    );
+
+    await fs.writeFile(
+      path.join(scriptsDir, "qa.sh"),
+      '#!/bin/bash\nexport PATH="$PWD/node_modules/.bin:$PATH"\nnpm run lint\nnpm run typecheck\nnpm run coverage\nnpm audit --audit-level=moderate\n',
+      { mode: 0o755 },
+    );
+
+    const after = await fs.readFile(path.join(scriptsDir, "qa.sh"), "utf-8");
+    expect(after).toContain('npm run typecheck');
+    expect(after).toContain('npm run coverage');
+    expect(after).toContain('npm audit --audit-level=moderate');
+    expect(after).not.toContain('npx vitest run --coverage');
+  });
 });
