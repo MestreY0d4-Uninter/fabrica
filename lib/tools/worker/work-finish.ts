@@ -150,7 +150,27 @@ export async function validatePrExistsForDeveloper(
 
     // Developer completion requires an OPEN PR. Historical merged PRs are not enough,
     // otherwise the reviewer/tester pipeline can be re-entered without a reviewable artifact.
+
     if (!prStatus.url || prStatus.state === PrState.MERGED || prStatus.state === PrState.CLOSED) {
+      // Specific guard: if on base branch with no open PR, give a clear actionable message
+      // instead of the generic "No PR found" error with the misleading --head main suggestion.
+      if (preferIssuePr && isCurrentProjectBaseBranch(branchName, baseBranch)) {
+        const currentBase = branchName || baseBranch || "main";
+        const suggestedBranch = `feature/${issueId}-${projectSlug.replace(/[^a-z0-9]+/g, "-").slice(0, 40)}`;
+        throw new Error(
+          `Cannot mark work_finish(done) while on the base branch ("${currentBase}") without an open PR.\n\n` +
+          `You must implement changes on a feature branch and open a PR before calling work_finish.\n\n` +
+          `Steps to fix:\n` +
+          `  1. git worktree add ../${projectSlug}.worktrees/${suggestedBranch} -b ${suggestedBranch}\n` +
+          `  2. cd ../${projectSlug}.worktrees/${suggestedBranch}\n` +
+          `  3. Implement the changes there, commit, push, and create a PR:\n` +
+          `     git push -u origin ${suggestedBranch}\n` +
+          `     gh pr create --base ${baseBranch ?? "main"} --head ${suggestedBranch} --title "feat: ..." --body "Closes #${issueId}"\n` +
+          `  4. Then call work_finish again.\n\n` +
+          `If the worktree already exists, cd into it and continue from there.`,
+        );
+      }
+
       // Get current branch for a helpful gh pr create example
       const currentBranch = branchName || "current-branch";
 
@@ -164,7 +184,7 @@ export async function validatePrExistsForDeveloper(
         `Cannot mark work_finish(done) without an open PR.\n\n` +
         `${reason}\n\n` +
         `Please create a PR first:\n` +
-        `  gh pr create --base main --head ${currentBranch} --title "..." --body "..."\n\n` +
+        `  gh pr create --base ${baseBranch ?? "main"} --head ${currentBranch} --title "..." --body "Closes #${issueId}"\n\n` +
         `Then call work_finish again.`,
       );
     }
