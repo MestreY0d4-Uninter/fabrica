@@ -626,20 +626,27 @@ EOF
   cat > scripts/qa.sh <<'QAEOF'
 #!/usr/bin/env bash
 set -euo pipefail
+ROOT="$(pwd)"
+sanitize_public_output() {
+  sed -E \
+    -e "s#${ROOT}#.#g" \
+    -e 's#file://[^[:space:]]+#file://.#g' \
+    -e 's#/home/[^[:space:]]+/git/[^[:space:]]+#.#g'
+}
 echo "=== QA Gate ==="
 FAIL=0
 
 echo "--- Lint ---"
-npm run lint 2>&1 || { echo "LINT FAILED"; FAIL=1; }
+npm run lint 2>&1 | sanitize_public_output || { echo "LINT FAILED"; FAIL=1; }
 
 echo "--- TypeScript ---"
-npm run typecheck 2>&1 || { echo "TSC FAILED"; FAIL=1; }
+npm run typecheck 2>&1 | sanitize_public_output || { echo "TSC FAILED"; FAIL=1; }
 
 echo "--- Tests ---"
-npm test 2>&1 || { echo "TESTS FAILED"; FAIL=1; }
+npm test 2>&1 | sanitize_public_output || { echo "TESTS FAILED"; FAIL=1; }
 
 echo "--- Coverage (>=80%) ---"
-npm run coverage 2>&1 || { echo "COVERAGE FAILED"; FAIL=1; }
+npm run coverage 2>&1 | sanitize_public_output || { echo "COVERAGE FAILED"; FAIL=1; }
 
 echo "--- Security audit ---"
 npm audit --audit-level=moderate 2>&1 || { echo "AUDIT FAILED"; FAIL=1; }
@@ -771,6 +778,13 @@ EOF
   cat > scripts/qa.sh <<'QAEOF'
 #!/usr/bin/env bash
 set -euo pipefail
+ROOT="$(pwd)"
+sanitize_public_output() {
+  sed -E \
+    -e "s#${ROOT}#.#g" \
+    -e 's#file://[^[:space:]]+#file://.#g' \
+    -e 's#/home/[^[:space:]]+/git/[^[:space:]]+#.#g'
+}
 echo "=== QA Gate ==="
 FAIL=0
 
@@ -778,13 +792,13 @@ echo "--- Lint ---"
 npx next lint . 2>&1 || { echo "LINT FAILED"; FAIL=1; }
 
 echo "--- TypeScript ---"
-npx tsc --noEmit 2>&1 || { echo "TSC FAILED"; FAIL=1; }
+npx tsc --noEmit 2>&1 | sanitize_public_output || { echo "TSC FAILED"; FAIL=1; }
 
 echo "--- Tests ---"
-npx vitest run 2>&1 || { echo "TESTS FAILED"; FAIL=1; }
+npx vitest run 2>&1 | sanitize_public_output || { echo "TESTS FAILED"; FAIL=1; }
 
 echo "--- Coverage (>=80%) ---"
-npx vitest run --coverage --coverage.thresholds.lines=80 2>&1 || { echo "COVERAGE FAILED"; FAIL=1; }
+npx vitest run --coverage --coverage.thresholds.lines=80 2>&1 | sanitize_public_output || { echo "COVERAGE FAILED"; FAIL=1; }
 
 echo "--- Secrets scan ---"
 if grep -rn 'password\s*=\s*"[^"]\+"\|api_key\s*=\s*"[^"]\+"\|secret\s*=\s*"[^"]\+"' --include="*.ts" --include="*.tsx" --include="*.js" src/ 2>/dev/null; then
@@ -910,20 +924,27 @@ EOF
   cat > scripts/qa.sh <<'QAEOF'
 #!/usr/bin/env bash
 set -euo pipefail
+ROOT="$(pwd)"
+sanitize_public_output() {
+  sed -E \
+    -e "s#${ROOT}#.#g" \
+    -e 's#file://[^[:space:]]+#file://.#g' \
+    -e 's#/home/[^[:space:]]+/git/[^[:space:]]+#.#g'
+}
 echo "=== QA Gate ==="
 FAIL=0
 
 echo "--- Lint ---"
-npx eslint src/ 2>&1 || { echo "LINT FAILED"; FAIL=1; }
+npx eslint src/ 2>&1 | sanitize_public_output || { echo "LINT FAILED"; FAIL=1; }
 
 echo "--- TypeScript ---"
-npx tsc --noEmit 2>&1 || { echo "TSC FAILED"; FAIL=1; }
+npx tsc --noEmit 2>&1 | sanitize_public_output || { echo "TSC FAILED"; FAIL=1; }
 
 echo "--- Tests ---"
-npx vitest run 2>&1 || { echo "TESTS FAILED"; FAIL=1; }
+npx vitest run 2>&1 | sanitize_public_output || { echo "TESTS FAILED"; FAIL=1; }
 
 echo "--- Coverage (>=80%) ---"
-npx vitest run --coverage --coverage.thresholds.lines=80 2>&1 || { echo "COVERAGE FAILED"; FAIL=1; }
+npx vitest run --coverage --coverage.thresholds.lines=80 2>&1 | sanitize_public_output || { echo "COVERAGE FAILED"; FAIL=1; }
 
 echo "--- Secrets scan ---"
 if grep -rn 'password\s*=\s*"[^"]\+"\|api_key\s*=\s*"[^"]\+"\|secret\s*=\s*"[^"]\+"' --include="*.ts" --include="*.js" src/ 2>/dev/null; then
@@ -1061,10 +1082,10 @@ echo "--- Mypy ---"
 mypy app/ 2>&1 || { echo "MYPY FAILED"; FAIL=1; }
 
 echo "--- Tests ---"
-python -m pytest tests/ -v 2>&1 || { echo "TESTS FAILED"; FAIL=1; }
+python -m pytest tests/ -v 2>&1 | sanitize_public_output || { echo "TESTS FAILED"; FAIL=1; }
 
 echo "--- Coverage (>=80%) ---"
-python -m pytest tests/ -q --cov=app --cov-report=term-missing --cov-fail-under=80 2>&1 || { echo "COVERAGE FAILED"; FAIL=1; }
+python -m pytest tests/ -q --cov=app --cov-report=term-missing --cov-fail-under=80 2>&1 | sanitize_public_output || { echo "COVERAGE FAILED"; FAIL=1; }
 
 echo "--- Secrets scan ---"
 if grep -rn 'password\s*=\s*"[^"]\+"\|api_key\s*=\s*"[^"]\+"\|secret\s*=\s*"[^"]\+"' --include="*.py" app/ 2>/dev/null; then
@@ -1192,10 +1213,10 @@ echo "--- Mypy ---"
 mypy app/ 2>&1 || { echo "MYPY FAILED"; FAIL=1; }
 
 echo "--- Tests ---"
-python -m pytest tests/ -v 2>&1 || { echo "TESTS FAILED"; FAIL=1; }
+python -m pytest tests/ -v 2>&1 | sanitize_public_output || { echo "TESTS FAILED"; FAIL=1; }
 
 echo "--- Coverage (>=80%) ---"
-python -m pytest tests/ -q --cov=app --cov-report=term-missing --cov-fail-under=80 2>&1 || { echo "COVERAGE FAILED"; FAIL=1; }
+python -m pytest tests/ -q --cov=app --cov-report=term-missing --cov-fail-under=80 2>&1 | sanitize_public_output || { echo "COVERAGE FAILED"; FAIL=1; }
 
 echo "--- Secrets scan ---"
 if grep -rn 'password\s*=\s*"[^"]\+"\|api_key\s*=\s*"[^"]\+"\|secret\s*=\s*"[^"]\+"' --include="*.py" app/ 2>/dev/null; then
@@ -1387,10 +1408,10 @@ echo "--- Mypy ---"
 mypy app/ 2>&1 || { echo "MYPY FAILED"; FAIL=1; }
 
 echo "--- Tests ---"
-python -m pytest tests/ -v 2>&1 || { echo "TESTS FAILED"; FAIL=1; }
+python -m pytest tests/ -v 2>&1 | sanitize_public_output || { echo "TESTS FAILED"; FAIL=1; }
 
 echo "--- Coverage (>=80%) ---"
-python -m pytest tests/ -q --cov=app --cov-report=term-missing --cov-fail-under=80 2>&1 || { echo "COVERAGE FAILED"; FAIL=1; }
+python -m pytest tests/ -q --cov=app --cov-report=term-missing --cov-fail-under=80 2>&1 | sanitize_public_output || { echo "COVERAGE FAILED"; FAIL=1; }
 
 echo "--- Secrets scan ---"
 if grep -rn 'password\s*=\s*"[^"]\+"\|api_key\s*=\s*"[^"]\+"\|secret\s*=\s*"[^"]\+"' --include="*.py" app/ 2>/dev/null; then
@@ -1526,10 +1547,10 @@ echo "--- Mypy ---"
 mypy src/ 2>&1 || { echo "MYPY FAILED"; FAIL=1; }
 
 echo "--- Tests ---"
-python -m pytest tests/ -v 2>&1 || { echo "TESTS FAILED"; FAIL=1; }
+python -m pytest tests/ -v 2>&1 | sanitize_public_output || { echo "TESTS FAILED"; FAIL=1; }
 
 echo "--- Coverage (>=80%) ---"
-python -m pytest tests/ -q --cov=src --cov-report=term-missing --cov-fail-under=80 2>&1 || { echo "COVERAGE FAILED"; FAIL=1; }
+python -m pytest tests/ -q --cov=src --cov-report=term-missing --cov-fail-under=80 2>&1 | sanitize_public_output || { echo "COVERAGE FAILED"; FAIL=1; }
 
 echo "--- Secrets scan ---"
 if grep -rn 'password\s*=\s*"[^"]\+"\|api_key\s*=\s*"[^"]\+"\|secret\s*=\s*"[^"]\+"' --include="*.py" src/ 2>/dev/null; then

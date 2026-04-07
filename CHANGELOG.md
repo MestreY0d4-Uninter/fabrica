@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.27 - 2026-04-07
+
+- Sanitized generated `scripts/qa.sh` output for greenfield scaffolds so canonical QA Evidence no longer leaks host-system paths into PR bodies during real Fabrica runs.
+- This prevents valid developer completions from being bounced back into feedback loops only because Vitest/coverage output included absolute local paths.
+
 ## 0.2.26 - 2026-04-07
 
 - Added a subagent-ended repair path for developer/tester/architect worker sessions so canonical completion can still be applied when a real worker run ends with a `Work result:` line but the primary `agent_end` path does not fire in time.
