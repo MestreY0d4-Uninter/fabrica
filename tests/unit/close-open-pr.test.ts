@@ -57,6 +57,74 @@ describe("closeIssue invariant", () => {
     }
   });
 
+  it("allows CLI close when canonical PR evidence already exists in runtime even if the tester summary is weak", async () => {
+    const unsafeWorkflow = {
+      ...DEFAULT_WORKFLOW,
+      states: {
+        ...DEFAULT_WORKFLOW.states,
+        testing: {
+          ...DEFAULT_WORKFLOW.states.testing,
+          on: {
+            ...DEFAULT_WORKFLOW.states.testing.on,
+            PASS: {
+              target: "done",
+              actions: ["closeIssue"],
+            },
+          },
+        },
+      },
+    } satisfies WorkflowConfig;
+
+    const h = await createTestHarness({
+      workflow: unsafeWorkflow,
+      workers: {
+        tester: { active: true, issueId: "30", level: "medior" },
+      },
+    });
+
+    try {
+      h.provider.seedIssue({ iid: 30, title: "CLI canonical PR evidence", labels: ["Testing"] });
+      const data = await h.readProjects();
+      data.projects[h.project.slug]!.stack = "python-cli";
+      data.projects[h.project.slug]!.issueRuntime = {
+        "30": {
+          currentPrNumber: 300,
+          currentPrState: "merged",
+          currentPrUrl: "https://example.com/pr/300",
+          currentPrIssueTarget: 30,
+          artifactOfRecord: {
+            prNumber: 300,
+            headSha: "abc12345",
+            mergedAt: "2026-04-07T16:00:00Z",
+            url: "https://example.com/pr/300",
+          },
+        },
+      };
+      await writeProjects(h.workspaceDir, data);
+
+      await executeCompletion({
+        workspaceDir: h.workspaceDir,
+        projectSlug: h.project.slug,
+        channels: h.project.channels,
+        role: "tester",
+        result: "pass",
+        issueId: 30,
+        summary: "ok",
+        provider: h.provider,
+        repoPath: h.project.repo,
+        projectName: h.project.name,
+        workflow: unsafeWorkflow,
+        runCommand: h.runCommand,
+      });
+
+      const issue = await h.provider.getIssue(30);
+      expect(issue.state).toBe("closed");
+      expect(h.provider.callsTo("closeIssue")).toHaveLength(1);
+    } finally {
+      await h.cleanup();
+    }
+  });
+
   it("refuses to close a CLI issue when the summary lacks CLI-specific evidence", async () => {
     const unsafeWorkflow = {
       ...DEFAULT_WORKFLOW,

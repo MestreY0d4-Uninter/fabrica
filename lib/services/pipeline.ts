@@ -308,8 +308,12 @@ export async function executeCompletion(opts: {
     : undefined;
 
   const closeRequested = completionRule.actions.includes(Action.CLOSE_ISSUE);
-  const hasEvidence = hasMeaningfulCompletionEvidence(effectiveSummary, prUrl, createdTasks);
-  const hasArchetypeEvidence = hasArchetypeSpecificEvidence(deliverable, effectiveSummary, prUrl, createdTasks);
+  const canonicalPrEvidenceUrl = prUrl
+    ?? issueRuntime?.currentPrUrl
+    ?? issueRuntime?.artifactOfRecord?.url
+    ?? undefined;
+  const hasEvidence = hasMeaningfulCompletionEvidence(effectiveSummary, canonicalPrEvidenceUrl, createdTasks);
+  const hasArchetypeEvidence = hasArchetypeSpecificEvidence(deliverable, effectiveSummary, canonicalPrEvidenceUrl, createdTasks);
   const finalAcceptance = buildFinalAcceptanceSummary({
     deliverable,
     qualityPolicy,

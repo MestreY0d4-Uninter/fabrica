@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.28 - 2026-04-07
+
+- Fixed final closeout evidence gating so tester-driven completion can use the canonical PR already stored in issue runtime/artifact metadata before deciding whether a CLI/project has meaningful evidence to close.
+- This removes a real false-negative seen in Telegram/OpenClaw validation where a project advanced through developer/reviewer/tester but the final heartbeat close was blocked despite an existing bound PR.
+
 ## 0.2.27 - 2026-04-07
 
 - Sanitized generated `scripts/qa.sh` output for greenfield scaffolds so canonical QA Evidence no longer leaks host-system paths into PR bodies during real Fabrica runs.
