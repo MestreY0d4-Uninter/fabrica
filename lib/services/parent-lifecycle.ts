@@ -44,10 +44,14 @@ function formatChildRollupLine(child: { issueId: number; runtime: IssueRuntimeSt
   const prUrl = runtime?.artifactOfRecord?.url ?? runtime?.currentPrUrl ?? null;
   const mergedAt = runtime?.artifactOfRecord?.mergedAt ?? null;
   const headSha = runtime?.artifactOfRecord?.headSha ?? runtime?.lastHeadSha ?? null;
+  const qualityCriticality = runtime?.qualityCriticality ?? null;
+  const riskProfile = runtime?.riskProfile ?? [];
   const extras = [
     prUrl ? `PR: ${prUrl}` : null,
     mergedAt ? `mergedAt: ${mergedAt}` : null,
     headSha ? `headSha: ${headSha}` : null,
+    qualityCriticality ? `qualityCriticality: ${qualityCriticality}` : null,
+    riskProfile.length > 0 ? `risks: ${riskProfile.join(",")}` : null,
   ].filter(Boolean);
   return `- #${child.issueId} — ${state}${extras.length > 0 ? ` — ${extras.join(" — ")}` : ""}`;
 }
@@ -58,12 +62,14 @@ const PARENT_ROLLUP_END = "<!-- fabrica:parent-rollup:end -->";
 function buildParentRollupComment(status: NonNullable<IssueRuntimeState["decompositionStatus"]>, completedChildIds: number[], blockedChildIds: number[], children: Array<{ issueId: number; runtime: IssueRuntimeState | undefined }>): string {
   const allChildIds = children.map((child) => child.issueId);
   const pendingChildIds = allChildIds.filter((id) => !completedChildIds.includes(id) && !blockedChildIds.includes(id));
+  const highCriticalityChildren = children.filter((child) => child.runtime?.qualityCriticality === "high").map((child) => child.issueId);
   return [
     "## Parent Rollup",
     `- Status: ${status}`,
     `- Completed children (${completedChildIds.length}/${allChildIds.length}): ${completedChildIds.length > 0 ? completedChildIds.map((id) => `#${id}`).join(", ") : "none"}`,
     `- Pending children: ${pendingChildIds.length > 0 ? pendingChildIds.map((id) => `#${id}`).join(", ") : "none"}`,
     `- Blocked children: ${blockedChildIds.length > 0 ? blockedChildIds.map((id) => `#${id}`).join(", ") : "none"}`,
+    `- High-criticality children: ${highCriticalityChildren.length > 0 ? highCriticalityChildren.map((id) => `#${id}`).join(", ") : "none"}`,
     "",
     "### Child Status",
     ...children.map((child) => formatChildRollupLine(child)),

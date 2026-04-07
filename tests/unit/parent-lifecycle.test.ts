@@ -54,6 +54,8 @@ describe("parent lifecycle reconciliation", () => {
           sessionCompletedAt: "2026-04-06T10:00:00Z",
           currentPrUrl: "https://example.com/pr/910",
           currentPrState: "open",
+          qualityCriticality: "high",
+          riskProfile: ["auth"],
         },
         "92": {
           parentIssueId: 90,
@@ -65,6 +67,8 @@ describe("parent lifecycle reconciliation", () => {
           currentPrUrl: "https://example.com/pr/920",
           currentPrIssueTarget: 92,
           lastHeadSha: "facefeed",
+          qualityCriticality: "medium",
+          riskProfile: ["data_model"],
           artifactOfRecord: {
             prNumber: 920,
             headSha: "facefeed",
@@ -94,8 +98,12 @@ describe("parent lifecycle reconciliation", () => {
       const parentIssue = await h.provider.getIssue(90);
       expect(parentIssue.labels).toContain("Done");
       expect(parentIssue.description).toContain("<!-- fabrica:parent-rollup:start -->");
+      expect(parentIssue.description).toContain("High-criticality children: #91");
       expect(parentIssue.description).toContain("#91 — completed_via_session — PR: https://example.com/pr/910");
+      expect(parentIssue.description).toContain("qualityCriticality: high");
+      expect(parentIssue.description).toContain("risks: auth");
       expect(parentIssue.description).toContain("#92 — completed_via_artifact — PR: https://example.com/pr/920");
+      expect(parentIssue.description).toContain("risks: data_model");
       expect(parentIssue.description).toContain("mergedAt: 2026-04-06T10:10:00Z");
       expect(parentIssue.description).toContain("headSha: facefeed");
 

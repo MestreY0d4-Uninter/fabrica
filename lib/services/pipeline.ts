@@ -6,11 +6,13 @@
 import type { PluginRuntime } from "openclaw/plugin-sdk";
 import { PrState, type StateLabel, type IssueProvider, type PrStatus } from "../providers/provider.js";
 import { deactivateWorker, loadProjectBySlug, getRoleWorker, getIssueRuntime, clearIssueRuntime, updateIssueRuntime } from "../projects/index.js";
+import type { Channel, Project } from "../projects/index.js";
 import type { PrSelector } from "../providers/provider.js";
 import type { RunCommand } from "../context.js";
 import { notify, getNotificationConfig } from "../dispatch/notify.js";
 import { log as auditLog } from "../audit.js";
 import { loadConfig } from "../config/index.js";
+import type { DeliveryTarget } from "../intake/types.js";
 import { detectStepRouting } from "./queue-scan.js";
 import { reconcileParentLifecycleForIssue } from "./parent-lifecycle.js";
 import {
@@ -25,9 +27,10 @@ import {
   type CompletionRule,
   type WorkflowConfig,
 } from "../workflow/index.js";
-import type { Channel } from "../projects/index.js";
 import { withCorrelationContext } from "../observability/context.js";
 import { withTelemetrySpan } from "../observability/telemetry.js";
+import { resolveQualityGatePolicy } from "../quality/quality-gates.js";
+import { resolveDonePolicy } from "../quality/done-policies.js";
 
 export type { CompletionRule };
 
@@ -39,6 +42,16 @@ export type CompletionOutput = {
   issueUrl?: string;
   issueClosed?: boolean;
   issueReopened?: boolean;
+  finalAcceptance?: FinalAcceptanceSummary;
+};
+
+export type FinalAcceptanceSummary = {
+  deliverable: string;
+  fidelityStatus: "pass" | "warn";
+  qualityGateStatus: "pass" | "warn";
+  evidenceStatus: "pass" | "fail";
+  donePolicyStatus: "pass" | "warn";
+  openConcerns: string[];
 };
 
 export type CloseGuardIssueRuntime = {
@@ -61,6 +74,83 @@ export type CloseGuardEvaluation = {
   reason?: "open_pr" | "missing_artifact_of_record" | "follow_up_pr_required";
   currentPrNumber?: number | null;
 };
+
+function hasMeaningfulCompletionEvidence(summary?: string, prUrl?: string, createdTasks?: Array<{ id: number; title: string; url: string }>): boolean {
+  if (summary && summary.trim().length >= 12) return true;
+  if (prUrl && prUrl.trim().length > 0) return true;
+  if (createdTasks && createdTasks.length > 0) return true;
+  return false;
+}
+
+function hasArchetypeSpecificEvidence(deliverable: DeliveryTarget, summary?: string, prUrl?: string, createdTasks?: Array<{ id: number; title: string; url: string }>): boolean {
+  if (prUrl && prUrl.trim().length > 0) return true;
+  if (createdTasks && createdTasks.length > 0) return true;
+  const text = (summary ?? "").toLowerCase();
+  if (!text) return deliverable === "unknown";
+  if (deliverable === "cli") return /cli|command|help|exit|argv|flag|terminal/.test(text);
+  if (deliverable === "api") return /api|endpoint|route|request|response|validation|handler/.test(text);
+  if (deliverable === "web-ui") return /ui|screen|page|render|flow|loading|error|form/.test(text);
+  if (deliverable === "hybrid") return /api|ui|flow|integration|endpoint|screen/.test(text);
+  return true;
+}
+
+function buildFinalAcceptanceSummary(opts: {
+  deliverable: string;
+  qualityPolicy: { requiredChecks: string[]; requiredEvidence: string[] };
+  donePolicy: { requiredArtifacts: string[]; requiredEvidence: string[] };
+  hasEvidence: boolean;
+  closeRequested: boolean;
+  qualityCriticality: "low" | "medium" | "high";
+  riskProfile: string[];
+}): FinalAcceptanceSummary {
+  const openConcerns: string[] = [];
+  if (!opts.hasEvidence) openConcerns.push("missing_meaningful_completion_evidence");
+  if (opts.deliverable === "unknown") openConcerns.push("deliverable_inference_is_unknown");
+  if (!opts.closeRequested) openConcerns.push("completion_did_not_request_close");
+  if (opts.qualityCriticality === "high") openConcerns.push("quality_criticality_high_requires_conservative_review");
+  if (opts.riskProfile.length > 0) openConcerns.push(...opts.riskProfile.map((risk) => `risk:${risk}`));
+
+  return {
+    deliverable: opts.deliverable,
+    fidelityStatus: opts.deliverable === "unknown" ? "warn" : "pass",
+    qualityGateStatus: opts.qualityPolicy.requiredChecks.length > 0 ? "pass" : "warn",
+    evidenceStatus: opts.hasEvidence ? "pass" : "fail",
+    donePolicyStatus: opts.donePolicy.requiredArtifacts.length > 0 ? "pass" : "warn",
+    openConcerns,
+  };
+}
+
+function resolvePipelineDeliverable(project?: Project | null): DeliveryTarget {
+  const stack = project?.environment?.stack ?? project?.stack ?? null;
+  if (stack === "nextjs") return "web-ui";
+  if (stack === "node-cli" || stack === "python-cli") return "cli";
+  if (stack === "express" || stack === "fastapi" || stack === "flask" || stack === "django") return "api";
+
+  const nameText = `${project?.name ?? ""} ${project?.slug ?? ""} ${project?.repo ?? ""}`.toLowerCase();
+  if (/\bcli\b|command/.test(nameText)) return "cli";
+  if (/\bapi\b|service|backend/.test(nameText)) return "api";
+  if (/dashboard|frontend|web|ui/.test(nameText)) return "web-ui";
+  return "unknown";
+}
+
+function buildHumanAcceptanceSummary(summary: FinalAcceptanceSummary): string {
+  const badges: string[] = [];
+  badges.push(`deliverable=${summary.deliverable}`);
+  badges.push(`evidence=${summary.evidenceStatus}`);
+  if (summary.fidelityStatus !== "pass") badges.push(`fidelity=${summary.fidelityStatus}`);
+  if (summary.qualityGateStatus !== "pass") badges.push(`quality=${summary.qualityGateStatus}`);
+  if (summary.donePolicyStatus !== "pass") badges.push(`done=${summary.donePolicyStatus}`);
+
+  const concerns = summary.openConcerns.filter((c) =>
+    c === "quality_criticality_high_requires_conservative_review" ||
+    c.startsWith("risk:") ||
+    c === "deliverable_inference_is_unknown",
+  );
+  if (concerns.length > 0) {
+    badges.push(`concerns=${concerns.slice(0, 3).join(",")}`);
+  }
+  return badges.join(" | ");
+}
 
 export async function persistMergedArtifact(opts: {
   workspaceDir: string;
@@ -209,9 +299,79 @@ export async function executeCompletion(opts: {
   let mergedArtifactHeadSha: string | undefined;
   const project = await loadProjectBySlug(workspaceDir, projectSlug);
   const issueRuntime = project ? getIssueRuntime(project, issueId) : undefined;
+  const deliverable = resolvePipelineDeliverable(project);
+  const qualityCriticality = issueRuntime?.qualityCriticality ?? "medium";
+  const qualityPolicy = resolveQualityGatePolicy({ deliverable, qualityCriticality });
+  const donePolicy = resolveDonePolicy({ deliverable, qualityCriticality: qualityPolicy.qualityCriticalityFloor });
   const prSelector: PrSelector | undefined = issueRuntime?.currentPrNumber
     ? { prNumber: issueRuntime.currentPrNumber }
     : undefined;
+
+  const closeRequested = completionRule.actions.includes(Action.CLOSE_ISSUE);
+  const hasEvidence = hasMeaningfulCompletionEvidence(effectiveSummary, prUrl, createdTasks);
+  const hasArchetypeEvidence = hasArchetypeSpecificEvidence(deliverable, effectiveSummary, prUrl, createdTasks);
+  const finalAcceptance = buildFinalAcceptanceSummary({
+    deliverable,
+    qualityPolicy,
+    donePolicy,
+    hasEvidence,
+    closeRequested,
+    qualityCriticality,
+    riskProfile: issueRuntime?.riskProfile ?? [],
+  });
+
+  await auditLog(workspaceDir, "completion_policy_snapshot", {
+    project: projectName,
+    issue: issueId,
+    role,
+    deliverable,
+    qualityGateChecks: qualityPolicy.requiredChecks,
+    requiredEvidence: qualityPolicy.requiredEvidence,
+    doneArtifacts: donePolicy.requiredArtifacts,
+    doneEvidence: donePolicy.requiredEvidence,
+    qualityCriticality,
+    qualityCriticalityFloor: qualityPolicy.qualityCriticalityFloor,
+    riskProfile: issueRuntime?.riskProfile ?? [],
+    finalAcceptance,
+  }).catch(() => {});
+
+  await auditLog(workspaceDir, "final_acceptance_summary", {
+    project: projectName,
+    issue: issueId,
+    role,
+    ...finalAcceptance,
+  }).catch(() => {});
+
+  if (closeRequested && !hasEvidence) {
+    await auditLog(workspaceDir, "completion_policy_block", {
+      project: projectName,
+      issue: issueId,
+      role,
+      result,
+      reason: "missing_completion_evidence",
+      deliverable,
+      requiredEvidence: donePolicy.requiredEvidence,
+    }).catch(() => {});
+    throw new Error(
+      `Refusing to complete issue #${issueId} without meaningful completion evidence for ${deliverable}. ` +
+      `Provide a substantive summary, PR evidence, or created-task evidence before close.`,
+    );
+  }
+
+  if (closeRequested && !hasArchetypeEvidence) {
+    await auditLog(workspaceDir, "completion_policy_block", {
+      project: projectName,
+      issue: issueId,
+      role,
+      result,
+      reason: "missing_archetype_specific_evidence",
+      deliverable,
+    }).catch(() => {});
+    throw new Error(
+      `Refusing to complete issue #${issueId} because the final summary lacks ${deliverable}-specific evidence. ` +
+      `Describe the relevant ${deliverable} behavior more concretely or attach PR/task evidence.`,
+    );
+  }
 
   const shouldBlockMergeBeforeTest = (
     completionRule.actions.includes(Action.MERGE_PR) &&
@@ -379,6 +539,8 @@ export async function executeCompletion(opts: {
   
   await provider.transitionLabel(issueId, completionRule.from as StateLabel, completionRule.to as StateLabel);
 
+  const acceptanceSummary = buildHumanAcceptanceSummary(finalAcceptance);
+
   // Execute post-transition actions
   for (const action of completionRule.actions) {
     switch (action) {
@@ -403,6 +565,7 @@ export async function executeCompletion(opts: {
             issueUrl: issue.web_url,
             issueTitle: issue.title,
             prUrl,
+            acceptanceSummary,
           },
           {
             workspaceDir,
@@ -474,6 +637,7 @@ export async function executeCompletion(opts: {
       name: workerName,
       result: effectiveResult as "done" | "pass" | "fail" | "refine" | "blocked",
       summary: effectiveSummary,
+      acceptanceSummary,
       nextState,
       prUrl,
       createdTasks,
@@ -591,6 +755,7 @@ export async function executeCompletion(opts: {
     issueUrl: issue.web_url,
     issueClosed: completionRule.actions.includes(Action.CLOSE_ISSUE),
     issueReopened: completionRule.actions.includes(Action.REOPEN_ISSUE),
+    finalAcceptance,
   };
 }
 

@@ -1465,6 +1465,7 @@ describe("E2E pipeline", () => {
         role: "tester",
         result: "pass",
         issueId: 90,
+        summary: "Tester verified the main flow and exit conditions successfully.",
         provider: h.provider,
         repoPath: "/tmp/test-repo",
         projectName: "test-project",
