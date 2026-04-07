@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.26 - 2026-04-07
+
+- Added a subagent-ended repair path for developer/tester/architect worker sessions so canonical completion can still be applied when a real worker run ends with a `Work result:` line but the primary `agent_end` path does not fire in time.
+- This closes a real Fabrica validation gap that could leave successful runtime-dispatched workers stuck in `Doing`/feedback loops even after the session had already ended cleanly.
+
 ## 0.2.25 - 2026-04-07
 
 - Improved Telegram bootstrap completion messaging so project topics and DM acknowledgements now include the GitHub issue and explicitly explain when automatic dispatch is paused by triage blockers.

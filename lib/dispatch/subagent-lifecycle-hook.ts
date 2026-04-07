@@ -23,6 +23,7 @@ import { createProvider } from "../providers/index.js";
 import { getActiveLabel, getRevertLabel } from "../workflow/index.js";
 import { wakeHeartbeat } from "../services/heartbeat/wake-bridge.js";
 import { handleReviewerAgentEnd } from "../services/reviewer-completion.js";
+import { handleWorkerAgentEnd } from "../services/worker-completion.js";
 
 export function registerSubagentLifecycleHook(
   api: OpenClawPluginApi,
@@ -156,6 +157,29 @@ export function registerSubagentLifecycleHook(
         }).catch(() => {});
 
         if (issueRuntime?.sessionCompletedAt) {
+          wakeHeartbeat("subagent_ended").catch(() => {});
+          return;
+        }
+
+        const workerOutcome = await handleWorkerAgentEnd({
+          sessionKey,
+          runId: event.runId,
+          workspaceDir,
+          runCommand: ctx.runCommand,
+          runtime: ctx.runtime as any,
+          pluginConfig: ctx.pluginConfig,
+        }).catch(() => null);
+        if (workerOutcome?.applied) {
+          wakeHeartbeat("subagent_ended").catch(() => {});
+          return;
+        }
+
+        const refreshedProjects = await readProjects(workspaceDir);
+        const refreshedProject = refreshedProjects.projects[projectSlug];
+        const refreshedIssueRuntime = issueId
+          ? refreshedProject?.issueRuntime?.[String(issueId)]
+          : undefined;
+        if (refreshedIssueRuntime?.sessionCompletedAt) {
           wakeHeartbeat("subagent_ended").catch(() => {});
           return;
         }

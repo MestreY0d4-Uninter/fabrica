@@ -12,6 +12,7 @@ const {
   mockLoadConfig,
   mockCreateProvider,
   mockHandleReviewerAgentEnd,
+  mockHandleWorkerAgentEnd,
 } = vi.hoisted(() => ({
   mockAuditLog: vi.fn(),
   mockReadProjects: vi.fn(),
@@ -19,6 +20,7 @@ const {
   mockLoadConfig: vi.fn(),
   mockCreateProvider: vi.fn(),
   mockHandleReviewerAgentEnd: vi.fn(),
+  mockHandleWorkerAgentEnd: vi.fn(),
 }));
 
 vi.mock("../../lib/audit.js", () => ({
@@ -45,6 +47,10 @@ vi.mock("../../lib/services/reviewer-completion.js", async () => {
     handleReviewerAgentEnd: mockHandleReviewerAgentEnd,
   };
 });
+
+vi.mock("../../lib/services/worker-completion.js", () => ({
+  handleWorkerAgentEnd: mockHandleWorkerAgentEnd,
+}));
 
 const workspaceDir = "/tmp/test-workspace";
 
@@ -134,6 +140,7 @@ describe("subagent_ended hook", () => {
       },
     });
     mockHandleReviewerAgentEnd.mockResolvedValue(null);
+    mockHandleWorkerAgentEnd.mockResolvedValue(null);
   });
 
   it("registers a subagent_ended hook via api.on when workspace is configured", () => {
@@ -175,6 +182,32 @@ describe("subagent_ended hook", () => {
         outcome: "ok",
       }),
     );
+  });
+
+  it("uses worker completion repair for developer sessions before fallback slot cleanup", async () => {
+    const { api, getHandler } = makeApi();
+    registerSubagentLifecycleHook(api, makeCtx(workspaceDir));
+    const handler = getHandler()!;
+
+    mockHandleWorkerAgentEnd.mockResolvedValue({ applied: true });
+
+    await handler(
+      {
+        targetSessionKey: "agent:fabrica:subagent:my-project-developer-medior-ada",
+        targetKind: "worker",
+        reason: "completed",
+        outcome: "ok",
+        runId: "run-1",
+      },
+      {},
+    );
+
+    expect(mockHandleWorkerAgentEnd).toHaveBeenCalledWith(expect.objectContaining({
+      sessionKey: "agent:fabrica:subagent:my-project-developer-medior-ada",
+      runId: "run-1",
+      workspaceDir,
+    }));
+    expect(mockDeactivateWorker).not.toHaveBeenCalled();
   });
 
   it("does nothing for non-worker session keys", async () => {
