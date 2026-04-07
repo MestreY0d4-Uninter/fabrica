@@ -271,7 +271,7 @@ describe("dispatch atomicity (C2 fix)", () => {
     expect(runtimeIdx).toBeLessThan(labelIdx);
   });
 
-  it("emits workerStart notifications with dispatch cycle identity", async () => {
+  it("emits workerStart notifications with dispatch cycle identity and trigger source", async () => {
     const { dispatchTask } = await import("../../lib/dispatch/index.js");
 
     await dispatchTask({
@@ -294,12 +294,14 @@ describe("dispatch atomicity (C2 fix)", () => {
       toLabel: "Doing",
       provider: makeProvider(),
       runCommand: makeRunCommand(),
+      triggerSource: "heartbeat_periodic",
     });
 
     expect(mockNotify).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "workerStart",
         dispatchCycleId: expect.any(String),
+        triggerSource: "heartbeat_periodic",
       }),
       expect.anything(),
     );

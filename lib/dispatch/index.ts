@@ -70,6 +70,8 @@ export type DispatchOpts = {
   instanceName?: string;
   /** Injected runCommand for dependency injection. */
   runCommand: RunCommand;
+  /** Origin of the dispatch cycle for auditability. */
+  triggerSource?: "heartbeat_periodic" | "bootstrap_immediate_tick" | "followup_tick" | "manual_target_role" | "unknown";
 };
 
 export type DispatchResult = {
@@ -105,6 +107,7 @@ export async function dispatchTask(
     issueDescription, issueUrl, role, level, fromLabel, toLabel,
     provider, pluginConfig, runtime,
   } = opts;
+  const triggerSource = opts.triggerSource ?? "unknown";
 
   const slotIndex = opts.slotIndex ?? 0;
   const rc = opts.runCommand;
@@ -168,6 +171,8 @@ export async function dispatchTask(
       role,
       level,
       fromLabel,
+      triggerSource,
+      dispatchSemantic: "feedback_redispatch",
       sessionKey: existingSessionKey,
       reason: "developer_feedback_cycle_requires_fresh_context",
     }).catch(() => {});
@@ -234,6 +239,8 @@ export async function dispatchTask(
         issue: issueId,
         role,
         level,
+        triggerSource,
+        dispatchSemantic: feedbackFreshSession ? "feedback_redispatch" : "fresh_dispatch",
         sessionKey,
         reason: feedbackFreshSession
           ? "gateway_session_alive_without_local_slot_tracking_after_feedback_reset"
@@ -536,6 +543,7 @@ export async function dispatchTask(
       effectiveModel: effectiveModel.downgraded ? model : undefined,
       dispatchCycleId,
       dispatchRunId: sendResult.runId,
+      triggerSource,
     },
     {
       workspaceDir,
@@ -556,13 +564,26 @@ export async function dispatchTask(
 
   // Step 5: Audit
   await auditDispatch(workspaceDir, {
-    project: project.name, issueId, issueTitle,
-    role, level, requestedModel: resolvedModel, resolvedModel, effectiveModel: model,
-    modelDowngraded: effectiveModel.downgraded, modelFallbackReason: effectiveModel.reason,
+    project: project.name,
+    issueId,
+    issueTitle,
+    role,
+    level,
+    requestedModel: resolvedModel,
+    resolvedModel,
+    effectiveModel: model,
+    modelDowngraded: effectiveModel.downgraded,
+    modelFallbackReason: effectiveModel.reason,
     modelAvailability: effectiveModel.availableModels,
     workflowMeta: resolvedConfig.workflowMeta,
-    sessionAction, sessionKey,
-    fromLabel, toLabel, sessionLabel, sessionLabelFull,
+    sessionAction,
+    dispatchSemantic,
+    triggerSource,
+    sessionKey,
+    fromLabel,
+    toLabel,
+    sessionLabel,
+    sessionLabelFull,
   });
 
   const announcement = buildAnnouncement(level, role, sessionAction, issueId, issueTitle, issueUrl, resolvedRole, botName);
@@ -611,6 +632,8 @@ async function auditDispatch(
     modelAvailability: string[];
     workflowMeta: WorkflowResolutionMeta;
     sessionAction: string;
+    dispatchSemantic: string;
+    triggerSource: string;
     sessionKey: string; fromLabel: string; toLabel: string; sessionLabel: string; sessionLabelFull: string;
   },
 ): Promise<void> {
@@ -618,7 +641,10 @@ async function auditDispatch(
     project: opts.project,
     issue: opts.issueId, issueTitle: opts.issueTitle,
     role: opts.role, level: opts.level,
-    sessionAction: opts.sessionAction, sessionKey: opts.sessionKey,
+    sessionAction: opts.sessionAction,
+    dispatchSemantic: opts.dispatchSemantic,
+    sessionKey: opts.sessionKey,
+    triggerSource: opts.triggerSource,
     sessionLabel: opts.sessionLabel,
     sessionLabelFull: opts.sessionLabelFull,
     labelTransition: `${opts.fromLabel} → ${opts.toLabel}`,
@@ -629,6 +655,8 @@ async function auditDispatch(
     role: opts.role,
     level: opts.level,
     sessionAction: opts.sessionAction,
+    dispatchSemantic: opts.dispatchSemantic,
+    triggerSource: opts.triggerSource,
     sessionKey: opts.sessionKey,
     sessionLabel: opts.sessionLabel,
     sessionLabelFull: opts.sessionLabelFull,

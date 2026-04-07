@@ -1604,6 +1604,7 @@ async function completeRegisteredBootstrap(
         runtime: ctx.runtime,
         runCommand: ctx.runCommand,
         maxPickups: 1,
+        triggerSource: "bootstrap_immediate_tick",
       });
     } catch (error) {
       logBootstrapWarning(ctx, `[telegram-bootstrap] immediate projectTick failed: ${error instanceof Error ? error.message : String(error)}`);

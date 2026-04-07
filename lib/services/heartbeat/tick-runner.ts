@@ -231,6 +231,7 @@ export async function tick(opts: {
         instanceName,
         runtime,
         runCommand,
+        triggerSource: "heartbeat_periodic",
       });
 
       result.totalPickups += tickResult.pickups.length;

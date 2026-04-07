@@ -215,5 +215,12 @@ describe.sequential("orchestration smoke", () => {
       .filter(Boolean)
       .map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(auditLines.some((entry) => entry.event === "reviewer_session_transition")).toBe(true);
+
+    const dispatchAuditEntries = auditLines.filter(
+      (entry) => entry.event === "session_dispatch_requested" && entry.issue === issueId,
+    );
+    expect(dispatchAuditEntries.length).toBeGreaterThanOrEqual(3);
+    expect(dispatchAuditEntries.some((entry) => entry.triggerSource === "unknown")).toBe(true);
+    expect(dispatchAuditEntries.some((entry) => entry.triggerSource === "followup_tick")).toBe(true);
   }, 60_000);
 });
