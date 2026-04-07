@@ -889,7 +889,7 @@ export async function handleWorkerAgentEnd(opts: {
     }).catch(() => {});
   }
 
-  if (observation.executionContractViolation) {
+  if (observation.executionContractViolation && (!observation.result || observation.executionContractViolation.reason === "worktree_drift")) {
     if (context) {
       const violationPayload = {
         sessionKey: opts.sessionKey,

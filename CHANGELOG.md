@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.33 - 2026-04-07
+
+- Refined the new worktree-drift guard so explicit `~/.openclaw/workspace` evidence only blocks completion when it is the actual execution-path violation, while canonical result precedence still holds for unrelated strong-evidence transcript matches.
+- This keeps the hardening introduced in 0.2.32 without breaking the established execution-surface contract tests.
+
 ## 0.2.32 - 2026-04-07
 
 - Added worker-completion recovery guards for explicit worktree drift evidence in subagent transcripts. When a worker produces a final result after falling back into `~/.openclaw/workspace`, Fabrica now marks the completion inconclusive instead of trusting the result line.
