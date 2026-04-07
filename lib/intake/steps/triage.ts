@@ -4,58 +4,33 @@
 import type { PipelineStep, GenesisPayload, Triage } from "../types.js";
 import type { StateLabel } from "../../providers/provider.js";
 import { runTriageLogic, type TriageMatrix } from "../lib/triage-logic.js";
+import { buildDecompositionChildDrafts } from "../lib/decomposition-planner.js";
+import { buildFidelityBrief } from "../lib/fidelity-brief.js";
 import { loadConfig } from "../../config/index.js";
 import { upsertTelegramBootstrapSession } from "../../dispatch/telegram-bootstrap-session.js";
+import { updateIssueRuntime } from "../../projects/index.js";
 
 import { createRequire } from "node:module";
 const _require = createRequire(import.meta.url);
 
 let cachedMatrix: TriageMatrix | null = null;
 
-type DecompositionChildDraft = {
-  title: string;
-  description: string;
-};
+function shouldAutoDecompose(decision: ReturnType<typeof runTriageLogic>): boolean {
+  if (!decision.readyForDispatch || decision.specQualityBlock) return false;
+  if (decision.effort === "xlarge") return true;
+  if (decision.effort !== "large") return false;
+  return decision.parallelizability !== "low" && decision.coupling !== "high";
+}
+
+function computeMaxParallelChildren(drafts: Array<{ parallelizable: boolean }>): number {
+  const parallelizableCount = drafts.filter((draft) => draft.parallelizable).length;
+  return Math.min(4, Math.max(1, parallelizableCount || 1));
+}
 
 function loadMatrix(): TriageMatrix {
   if (cachedMatrix) return cachedMatrix;
   cachedMatrix = _require("../configs/triage-matrix.json") as TriageMatrix;
   return cachedMatrix;
-}
-
-function buildChildDrafts(payload: GenesisPayload, issueNumber: number, effort: Triage["effort"]): DecompositionChildDraft[] {
-  const spec = payload.spec!;
-  const scopeItems = spec.scope_v1.filter((item) => item.trim().length > 0);
-  const maxChildren = effort === "xlarge" ? 4 : 3;
-  const chunkSize = 2;
-  const drafts: DecompositionChildDraft[] = [];
-
-  for (let i = 0; i < scopeItems.length && drafts.length < maxChildren; i += chunkSize) {
-    const slice = scopeItems.slice(i, i + chunkSize);
-    if (slice.length === 0) continue;
-    const childIndex = drafts.length + 1;
-    drafts.push({
-      title: `${spec.title} — Part ${childIndex}`,
-      description: [
-        `## Objective`,
-        spec.objective,
-        "",
-        `## Parent Issue`,
-        `Parent issue: #${issueNumber}`,
-        "",
-        `## This Part`,
-        ...slice.map((item) => `- ${item}`),
-        "",
-        `## Acceptance Criteria`,
-        ...spec.acceptance_criteria.map((item) => `- ${item}`),
-        "",
-        `## Definition of Done`,
-        ...spec.definition_of_done.map((item) => `- ${item}`),
-      ].join("\n"),
-    });
-  }
-
-  return drafts;
 }
 
 export const triageStep: PipelineStep = {
@@ -70,6 +45,12 @@ export const triageStep: PipelineStep = {
     const issue = payload.issues![0];
 
     ctx.log(`Running triage for issue #${issue.number}`);
+
+    const fidelityBrief = buildFidelityBrief({
+      rawIdea: payload.raw_idea,
+      spec,
+      metadata: payload.metadata,
+    });
 
     const decision = runTriageLogic({
       type: spec.type,
@@ -107,8 +88,9 @@ export const triageStep: PipelineStep = {
     if (!decision.readyForDispatch || decision.specQualityBlock) allLabels.push("needs-human");
     const uniqueLabels = Array.from(new Set(allLabels.filter(Boolean)));
 
-    const shouldDecompose = decision.readyForDispatch && !decision.specQualityBlock && ["large", "xlarge"].includes(decision.effort);
-    const decompositionDrafts = shouldDecompose ? buildChildDrafts(payload, issue.number, decision.effort) : [];
+    const decompositionRequested = decision.readyForDispatch && !decision.specQualityBlock && ["large", "xlarge"].includes(decision.effort);
+    const shouldDecompose = shouldAutoDecompose(decision);
+    const decompositionDrafts = shouldDecompose ? buildDecompositionChildDrafts(spec, issue.number, decision.effort) : [];
     const canDecompose = decompositionDrafts.length >= 2;
 
     let createdChildIssueNumbers: number[] = [];
@@ -132,25 +114,57 @@ export const triageStep: PipelineStep = {
         } else if (canDecompose) {
           await provider.addLabel(issue.number, "decomposition:parent");
           const childIssues = [] as Array<{ iid: number; title: string; web_url: string }>;
+          const createdChildren = [] as Array<{ iid: number; title: string; web_url: string; draft: typeof decompositionDrafts[number] }>;
           for (const draft of decompositionDrafts) {
             const child = await provider.createIssue(draft.title, draft.description, initialLabel as StateLabel);
             childIssues.push({ iid: child.iid, title: child.title, web_url: child.web_url });
+            createdChildren.push({ iid: child.iid, title: child.title, web_url: child.web_url, draft });
             createdChildIssueNumbers.push(child.iid);
             for (const label of uniqueLabels) {
               await provider.addLabel(child.iid, label);
             }
             await provider.addLabel(child.iid, "decomposition:child");
+            await provider.transitionLabel(child.iid, initialLabel as StateLabel, decision.targetState as StateLabel);
+            if (decision.targetState === "To Do" && decision.dispatchLabel) {
+              await provider.addLabel(child.iid, decision.dispatchLabel);
+            }
+            if (decision.targetState === "To Do") {
+              await provider.addLabel(child.iid, `developer:${draft.recommendedLevel}`);
+            }
+          }
+          if (projectSlug) {
+            for (const child of createdChildren) {
+              await updateIssueRuntime(ctx.workspaceDir, projectSlug, child.iid, {
+                parentIssueId: issue.number,
+                dependencyIssueIds: child.draft.dependencyIndexes.map((index) => createdChildren[index]?.iid).filter((value): value is number => Number.isFinite(value)),
+                childReadyForDispatch: decision.targetState === "To Do",
+                parallelizable: child.draft.parallelizable,
+                recommendedLevel: child.draft.recommendedLevel,
+                decompositionMode: "none",
+                decompositionStatus: null,
+              }).catch(() => {});
+            }
+            await updateIssueRuntime(ctx.workspaceDir, projectSlug, issue.number, {
+              childIssueIds: createdChildIssueNumbers,
+              maxParallelChildren: computeMaxParallelChildren(decompositionDrafts),
+              decompositionMode: "parent_child",
+              decompositionStatus: "active",
+            }).catch(() => {});
           }
           await provider.addComment(issue.number, [
             "## Decomposition Plan",
             ...childIssues.map((child) => `- [ ] #${child.iid} ${child.title}`),
           ].join("\n"));
-        } else if (shouldDecompose) {
+        } else if (decompositionRequested && shouldDecompose) {
           await provider.addLabel(issue.number, "needs-human");
           await provider.addComment(issue.number, [
-            "⚠️ Automatic decomposition was requested, but the generated spec did not yield at least two independently scoped child tasks.",
+            shouldDecompose
+              ? "⚠️ Automatic decomposition was requested, but the generated spec did not yield at least two independently scoped child tasks."
+              : "⚠️ This request is large, but triage detected high coupling / low parallelizability. Fabrica will keep it as one executable issue unless a human explicitly splits it.",
             "",
-            "Refine the scope/acceptance criteria or split the plan manually before dispatch.",
+            shouldDecompose
+              ? "Refine the scope/acceptance criteria or split the plan manually before dispatch."
+              : "If you still want multiple child issues, split the plan manually along stable boundaries before dispatch.",
           ].join("\n"));
         } else if (decision.readyForDispatch) {
           await provider.transitionLabel(issue.number, initialLabel as StateLabel, decision.targetState as StateLabel);
@@ -206,6 +220,11 @@ export const triageStep: PipelineStep = {
     const triage: Triage = {
       priority: decision.priority,
       effort: decision.effort,
+      complexity: decision.complexity,
+      coupling: decision.coupling,
+      parallelizability: decision.parallelizability,
+      quality_criticality: decision.qualityCriticality,
+      risk_profile: decision.riskProfile,
       target_state: decision.targetState,
       project_slug: payload.scaffold?.project_slug ?? null,
       project_channel_id: null,
@@ -215,7 +234,7 @@ export const triageStep: PipelineStep = {
       errors: [
         ...decision.errors,
         ...(decision.specQualityBlock ? ["spec_quality_block"] : []),
-        ...(shouldDecompose && !canDecompose ? ["decomposition_needs_human"] : []),
+        ...(decompositionRequested && shouldDecompose && !canDecompose ? ["decomposition_needs_human"] : []),
       ],
       decomposition_mode: canDecompose ? "parent_child" : "none",
       child_issue_numbers: createdChildIssueNumbers,
@@ -249,6 +268,11 @@ export const triageStep: PipelineStep = {
     return {
       ...payload,
       step: "triage",
+      fidelity_brief: fidelityBrief,
+      metadata: {
+        ...payload.metadata,
+        fidelity_brief: fidelityBrief,
+      },
       triage,
     };
   },

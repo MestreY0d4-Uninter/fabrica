@@ -13,6 +13,21 @@ function toBranchSlug(value: string): string {
     .slice(0, 48) || "task";
 }
 
+export function resolveExecutionSetup(opts: {
+  projectName: string;
+  issueId: number;
+  repo: string;
+  prBranchName?: string | null;
+}): { branchName: string; worktreePath: string } {
+  const branchName = opts.prBranchName?.trim()
+    ? opts.prBranchName.trim()
+    : `feature/${opts.issueId}-${toBranchSlug(opts.projectName)}`;
+  return {
+    branchName,
+    worktreePath: `${opts.repo}.worktrees/${branchName}`,
+  };
+}
+
 /**
  * Build the task message sent to a worker session.
  *
@@ -48,10 +63,12 @@ export function buildTaskMessage(opts: {
   } = opts;
   const repoDisplay = repo;
   const isFeedbackCycle = !!opts.prFeedback;
-  const branchName = opts.prFeedback?.branchName?.trim()
-    ? opts.prFeedback.branchName.trim()
-    : `feature/${issueId}-${toBranchSlug(projectName)}`;
-  const worktreePath = `${repoDisplay}.worktrees/${branchName}`;
+  const { branchName, worktreePath } = resolveExecutionSetup({
+    projectName,
+    issueId,
+    repo: repoDisplay,
+    prBranchName: opts.prFeedback?.branchName,
+  });
 
   const parts = [
     `${role.toUpperCase()} task for project "${projectName}" — Issue #${issueId}`,
@@ -74,10 +91,11 @@ export function buildTaskMessage(opts: {
     ``,
     `## Execution Setup (do this before editing files)`,
     `Repo: ${repoDisplay} | Base branch: ${baseBranch} | ${issueUrl}`,
-    `Execution path: ${repoDisplay}`,
+    `Execution path: ${worktreePath}`,
+    `Main checkout: ${repoDisplay}`,
     `Required branch: ${branchName}`,
     `Required worktree: ${worktreePath}`,
-    `Before editing any file, create or reuse the required worktree above and work only there.`,
+    `Before editing any file, change into the execution path above and work only there.`,
     `Do not re-initialize or replace the scaffold in the main checkout (for example: do not run npm init, cargo init, uv init, or create a second project skeleton) when the repo already contains scaffolded files. Modify the existing scaffold inside the worktree instead.`,
     `If the repo path is missing or inaccessible, return the canonical blocked result instead of improvising in ~/.openclaw/workspace.`,
   );
@@ -166,10 +184,12 @@ export function buildConflictFixMessage(opts: {
     issueUrl, repo, baseBranch, prFeedback,
   } = opts;
   const repoDisplay = repo;
-  const branchName = prFeedback.branchName?.trim()
-    ? prFeedback.branchName.trim()
-    : `feature/${issueId}-${toBranchSlug(projectName)}`;
-  const worktreePath = `${repoDisplay}.worktrees/${branchName}`;
+  const { branchName, worktreePath } = resolveExecutionSetup({
+    projectName,
+    issueId,
+    repo: repoDisplay,
+    prBranchName: prFeedback.branchName,
+  });
 
   const parts = [
     `${role.toUpperCase()} task for project "${projectName}" — Issue #${issueId}`,
@@ -185,10 +205,11 @@ export function buildConflictFixMessage(opts: {
     ``,
     `Repo: ${repoDisplay} | Base branch: ${baseBranch} | ${issueUrl}`,
     `Project: ${projectName} | Channel: ${channelId}`,
-    `Execution path: ${repoDisplay}`,
+    `Execution path: ${worktreePath}`,
+    `Main checkout: ${repoDisplay}`,
     `Required branch: ${branchName}`,
     `Required worktree: ${worktreePath}`,
-    `Start by changing into the canonical repo path above before reusing the PR branch or creating its worktree. Reuse the exact PR branch named above; do not switch to a new canonical issue branch during a feedback cycle. Do not resolve the issue inside ~/.openclaw/workspace unless the repo path itself points there.`,
+    `Start by changing into the execution path above before reusing the PR branch. Reuse the exact PR branch named above; do not switch to a new canonical issue branch during a feedback cycle. Do not resolve the issue inside ~/.openclaw/workspace unless the repo path itself points there.`,
   );
 
   parts.push(...buildCompletionContract(role));

@@ -4,6 +4,7 @@
  * Handles: session lookup, spawn/reuse via Gateway RPC, task dispatch via CLI,
  * state update (activateWorker), and audit logging.
  */
+import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type { PluginRuntime } from "openclaw/plugin-sdk";
 import type { RunCommand } from "../context.js";
@@ -35,8 +36,9 @@ import { selectIssueComments } from "./issue-comments.js";
 import { loadSecurityChecklist } from "./security-checklist.js";
 import { resolveEffectiveModelForGateway } from "../roles/model-fetcher.js";
 
-import { buildTaskMessage, buildConflictFixMessage, buildAnnouncement, formatSessionLabel, formatSessionLabelFull } from "./message-builder.js";
+import { buildTaskMessage, buildConflictFixMessage, buildAnnouncement, formatSessionLabel, formatSessionLabelFull, resolveExecutionSetup } from "./message-builder.js";
 import { buildEffortPrompt, ensureSessionReady, sendToAgent, shouldClearSession } from "./session.js";
+import { fetchGatewaySessions, isSessionAlive } from "../services/gateway-sessions.js";
 import { acknowledgeComments, EYES_EMOJI } from "./acknowledge.js";
 
 export type DispatchOpts = {
@@ -150,7 +152,8 @@ export async function dispatchTask(
   // the same issue. Reusing the old session tends to preserve the prior
   // “already done” mindset and can create a no-op loop where the developer keeps
   // sending `work_finish(done)` without addressing the new feedback.
-  if (existingSessionKey && role === "developer" && isFeedbackState(resolvedConfig.workflow, fromLabel)) {
+  const feedbackFreshSession = !!(existingSessionKey && role === "developer" && isFeedbackState(resolvedConfig.workflow, fromLabel));
+  if (feedbackFreshSession) {
     await rc(
       ["openclaw", "gateway", "call", "sessions.delete", "--params", JSON.stringify({ key: existingSessionKey })],
       { timeoutMs: 10_000 },
@@ -187,10 +190,17 @@ export async function dispatchTask(
     }
   }
 
+  const dispatchCycleId = randomUUID();
+
   // Compute session key deterministically (avoids waiting for gateway)
-  // Slot name provides both collision prevention and human-readable identity
+  // Slot name provides both collision prevention and human-readable identity.
+  // Feedback cycles intentionally get a fresh key so they cannot inherit stale
+  // context if gateway/session deletion silently fails or lags.
   const botName = slotName(project.name, role, level, slotIndex);
-  const sessionKey = `agent:${agentId ?? "unknown"}:subagent:${project.name}-${role}-${level}-${botName.toLowerCase()}`;
+  const deterministicSessionKey = `agent:${agentId ?? "unknown"}:subagent:${project.name}-${role}-${level}-${botName.toLowerCase()}`;
+  const sessionKey = feedbackFreshSession
+    ? `${deterministicSessionKey}-retry-${dispatchCycleId.slice(0, 8)}`
+    : deterministicSessionKey;
 
   // Clear stale session key if it doesn't match the current deterministic key
   // (handles migration from old numeric format like ...-0 to name-based ...-Cordelia)
@@ -207,8 +217,35 @@ export async function dispatchTask(
     }
   }
 
+  // If local project state has no tracked session for this slot, but the gateway still
+  // has a live session under the deterministic key, treat it as an orphan from a prior
+  // dispatch/recreation and delete it before reusing the key. Otherwise a fresh dispatch
+  // can inherit stale subagent context even though the local slot state was reset.
+  if (!existingSessionKey) {
+    const gatewaySessions = await fetchGatewaySessions(undefined, rc).catch(() => null);
+    if (gatewaySessions && isSessionAlive(sessionKey, gatewaySessions)) {
+      await rc(
+        ["openclaw", "gateway", "call", "sessions.delete", "--params", JSON.stringify({ key: sessionKey })],
+        { timeoutMs: 10_000 },
+      ).catch((err: Error) => console.error("[fabrica] silent-catch:", err.message));
+      await auditLog(workspaceDir, "session_orphan_reset", {
+        project: project.name,
+        projectSlug: project.slug,
+        issue: issueId,
+        role,
+        level,
+        sessionKey,
+        reason: feedbackFreshSession
+          ? "gateway_session_alive_without_local_slot_tracking_after_feedback_reset"
+          : "gateway_session_alive_without_local_slot_tracking",
+      }).catch(() => {});
+    }
+  }
+
   const sessionAction = existingSessionKey ? "send" : "spawn";
-  const dispatchCycleId = randomUUID();
+  const dispatchSemantic = feedbackFreshSession
+    ? "feedback_redispatch"
+    : (sessionAction === "send" ? "session_resume" : "fresh_dispatch");
 
   // Fetch issue discussion (filtered later based on role/phase)
   const allComments = await provider.listComments(issueId);
@@ -236,6 +273,54 @@ export async function dispatchTask(
   const primaryChannelId = project.slug;
   const isConflictFix = prFeedback?.reason === "merge_conflict";
   const repoContext = project.repo ? resolveRepoPath(project.repo) : (project.repoRemote?.replace(/\.git$/, "") || project.slug);
+  const executionSetup = resolveExecutionSetup({
+    projectName: project.name,
+    issueId,
+    repo: repoContext,
+    prBranchName: prFeedback?.branchName,
+  });
+  const localRepoPath = project.repo ? resolveRepoPath(project.repo) : null;
+  if (localRepoPath) {
+    const remoteStartRef = prFeedback?.branchName?.trim()
+      ? `origin/${executionSetup.branchName}`
+      : `origin/${project.baseBranch}`;
+    await fs.mkdir(`${localRepoPath}.worktrees`, { recursive: true }).catch(() => {});
+    const worktreeExists = await fs.stat(executionSetup.worktreePath).then(() => true).catch(() => false);
+    if (!worktreeExists) {
+      await rc(["git", "fetch", "origin", project.baseBranch], { timeoutMs: 30_000, cwd: localRepoPath }).catch(() => {});
+      if (prFeedback?.branchName?.trim()) {
+        await rc(["git", "fetch", "origin", executionSetup.branchName], { timeoutMs: 30_000, cwd: localRepoPath }).catch(() => {});
+      }
+      await rc(
+        ["git", "worktree", "add", executionSetup.worktreePath, "-B", executionSetup.branchName, remoteStartRef],
+        { timeoutMs: 60_000, cwd: localRepoPath },
+      );
+      await auditLog(workspaceDir, "dispatch_worktree_prepared", {
+        project: project.name,
+        projectSlug: project.slug,
+        issue: issueId,
+        role,
+        level,
+        branchName: executionSetup.branchName,
+        worktreePath: executionSetup.worktreePath,
+        mode: "create",
+      }).catch(() => {});
+    } else {
+      await rc(["git", "checkout", executionSetup.branchName], { timeoutMs: 30_000, cwd: executionSetup.worktreePath }).catch(() => {});
+      await rc(["git", "reset", "--hard", remoteStartRef], { timeoutMs: 30_000, cwd: executionSetup.worktreePath }).catch(() => {});
+      await rc(["git", "clean", "-fd"], { timeoutMs: 30_000, cwd: executionSetup.worktreePath }).catch(() => {});
+      await auditLog(workspaceDir, "dispatch_worktree_prepared", {
+        project: project.name,
+        projectSlug: project.slug,
+        issue: issueId,
+        role,
+        level,
+        branchName: executionSetup.branchName,
+        worktreePath: executionSetup.worktreePath,
+        mode: "reuse",
+      }).catch(() => {});
+    }
+  }
   const taskMessage = isConflictFix && prFeedback
     ? buildConflictFixMessage({
         projectName: project.name, channelId: primaryChannelId, role, issueId,
@@ -385,8 +470,53 @@ export async function dispatchTask(
     // Best-effort — label failure must not abort dispatch
   }
 
-  // Step 2: Send notification early (before session dispatch which can timeout)
-  // This ensures users see the notification even if gateway is slow
+  // Step 4c: Send task to agent.
+  // Treat runtime.subagent.run() as a real dispatch boundary: if it throws synchronously
+  // or rejects immediately, roll back instead of leaving a phantom "Doing" worker that
+  // was announced but never actually reached the agent runtime.
+  const dispatchEpoch = new Date().toISOString();
+  let sendResult: { method: "runtime.subagent.run" | "subprocess_fallback"; runId: string | null };
+  try {
+    sendResult = await sendToAgent(sessionKey, taskMessage, {
+      agentId, projectName: project.name, projectSlug: project.slug, issueId, role, level, slotIndex, fromLabel,
+      orchestratorSessionKey: opts.sessionKey, workspaceDir,
+      dispatchTimeoutMs: timeouts.dispatchMs,
+      extraSystemPrompt: buildEffortPrompt(
+        resolvedRole?.effort?.[level],
+        roleInstructions.trim() || undefined,
+      ) || undefined,
+      runCommand: rc,
+      runtime,
+      dispatchEpoch,
+    });
+  } catch (err) {
+    try {
+      await resilientLabelTransition(provider, issueId, toLabel, fromLabel,
+        (msg) => auditLog(workspaceDir, "dispatch_warning", { step: "send_rollback_label", issue: issueId, msg }).catch(() => {}),
+      );
+      await deactivateWorker(workspaceDir, project.slug, role, { level, slotIndex, issueId: String(issueId) });
+    } catch { /* best effort rollback */ }
+    throw new Error(`Dispatch send failed for issue #${issueId}: ${(err as Error).message ?? String(err)}`);
+  }
+
+  // Record lifecycle event only after the agent runtime accepted the dispatch setup.
+  await recordIssueLifecycle({
+    workspaceDir,
+    slug: project.slug,
+    issueId,
+    stage: "dispatch_requested",
+    sessionKey,
+    details: { role, level, slotIndex, sessionAction },
+  }).catch((err) => {
+    auditLog(workspaceDir, "dispatch_warning", {
+      project: project.name, issue: issueId, role,
+      warning: "Lifecycle event failed after successful dispatch",
+      error: (err as Error).message, sessionKey,
+    }).catch(() => {});
+  });
+
+  // Step 2: Notify only after dispatch setup is accepted, so Telegram never announces
+  // a worker start for a dispatch that failed before reaching the agent runtime.
   const notifyConfig = getNotificationConfig(pluginConfig);
   const notifyTarget = resolveNotifyChannel(issue?.labels ?? [], project.channels);
   notify(
@@ -400,11 +530,12 @@ export async function dispatchTask(
       level,
       name: botName,
       sessionAction,
+      dispatchSemantic,
       modelDowngraded: effectiveModel.downgraded,
       originalModel: effectiveModel.downgraded ? resolvedModel : undefined,
       effectiveModel: effectiveModel.downgraded ? model : undefined,
       dispatchCycleId,
-      dispatchRunId: null,
+      dispatchRunId: sendResult.runId,
     },
     {
       workspaceDir,
@@ -421,39 +552,6 @@ export async function dispatchTask(
       step: "notify", issue: issueId, role,
       error: (err as Error).message ?? String(err),
     }).catch((auditErr: Error) => console.error("[fabrica] silent-catch:", auditErr.message));
-  });
-
-  // Step 4c: Send task to agent (fire-and-forget — session already confirmed above)
-  // Model is set on the session via sessions.patch (pre-commitment), not on the agent RPC —
-  // the gateway's agent endpoint rejects unknown properties like 'model'.
-  const dispatchEpoch = new Date().toISOString();
-  sendToAgent(sessionKey, taskMessage, {
-    agentId, projectName: project.name, projectSlug: project.slug, issueId, role, level, slotIndex, fromLabel,
-    orchestratorSessionKey: opts.sessionKey, workspaceDir,
-    dispatchTimeoutMs: timeouts.dispatchMs,
-    extraSystemPrompt: buildEffortPrompt(
-      resolvedRole?.effort?.[level],
-      roleInstructions.trim() || undefined,
-    ) || undefined,
-    runCommand: rc,
-    runtime,
-    dispatchEpoch,
-  });
-
-  // Record lifecycle event (worker state already written in Step 4a)
-  await recordIssueLifecycle({
-    workspaceDir,
-    slug: project.slug,
-    issueId,
-    stage: "dispatch_requested",
-    sessionKey,
-    details: { role, level, slotIndex, sessionAction },
-  }).catch((err) => {
-    auditLog(workspaceDir, "dispatch_warning", {
-      project: project.name, issue: issueId, role,
-      warning: "Lifecycle event failed after successful dispatch",
-      error: (err as Error).message, sessionKey,
-    }).catch(() => {});
   });
 
   // Step 5: Audit

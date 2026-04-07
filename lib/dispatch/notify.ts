@@ -43,6 +43,7 @@ export type NotifyEvent =
       level: string;
       name?: string;
       sessionAction: "spawn" | "send";
+      dispatchSemantic?: "fresh_dispatch" | "session_resume" | "feedback_redispatch" | "recovery_redispatch" | "bootstrap_initial_dispatch" | null;
       modelDowngraded?: boolean;
       originalModel?: string;
       effectiveModel?: string;
@@ -242,12 +243,20 @@ function prLink(url: string): string {
 export function buildMessage(event: NotifyEvent): string {
   switch (event.type) {
     case "workerStart": {
-      const action = event.sessionAction === "spawn" ? "🚀 Started" : "▶️ Resumed";
+      const semanticAction = event.dispatchSemantic === "feedback_redispatch"
+        ? "🔁 Re-dispatched after feedback"
+        : event.dispatchSemantic === "recovery_redispatch"
+          ? "♻️ Re-dispatched after recovery"
+          : event.dispatchSemantic === "bootstrap_initial_dispatch"
+            ? "🧱 Started from bootstrap"
+            : event.sessionAction === "spawn"
+              ? "🚀 Started"
+              : "▶️ Resumed";
       const worker = formatWorkerString(event.role, {
         name: event.name,
         level: event.level,
       });
-      let msg = `${action} ${worker} on #${event.issueId}: ${event.issueTitle}\n🔗 [Issue #${event.issueId}](${event.issueUrl})`;
+      let msg = `${semanticAction} ${worker} on #${event.issueId}: ${event.issueTitle}\n🔗 [Issue #${event.issueId}](${event.issueUrl})`;
       if (event.modelDowngraded && event.originalModel && event.effectiveModel) {
         msg += `\n⚠️ Modelo: ${event.originalModel} → ${event.effectiveModel}`;
       }

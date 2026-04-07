@@ -8,7 +8,7 @@
  *
  * Run: npx tsx --test lib/services/pipeline.e2e.test.ts
  */
-import { describe, it, beforeEach, afterEach } from "vitest";
+import { describe, it, beforeEach, afterEach, expect } from "vitest";
 import assert from "node:assert";
 import { createTestHarness, type TestHarness } from "../testing/index.js";
 import { dispatchTask } from "../dispatch/index.js";
@@ -87,6 +87,39 @@ describe("E2E pipeline", () => {
       assert.ok(taskMsg.includes(h.project.slug), "Task message should include project slug");
       assert.ok(taskMsg.includes("Work result: DONE"), "Task message should include the canonical developer completion line");
       assert.ok(taskMsg.includes("Work result: BLOCKED"), "Task message should include the canonical developer blocked line");
+    });
+
+    it("rolls back the issue when runtime subagent dispatch fails before agent acceptance", async () => {
+      h.provider.seedIssue({ iid: 98, title: "Dispatch failure test", labels: ["To Do"] });
+
+      await expect(dispatchTask({
+        workspaceDir: h.workspaceDir,
+        agentId: "test-agent",
+        project: h.project,
+        issueId: 98,
+        issueTitle: "Dispatch failure test",
+        issueDescription: "Simulate synchronous runtime.subagent.run failure",
+        issueUrl: "https://example.com/issues/98",
+        role: "developer",
+        level: "medior",
+        fromLabel: "To Do",
+        toLabel: "Doing",
+        provider: h.provider,
+        runCommand: h.runCommand,
+        runtime: {
+          subagent: {
+            run: (() => { throw new Error("synthetic subagent failure"); }) as any,
+          },
+        } as any,
+      })).rejects.toThrow(/Dispatch send failed/);
+
+      const issue = await h.provider.getIssue(98);
+      expect(issue.labels).toContain("To Do");
+      expect(issue.labels).not.toContain("Doing");
+
+      const data = await readProjects(h.workspaceDir);
+      const rw = getRoleWorker(getProject(data, h.channelId)!, "developer");
+      expect(rw.levels.medior[0]!.active).toBe(false);
     });
 
     it("should set resolved model via sessions.patch, not agent RPC (#436)", async () => {

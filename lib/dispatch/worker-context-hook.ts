@@ -59,6 +59,9 @@ Do not delegate implementation, testing, review, or planning to another coding a
 Do not use nested coding agents.
 Do not use planning or meta-skills such as brainstorming, writing-plans, or coding-agent.
 Do not spawn, supervise, or instruct another agent to do the work for you.
+Do not weaken, replace, or bypass the canonical scripts/qa.sh contract just to make the task pass.
+Preserve the canonical QA gates: lint, types, security, tests, and coverage.
+If QA fails, fix the product code or project setup instead of rewriting the QA contract into ad-hoc scenario checks.
 If you cannot proceed directly in the assigned worktree, end with your role's canonical blocked result line.
 `;
 

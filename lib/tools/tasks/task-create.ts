@@ -97,11 +97,15 @@ export function createTaskCreateTool(ctx: PluginContext) {
       if (parentIssueId) {
         await updateIssueRuntime(workspaceDir, project.slug, issue.iid, {
           parentIssueId,
+          decompositionMode: "none",
+          decompositionStatus: null,
         }).catch(() => {});
         const parentRuntime = project.issueRuntime?.[String(parentIssueId)] ?? {};
         const previousChildren = Array.isArray(parentRuntime.childIssueIds) ? parentRuntime.childIssueIds : [];
         await updateIssueRuntime(workspaceDir, project.slug, parentIssueId, {
           childIssueIds: [...new Set([...previousChildren, issue.iid])],
+          decompositionMode: "parent_child",
+          decompositionStatus: "active",
         }).catch(() => {});
         provider.addComment(
           parentIssueId,

@@ -174,5 +174,18 @@ Exit code: 127
     expect(formatQaEvidenceValidationFailure(validation, "reviewer")).toContain(
       'Reject the PR and instruct the developer to replace the existing "## QA Evidence" section in the PR body',
     );
+    expect(formatQaEvidenceValidationFailure(validation, "reviewer")).toContain(
+      "Do not accept ad-hoc scenario scripts or weakened QA gates",
+    );
+  });
+
+  it("formats developer failures with explicit guidance to preserve canonical qa gates", () => {
+    const validation = validateQaEvidence("## Summary\n\nNo QA section here.");
+    expect(formatQaEvidenceValidationFailure(validation, "developer")).toContain(
+      "Do not rewrite or weaken scripts/qa.sh into ad-hoc scenario checks",
+    );
+    expect(formatQaEvidenceValidationFailure(validation, "developer")).toContain(
+      "lint/types/security/tests/coverage",
+    );
   });
 });

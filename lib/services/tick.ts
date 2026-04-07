@@ -26,7 +26,7 @@ import {
   type Role,
 } from "../workflow/index.js";
 import { detectRoleLevelFromLabels, detectStepRouting, findNextIssueForRole } from "./queue-scan.js";
-import { computeDispatchId, isDuplicate, recordDispatch, cleanupExpired } from "../dispatch/dispatch-dedup.js";
+import { claimDispatch, computeDispatchId, isDuplicate, recordDispatch, releaseDispatchClaim, cleanupExpired } from "../dispatch/dispatch-dedup.js";
 import { ROLE_REGISTRY } from "../roles/registry.js";
 
 // ---------------------------------------------------------------------------
@@ -165,7 +165,7 @@ export async function projectTick(opts: {
       }
     }
 
-    const next = await findNextIssueForRole(provider, role, workflow, instanceName);
+    const next = await findNextIssueForRole(provider, role, workflow, instanceName, fresh);
     if (!next) continue;
 
     const { issue, label: currentLabel } = next;
@@ -321,13 +321,6 @@ export async function projectTick(opts: {
       continue;
     }
 
-    // F1-3: Dedup guard — skip if same issue/role/level was dispatched in the last 5 min
-    const dispatchId = computeDispatchId(projectSlug, issue.iid, role, effectiveLevel);
-    if (await isDuplicate(workspaceDir, dispatchId)) {
-      skipped.push({ role, reason: `dispatch_dedup: ${dispatchId}` });
-      continue;
-    }
-
     if (role === "developer" || role === "tester") {
       const stack = fresh.stack;
       if (!stack) {
@@ -371,6 +364,20 @@ export async function projectTick(opts: {
       }
     }
 
+    // F1-3: Dedup guard — skip if same issue/role/level was dispatched in the last 5 min.
+    // Only claim once we know the issue is actually dispatchable. Dry runs stay side-effect free.
+    const dispatchId = computeDispatchId(projectSlug, issue.iid, role, effectiveLevel);
+    if (!dryRun) {
+      if (await isDuplicate(workspaceDir, dispatchId)) {
+        skipped.push({ role, reason: `dispatch_dedup: ${dispatchId}` });
+        continue;
+      }
+      if (!(await claimDispatch(workspaceDir, dispatchId))) {
+        skipped.push({ role, reason: `dispatch_claimed: ${dispatchId}` });
+        continue;
+      }
+    }
+
     if (dryRun) {
       const existingSession = roleWorker.levels[effectiveLevel]?.[freeSlot]?.sessionKey;
       pickups.push({
@@ -400,6 +407,7 @@ export async function projectTick(opts: {
         // F1-3: Record dispatch for dedup
         await recordDispatch(workspaceDir, dispatchId).catch(() => {}); // best-effort
       } catch (err) {
+        releaseDispatchClaim(dispatchId);
         skipped.push({ role, reason: `Dispatch failed: ${(err as Error).message}` });
         continue;
       }

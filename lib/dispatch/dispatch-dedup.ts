@@ -12,8 +12,10 @@ import { DATA_DIR } from "../setup/constants.js";
 const DEDUP_FILE = "dispatch-dedup.ndjson";
 const BUCKET_MS = 5 * 60_000; // 5 minutes
 const DEFAULT_TTL_MS = 30 * 60_000; // 30 minutes
+const ACTIVE_CLAIM_TTL_MS = 10 * 60_000; // 10 minutes safety net for in-process races
 
 type DedupEntry = { id: string; ts: number };
+const activeClaims = new Map<string, number>();
 
 function dedupPath(workspaceDir: string): string {
   return path.join(workspaceDir, DATA_DIR, DEDUP_FILE);
@@ -49,12 +51,42 @@ async function readEntries(filePath: string): Promise<DedupEntry[]> {
   }
 }
 
+function sweepExpiredClaims(now: number = Date.now()): void {
+  for (const [dispatchId, expiresAt] of activeClaims.entries()) {
+    if (expiresAt <= now) activeClaims.delete(dispatchId);
+  }
+}
+
 /**
  * Check if a dispatch ID was already recorded.
  */
 export async function isDuplicate(workspaceDir: string, dispatchId: string): Promise<boolean> {
+  sweepExpiredClaims();
+  if (activeClaims.has(dispatchId)) return true;
   const entries = await readEntries(dedupPath(workspaceDir));
   return entries.some((e) => e.id === dispatchId);
+}
+
+/**
+ * Reserve a dispatch ID before the expensive async dispatch flow starts.
+ * Returns true if the caller acquired the claim, false if another in-process
+ * dispatcher already holds it or if it was already persisted.
+ */
+export async function claimDispatch(workspaceDir: string, dispatchId: string): Promise<boolean> {
+  sweepExpiredClaims();
+  if (activeClaims.has(dispatchId)) return false;
+  const entries = await readEntries(dedupPath(workspaceDir));
+  if (entries.some((e) => e.id === dispatchId)) return false;
+  activeClaims.set(dispatchId, Date.now() + ACTIVE_CLAIM_TTL_MS);
+  return true;
+}
+
+/**
+ * Release an in-process claim when dispatch setup fails before the completed
+ * dispatch is persisted.
+ */
+export function releaseDispatchClaim(dispatchId: string): void {
+  activeClaims.delete(dispatchId);
 }
 
 /**
@@ -65,6 +97,7 @@ export async function recordDispatch(workspaceDir: string, dispatchId: string): 
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const entry: DedupEntry = { id: dispatchId, ts: Date.now() };
   await fs.appendFile(filePath, JSON.stringify(entry) + "\n", "utf-8");
+  activeClaims.delete(dispatchId);
 }
 
 /**

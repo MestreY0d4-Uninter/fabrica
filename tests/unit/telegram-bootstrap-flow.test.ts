@@ -723,6 +723,33 @@ describe("telegram bootstrap clarification flow", () => {
     expect(pipelinePayload.metadata.project_name).toBe("task-manager-api");
   });
 
+  it("preserves explicit project name from natural language phrasing on the initial DM", async () => {
+    mockRunPipeline.mockResolvedValue({
+      success: true,
+      payload: {
+        metadata: {
+          channel_id: "-1003709213169",
+          message_thread_id: 912,
+          project_slug: "csv-contract-cli",
+          project_name: "csv-contract-cli",
+        },
+      },
+    });
+
+    await handler?.(
+      {
+        content: "Build a Python CLI that validates CSV files against a required column contract, prints a clear summary of missing/extra columns, and exits non-zero when validation fails. Please use the project name csv-contract-cli.",
+        metadata: {},
+      },
+      { channelId: "telegram", conversationId: CONVERSATION_ID },
+    );
+
+    await vi.waitFor(() => expect(mockRunPipeline).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    const pipelinePayload = mockRunPipeline.mock.calls[0]?.[0];
+    expect(pipelinePayload.metadata.stack_hint).toBe("python-cli");
+    expect(pipelinePayload.metadata.project_name).toBe("csv-contract-cli");
+  });
+
   it("continueBootstrap generates fallback slug when rawIdea empty and name was already asked (Bug J level 2)", async () => {
     // Seed a session with pendingClarification: "name" so level 2 guard fires
     // when continueBootstrap is called with projectName: null and rawIdea that

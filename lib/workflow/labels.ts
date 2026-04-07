@@ -49,6 +49,8 @@ export const OPERATIONAL_LABELS: ReadonlyArray<{ name: string; color: string }> 
   { name: "type:infra",        color: "5319E7" },
   { name: "needs-human",       color: "d73a4a" },
   { name: "approved",          color: "0e8a16" },
+  { name: "decomposition:parent", color: "1d76db" },
+  { name: "decomposition:child",  color: "5319e7" },
 ] as const;
 
 /** Step routing label color. */

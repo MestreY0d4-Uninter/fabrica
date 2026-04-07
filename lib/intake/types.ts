@@ -28,6 +28,14 @@ export type TriagePriority = "P0" | "P1" | "P2" | "P3";
 
 export type TriageEffort = "small" | "medium" | "large" | "xlarge";
 
+export type TriageComplexity = "low" | "medium" | "high";
+
+export type TriageCoupling = "low" | "medium" | "high";
+
+export type TriageParallelizability = "low" | "medium" | "high";
+
+export type TriageQualityCriticality = "low" | "medium" | "high";
+
 export type GenesisAnswers = Record<string, string>;
 
 export type GenesisAnswersJson = Record<string, unknown>;
@@ -115,6 +123,28 @@ export type Spec = {
   constraints: string;
   risks: string[];
   delivery_target: DeliveryTarget;
+};
+
+// ---------------------------------------------------------------------------
+// Fidelity Brief
+// ---------------------------------------------------------------------------
+
+export type FidelityConfidence = "low" | "medium" | "high";
+
+export type FidelityDeliverable = DeliveryTarget | "library" | "automation";
+
+export type FidelityBrief = {
+  primary_objective: string;
+  requested_deliverable: FidelityDeliverable;
+  requested_stack?: string | null;
+  inferred_stack?: string | null;
+  hard_constraints: string[];
+  soft_preferences: string[];
+  explicit_non_goals: string[];
+  quality_expectations: string[];
+  ambiguity_flags: string[];
+  risk_signals: string[];
+  confidence: FidelityConfidence;
 };
 
 // ---------------------------------------------------------------------------
@@ -242,6 +272,11 @@ export type CreatedIssue = {
 export type Triage = {
   priority: TriagePriority;
   effort: TriageEffort;
+  complexity?: TriageComplexity;
+  coupling?: TriageCoupling;
+  parallelizability?: TriageParallelizability;
+  quality_criticality?: TriageQualityCriticality;
+  risk_profile?: string[];
   target_state: string;
   project_slug: string | null;
   project_channel_id: string | null;
@@ -293,6 +328,7 @@ export type PipelineMetadata = {
   repo_provisioned?: boolean;
   needs_spec_refinement?: boolean;
   needs_human_security?: boolean;
+  fidelity_brief?: FidelityBrief | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -315,6 +351,7 @@ export type GenesisPayload = {
   interview?: Interview;
   spec_data?: SpecData;
   spec?: Spec;
+  fidelity_brief?: FidelityBrief;
   project_map?: ProjectMap;
   impact?: Impact;
   scaffold?: Scaffold;

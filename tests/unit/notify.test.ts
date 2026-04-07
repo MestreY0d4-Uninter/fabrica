@@ -255,6 +255,24 @@ describe("notify", () => {
     }
   });
 
+  it("formats workerStart with explicit feedback redispatch semantics", () => {
+    const message = buildMessage({
+      type: "workerStart",
+      project: "demo",
+      issueId: 44,
+      issueUrl: "https://example.com/issues/44",
+      issueTitle: "Fix follow-up",
+      role: "developer",
+      level: "senior",
+      name: "Ada",
+      sessionAction: "spawn",
+      dispatchSemantic: "feedback_redispatch",
+    } as any);
+
+    expect(message).toContain("Re-dispatched after feedback");
+    expect(message).toContain("DEVELOPER Ada (senior)");
+  });
+
   it("formats workerRecoveryExhausted as an explicit operational failure timeline event", () => {
     const message = buildMessage({
       type: "workerRecoveryExhausted",

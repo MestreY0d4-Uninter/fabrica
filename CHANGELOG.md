@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.23 - 2026-04-07
+
+- Completed the parent/child runtime promotion for large work: decomposition metadata is now canonical in issue runtime, child issues carry dependency bindings, recommended level hints, and parent families persist a parallelism ceiling.
+- Upgraded decomposition from naive chunking to child drafts with capability areas, execution profiles, dependency hints, and queue-ready child transitions so large initiatives can enter the normal worker flow safely.
+- Made triage distinguish effort from parallelizability/coupling: tightly coupled `large` work no longer auto-splits just because it is big, while decomposable work can fan out into child execution families.
+- Added family-aware scheduling and parent lifecycle reconciliation: parent issues stay coordinator-only, dependency ordering is respected, sibling parallelism is capped, blocked children propagate to the parent rollup, and completed families auto-close the parent dashboard issue.
+- Hardened Telegram DM bootstrap naming/clarification, dispatch atomicity tests, environment-gate ordering, and pipeline/e2e coverage so the release gate (`npm publish --dry-run`) passes end-to-end again.
+
 ## 0.2.20 - 2026-04-06
 
 - **Bug fix (clarification):** Added scope-ambiguity detection to the Telegram bootstrap flow. When a request spans 3+ subsystems (auth, notifications, workers, DB...) without explicit tech choices, the bot now asks for clarification before registering the project instead of proceeding with a vague LLM-minimised spec. User can reply "livre"/"your call" to skip and let the bot decide. Closes #1.

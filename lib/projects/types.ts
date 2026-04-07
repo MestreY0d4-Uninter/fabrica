@@ -70,6 +70,16 @@ export type IssueRuntimeState = {
   lastConflictDetectedAt?: string | null;
   parentIssueId?: number | null;
   childIssueIds?: number[];
+  completedChildIssueIds?: number[];
+  blockedChildIssueIds?: number[];
+  dependencyIssueIds?: number[];
+  maxParallelChildren?: number;
+  childReadyForDispatch?: boolean;
+  parallelizable?: boolean;
+  recommendedLevel?: "junior" | "medior" | "senior" | null;
+  decompositionMode?: "none" | "parent_child" | null;
+  decompositionStatus?: "draft" | "active" | "completed" | "blocked" | null;
+  lastParentRollupAt?: string | null;
   infraFailCount?: number;
   // Diagnostic-first escalation tracking (v0.2.0)
   dispatchAttemptCount?: number;

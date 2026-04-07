@@ -214,10 +214,10 @@ export function buildEffortPrompt(
   return effortPrefix ?? roleInstructions ?? "";
 }
 
-export function sendToAgent(
+export async function sendToAgent(
   sessionKey: string, taskMessage: string,
   opts: { agentId?: string; projectName: string; projectSlug?: string; issueId: number; role: string; level?: string; slotIndex?: number; fromLabel?: string; orchestratorSessionKey?: string; workspaceDir: string; dispatchTimeoutMs?: number; extraSystemPrompt?: string; runCommand: RunCommand; runtime?: PluginRuntime; dispatchEpoch?: string },
-): void {
+): Promise<{ method: "runtime.subagent.run" | "subprocess_fallback"; runId: string | null }> {
   // dispatchEpoch ensures retries (after slot cleanup + label revert) get a fresh
   // idempotency key so OpenClaw doesn't deduplicate them as already-completed sessions.
   const epoch = opts.dispatchEpoch ?? new Date().toISOString();
@@ -227,18 +227,19 @@ export function sendToAgent(
   // entirely, avoiding the WS handshake timeout caused by event-loop contention
   // during heartbeat ticks.
   if (opts.runtime?.subagent?.run) {
-    opts.runtime.subagent.run({
-      sessionKey,
-      message: taskMessage,
-      idempotencyKey,
-      lane: "subagent",
-      deliver: false,
-      ...(opts.extraSystemPrompt ? { extraSystemPrompt: opts.extraSystemPrompt } : {}),
-    }).then((result) => {
+    try {
+      const result = await opts.runtime.subagent.run({
+        sessionKey,
+        message: taskMessage,
+        idempotencyKey,
+        lane: "subagent",
+        deliver: false,
+        ...(opts.extraSystemPrompt ? { extraSystemPrompt: opts.extraSystemPrompt } : {}),
+      });
       if (result?.runId) {
-        bindDispatchRunIdBySessionKey(opts.workspaceDir, sessionKey, result.runId).catch(() => {});
+        await bindDispatchRunIdBySessionKey(opts.workspaceDir, sessionKey, result.runId).catch(() => {});
       }
-      auditLog(opts.workspaceDir, "dispatch_agent_sent", {
+      await auditLog(opts.workspaceDir, "dispatch_agent_sent", {
         step: "sendToAgent", sessionKey,
         issue: opts.issueId, role: opts.role,
         method: "runtime.subagent.run",
@@ -246,7 +247,7 @@ export function sendToAgent(
       }).catch(() => {});
       // runtime.subagent.run is in-process — the dispatch is confirmed immediately.
       // Record agent_accepted so the health checker doesn't flag this as dispatch_unconfirmed.
-      recordIssueLifecycle({
+      await recordIssueLifecycle({
         workspaceDir: opts.workspaceDir,
         slug: opts.projectSlug ?? opts.projectName,
         issueId: opts.issueId,
@@ -254,15 +255,23 @@ export function sendToAgent(
         sessionKey,
         details: { method: "runtime.subagent.run" },
       }).catch(() => {});
-    }).catch((err) => {
+      return { method: "runtime.subagent.run", runId: result?.runId ?? null };
+    } catch (err) {
+      const errorMessage = (err as Error).message ?? String(err);
       auditLog(opts.workspaceDir, "dispatch_warning", {
         step: "sendToAgent", sessionKey,
         issue: opts.issueId, role: opts.role,
         method: "runtime.subagent.run",
-        error: (err as Error).message ?? String(err),
+        error: errorMessage,
       }).catch(() => {});
-    });
-    return;
+      if (/only available during a gateway request/i.test(errorMessage)) {
+        // This can happen when bootstrap-triggered projectTick runs outside a live gateway
+        // request context. Fall through to the subprocess path instead of failing the
+        // dispatch and leaving the issue in a phantom active state.
+      } else {
+        throw err;
+      }
+    }
   }
 
   // Fallback: subprocess dispatch (for environments without runtime.subagent)
@@ -277,17 +286,49 @@ export function sendToAgent(
     ...(opts.orchestratorSessionKey ? { spawnedBy: opts.orchestratorSessionKey } : {}),
     ...(opts.extraSystemPrompt ? { extraSystemPrompt: opts.extraSystemPrompt } : {}),
   });
-  rc(
-    ["openclaw", "gateway", "call", "agent", "--params", gatewayParams, "--expect-final", "--json"],
-    { timeoutMs: opts.dispatchTimeoutMs ?? 60_000 },
-  ).catch((err) => {
-    auditLog(opts.workspaceDir, "dispatch_warning", {
+  try {
+    const response = await rc(
+      ["openclaw", "gateway", "call", "agent", "--params", gatewayParams, "--expect-final", "--json"],
+      { timeoutMs: opts.dispatchTimeoutMs ?? 60_000 },
+    );
+    const stdout = String((response as { stdout?: string }).stdout ?? "").trim();
+    let runId: string | null = null;
+    if (stdout) {
+      try {
+        const parsed = JSON.parse(stdout) as { runId?: string | null; result?: { runId?: string | null } };
+        runId = parsed.runId ?? parsed.result?.runId ?? null;
+      } catch {
+        // Best-effort parsing only — successful subprocess dispatch is still accepted
+        // even when the gateway payload shape changes or returns non-JSON noise.
+      }
+    }
+    if (runId) {
+      await bindDispatchRunIdBySessionKey(opts.workspaceDir, sessionKey, runId).catch(() => {});
+    }
+    await auditLog(opts.workspaceDir, "dispatch_agent_sent", {
+      step: "sendToAgent", sessionKey,
+      issue: opts.issueId, role: opts.role,
+      method: "subprocess_fallback",
+      runId,
+    }).catch(() => {});
+    await recordIssueLifecycle({
+      workspaceDir: opts.workspaceDir,
+      slug: opts.projectSlug ?? opts.projectName,
+      issueId: opts.issueId,
+      stage: "agent_accepted",
+      sessionKey,
+      details: { method: "subprocess_fallback", runId },
+    }).catch(() => {});
+    return { method: "subprocess_fallback", runId };
+  } catch (err) {
+    await auditLog(opts.workspaceDir, "dispatch_warning", {
       step: "sendToAgent", sessionKey,
       issue: opts.issueId, role: opts.role,
       method: "subprocess_fallback",
       error: (err as Error).message ?? String(err),
     }).catch(() => {});
-  });
+    throw err;
+  }
 }
 
 export function normalizeGatewaySessionLabel(label?: string, maxLength = GATEWAY_SESSION_LABEL_MAX): {

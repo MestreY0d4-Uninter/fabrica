@@ -123,8 +123,8 @@ export function formatQaEvidenceValidationFailure(
     ? "Cannot mark work_finish(done) with invalid QA Evidence in the PR body."
     : "Cannot approve review with invalid QA Evidence in the PR body.";
   const guidance = actor === "developer"
-    ? 'Replace the existing "## QA Evidence" section with fresh sanitized output from scripts/qa.sh (exactly one section, Exit code: 0), then call work_finish again.'
-    : 'Reject the PR and instruct the developer to replace the existing "## QA Evidence" section in the PR body with fresh sanitized output from scripts/qa.sh (exactly one section, Exit code: 0).';
+    ? 'Replace the existing "## QA Evidence" section with fresh sanitized output from scripts/qa.sh (exactly one section, Exit code: 0), then call work_finish again. Do not rewrite or weaken scripts/qa.sh into ad-hoc scenario checks — preserve the canonical lint/types/security/tests/coverage gates and fix the underlying code or project setup instead.'
+    : 'Reject the PR and instruct the developer to replace the existing "## QA Evidence" section in the PR body with fresh sanitized output from scripts/qa.sh (exactly one section, Exit code: 0). Do not accept ad-hoc scenario scripts or weakened QA gates in place of the canonical lint/types/security/tests/coverage contract.';
 
   const allIssues = [...validation.problems, ...validation.errors];
   return `${intro}\n\n${allIssues.map((issue) => `- ${issue}`).join("\n")}\n\n${guidance}`;

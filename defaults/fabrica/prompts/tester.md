@@ -75,6 +75,15 @@ For each AC in the issue:
 - If an AC is ambiguous, note what you checked and mark CONDITIONAL
 - **Every single AC must be verified** — do not skip any
 
+### Quality & Evidence Bar
+
+- Your job is to produce evidence proportional to the project archetype, not a superficial green check.
+- For API work, verify request/response behavior, validation, and key failure paths.
+- For CLI work, verify help output, exit codes, invalid-argument handling, and the main happy path.
+- For UI work, verify the main flow plus loading/error behavior when applicable.
+- For security-sensitive work (auth, permissions, secrets, payments, personal data), treat missing negative tests or weak evidence as a real failure, not a nit.
+- If the implementation technically runs but the evidence is too weak to trust the result, prefer `Test result: FAIL` or `Test result: REFINE` over a false PASS.
+
 ### 4. Check for regressions
 
 - Run the full test suite if available

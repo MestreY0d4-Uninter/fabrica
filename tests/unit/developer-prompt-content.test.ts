@@ -46,8 +46,22 @@ describe("developer prompt anti-pattern checklist", () => {
     expect(content).toContain("coverage");
   });
 
+  it("contains a technical quality bar aligned with stack fit and simplicity", () => {
+    expect(content).toContain("Technical Quality Bar");
+    expect(content).toContain("idiomatic, well-supported solution for the project's stack");
+    expect(content).toContain("Choose mature libraries/functions");
+    expect(content).toContain("Avoid overengineering");
+    expect(content).toContain("Optimize for maintainability first");
+    expect(content).toContain("security-sensitive");
+  });
+
   it("contains QA Evidence PR body instruction", () => {
     expect(content).toContain("QA Evidence");
+    expect(content).toContain("Do NOT weaken, replace, or bypass the canonical `scripts/qa.sh` contract");
+    expect(content).toContain("lint`, `types`, `security`, `tests`, `coverage`");
+    expect(content).toContain("Create the PR with the base body only first");
+    expect(content).toContain("Never place `## QA Evidence` directly in the initial `gh pr create --body` text.");
+    expect(content).toContain("Never paste multiline QA output directly into the `gh pr create --body` command.");
   });
 
   it("keeps tester and architect prompts aligned to canonical lifecycle result lines", () => {
@@ -56,6 +70,10 @@ describe("developer prompt anti-pattern checklist", () => {
     expect(testerContent).toContain("Test result: REFINE");
     expect(testerContent).toContain("Test result: BLOCKED");
     expect(testerContent).not.toContain("work_finish");
+    expect(testerContent).toContain("Quality & Evidence Bar");
+    expect(testerContent).toContain("project archetype");
+    expect(testerContent).toContain("help output, exit codes, invalid-argument handling");
+    expect(testerContent).toContain("security-sensitive work");
 
     expect(architectContent).toContain("Architecture result: DONE");
     expect(architectContent).toContain("Architecture result: BLOCKED");
@@ -117,6 +135,9 @@ describe("developer prompt anti-pattern checklist", () => {
     expect(worktreeWorkflow).toContain("Work result: BLOCKED");
     expect(worktreeWorkflow).toContain("~/.openclaw/workspace/<slug>");
     expect(worktreeWorkflow).toContain("do not re-initialize the project with `npm init`");
+    expect(worktreeWorkflow).toMatch(/git -C "\$REPO_ROOT" worktree list --porcelain/);
+    expect(worktreeWorkflow).toMatch(/git -C "\$REPO_ROOT" worktree add/);
+    expect(worktreeWorkflow).toContain("Never improvise with `./.worktrees`");
     expect(worktreeWorkflow).not.toContain("fresh worktree");
   });
 

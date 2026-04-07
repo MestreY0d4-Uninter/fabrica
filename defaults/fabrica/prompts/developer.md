@@ -29,18 +29,18 @@ Read the comments carefully — they often contain clarifications, decisions, or
 ```bash
 # Example: task message says Repo: /home/ubuntu/git/acme/myproject
 REPO_ROOT="/absolute/path/from-task-message"
-cd "$REPO_ROOT"
 BRANCH="feature/<issue-id>-<slug>"
 WORKTREE="${REPO_ROOT}.worktrees/${BRANCH}"
-if git worktree list --porcelain | grep -Fq "worktree ${WORKTREE}"; then
+mkdir -p "$(dirname "$WORKTREE")"
+if git -C "$REPO_ROOT" worktree list --porcelain | grep -Fq "worktree ${WORKTREE}"; then
   cd "$WORKTREE"
 else
-  git worktree add "$WORKTREE" -b "$BRANCH"
+  git -C "$REPO_ROOT" worktree add "$WORKTREE" -b "$BRANCH"
   cd "$WORKTREE"
 fi
 ```
 
-The `.worktrees/` directory sits NEXT TO the repo folder (not inside it). This keeps the main checkout clean for the orchestrator and other workers. If the assigned worktree already exists from a previous task on the same branch, verify it's clean and reuse it.
+The `.worktrees/` directory sits NEXT TO the repo folder (not inside it). This keeps the main checkout clean for the orchestrator and other workers. Never improvise with `./.worktrees`, `${REPO_ROOT}/.worktrees`, or any other in-repo worktree path. If the assigned worktree already exists from a previous task on the same branch, verify it's clean and reuse it.
 
 Never create or implement the project under `~/.openclaw/workspace/<slug>` unless the task message explicitly says that directory is the canonical repo path. If the repo already contains scaffolded files, do not re-initialize the project with `npm init`, `uv init`, `cargo init`, or a second skeleton generator — keep the existing stack and modify the scaffold inside the assigned worktree. Once you are in the assigned worktree, stay there for the rest of the task and do not switch back to the main checkout.
 
@@ -50,6 +50,15 @@ Never create or implement the project under `~/.openclaw/workspace/<slug>` unles
 - Make the changes described in the issue
 - Follow existing code patterns and conventions in the project
 - Run tests/linting if the project has them configured
+
+### Technical Quality Bar
+
+- Prefer the most idiomatic, well-supported solution for the project's stack instead of inventing custom infrastructure.
+- Match the project archetype: API projects need strong boundary validation and error handling; CLI projects need excellent help/exit-code UX; UI projects need clear loading/error states.
+- Choose mature libraries/functions that simplify the codebase and improve reliability. Do not add a dependency when the standard stack already solves the problem cleanly.
+- Keep the implementation simple and cohesive. Avoid overengineering, speculative abstractions, and generic frameworks for a narrow problem.
+- Optimize for maintainability first, then performance where the task actually needs it. Remove obvious inefficiencies in hot paths, repeated I/O, wasteful queries, and duplicated work.
+- If the request is security-sensitive (auth, permissions, secrets, payments, personal data), treat correctness and safe defaults as mandatory, not optional polish.
 
 ### Structure & Hygiene
 
@@ -82,7 +91,8 @@ Conventional commits: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`
 - **NEVER** include host-system paths outside the repository (e.g., `/home/*/`, `~/.openclaw/`)
 - **NEVER** include raw output of commands not explicitly listed in this template
 
-Use `gh pr create` with the template below. Do NOT deviate from this format:
+Use `gh pr create` with the template below. Do NOT deviate from this format.
+Create the PR with the base body only first — do NOT try to embed multiline `## QA Evidence`, code fences, or raw `scripts/qa.sh` output directly inside the `gh pr create --body "..."` command. That content must be added only by the separate QA Evidence PATCH workflow below.
 
 ```bash
 gh pr create --base "$BASE_BRANCH" \
@@ -106,6 +116,7 @@ Addresses issue #<issue-id>.
 **Do NOT use closing keywords** in the description (no "Closes #X", "Fixes #X"). Use "Addresses issue #X" instead — Fabrica manages issue lifecycle.
 
 **Do NOT invent ad-hoc sections** beyond Summary, Changes, and Security Checklist. The only additional section allowed in the PR body is the canonical `## QA Evidence` section updated in place by the QA workflow below.
+**Never place `## QA Evidence` directly in the initial `gh pr create --body` text.** Create the PR first, then update that section via the dedicated PATCH flow below.
 
 ### Handling PR Feedback (changes requested / To Improve)
 
@@ -130,10 +141,15 @@ When your task message includes a **PR Feedback** section, it means a reviewer r
 
 ### QA Evidence (MANDATORY)
 
-After implementing (or after addressing reviewer feedback), run `scripts/qa.sh` in the worktree. The QA script is expected to bootstrap project-local test dependencies when needed; do not rely on a shared host-level venv or globally preinstalled project packages. Then **replace the PR description body's existing `## QA Evidence` section** with fresh sanitized output (never append a second section):
+After implementing (or after addressing reviewer feedback), run `scripts/qa.sh` in the worktree. The QA script is expected to bootstrap project-local test dependencies when needed; do not rely on a shared host-level venv or globally preinstalled project packages. Then **replace the PR description body's existing `## QA Evidence` section** with fresh sanitized output (never append a second section).
+Do this as a second step after PR creation — not inline in `gh pr create` — because multiline QA output, code fences, and shell quoting frequently corrupt the initial PR creation command:
+
+**Do NOT weaken, replace, or bypass the canonical `scripts/qa.sh` contract just to make the task pass.** Preserve the five canonical gates (`lint`, `types`, `security`, `tests`, `coverage`) and fix the product code or project setup instead. Ad-hoc scenario scripts, one-off smoke tests, or custom gate names do not satisfy Fabrica's QA Evidence validator.
 
 ```bash
 # Get current PR body, replace QA Evidence, update
+# IMPORTANT: keep this as a separate PATCH step after `gh pr create` succeeds.
+# Never paste multiline QA output directly into the `gh pr create --body` command.
 PR_NUM=$(gh pr list --head "$BRANCH" --json number -q '.[0].number')
 QA_RAW=$(bash scripts/qa.sh 2>&1); QA_EXIT=$?
 # MANDATORY: sanitize before embedding in PR — strip lines with tokens/keys/env vars/host paths

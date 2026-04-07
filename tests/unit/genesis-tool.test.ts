@@ -134,6 +134,16 @@ describe("normalizeGenesisRequest", () => {
     expect(normalized.metadata.project_name).toBe("incident-hub");
     expect(normalized.rawIdea).toBe("Python/FastAPI, PostgreSQL, JWT auth. Project name: incident-hub");
   });
+
+  it("extracts explicit project_name from natural language phrasing without a colon", () => {
+    const normalized = normalizeGenesisRequest({
+      phase: "discover",
+      idea: "Build a Python CLI that validates CSV files. Please use the project name csv-contract-cli.",
+      stack: "python-cli",
+    });
+
+    expect(normalized.metadata.project_name).toBe("csv-contract-cli");
+  });
 });
 
 describe("genesis tool", () => {

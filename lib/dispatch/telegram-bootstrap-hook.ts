@@ -9,6 +9,7 @@ import { hasGenesisAgent } from "../setup/agent.js";
 import { runPipeline, type GenesisPayload, type StepContext } from "../intake/index.js";
 import { createProvider } from "../providers/index.js";
 import { normalizeStackHint } from "../intake/lib/stack-detection.js";
+import { decideBootstrapClarification, detectScopeClarificationNeed, type BootstrapClarificationKind } from "../intake/lib/clarification-policy.js";
 import { supportsGreenfieldScaffold } from "../test-env/bootstrap.js";
 import { readFabricaTelegramConfig } from "../telegram/config.js";
 import { readProjects } from "../projects/index.js";
@@ -160,41 +161,9 @@ const BOOTSTRAP_MESSAGES = {
 /**
  * Detect when a request spans multiple subsystems without explicit tech choices.
  * Returns true when the user should be asked for clarification before registering.
- *
- * Criteria:
- * - 3+ subsystem signals in the rawIdea, AND
- * - No explicit tech choice for at least one key dimension (DB or auth method), AND
- * - The user didn't explicitly say "your call" / "livre" (opt-out of clarification)
  */
 function detectScopeAmbiguity(rawIdea: string, stackHint: string | null | undefined): boolean {
-  const text = rawIdea.toLowerCase();
-
-  // User opted out of clarification
-  if (/\b(livre|free.?choice|your.?call|pode.?escolher|voc[eê].?decide|qualquer)\b/i.test(text)) {
-    return false;
-  }
-
-  // Count subsystem signals
-  const subsystems = [
-    /\b(worker|background.?job|queue|task.?runner|celery|bull)\b/i,
-    /\b(websocket|sse|real.?time|realtime|push.?notif)\b/i,
-    /\b(auth|oauth|jwt|login|register|signup|autenticac)\b/i,
-    /\b(notif|alert|assinatura|subscription|subscribe|email|sms)\b/i,
-    /\b(banco|database|db|postgres|mysql|mongodb|redis|sqlite)\b/i,
-    /\b(api\s+rest|rest\s+api|endpoint|graphql|grpc)\b/i,
-    /\b(dashboard|frontend|interface|ui|tela)\b/i,
-  ];
-  const matchedSubsystems = subsystems.filter(r => r.test(text)).length;
-  if (matchedSubsystems < 3) return false;
-
-  // Check if user gave explicit tech choices for key dimensions
-  const hasExplicitDB = /\b(postgres(ql)?|mysql|mongodb|mongo|redis|sqlite|supabase|dynamodb|cockroach)\b/i.test(text);
-  const hasExplicitAuth = /\b(jwt|oauth2?|basic.?auth|api.?key|session.?based|cookie.?auth)\b/i.test(text);
-  const hasExplicitStack = !!stackHint && !["api", "rest-api", "backend"].includes(stackHint);
-
-  // Ambiguous when at least 2 key dimensions are unspecified
-  const unspecifiedDimensions = [!hasExplicitDB, !hasExplicitAuth, !hasExplicitStack].filter(Boolean).length;
-  return unspecifiedDimensions >= 2;
+  return detectScopeClarificationNeed(rawIdea, stackHint).ask;
 }
 
 function inferProjectSlug(text: string): string | undefined {
@@ -260,6 +229,10 @@ function parseIdeaBlock(text: string): string | undefined {
 }
 
 function parseExplicitProjectName(text: string): string | undefined {
+  const naturalLanguageMatch = text.match(/\b(?:please\s+)?(?:use|set|keep)\s+(?:the\s+)?(?:project name|repo name|repository name|nome do projeto)\s+(?:as\s+)?[`"'“”‘’]?([a-z0-9][a-z0-9-]{1,63})[`"'“”‘’]?(?=$|[\s.,!?;:])/i);
+  if (naturalLanguageMatch?.[1]) {
+    return normalizeProjectNameCandidate(naturalLanguageMatch[1].toLowerCase());
+  }
   const match = text.match(/\b(?:called|named|chamado)\s+[`"'“”‘’]?([a-z0-9][a-z0-9-]{1,63})[`"'“”‘’]?(?=$|[\s.,!?;:])/i);
   return normalizeProjectNameCandidate(match?.[1]?.toLowerCase());
 }
@@ -590,9 +563,16 @@ function parseClarificationResponse(text: string, session: TelegramBootstrapSess
   return { recognized: false };
 }
 
-function buildClarificationMessage(parsed: BootstrapRequest, pendingClarification?: "stack" | "stack_and_name" | "name", language: BootstrapLanguage = "pt"): string {
+function buildClarificationMessage(
+  parsed: BootstrapRequest,
+  pendingClarification?: BootstrapClarificationKind,
+  language: BootstrapLanguage = "pt",
+): string {
   if (pendingClarification === "name") {
     return BOOTSTRAP_MESSAGES.clarifyName[language];
+  }
+  if (pendingClarification === "scope") {
+    return BOOTSTRAP_MESSAGES.clarifyScope[language](parsed.rawIdea);
   }
   if (pendingClarification === "stack_and_name" || (!parsed.stackHint && !parsed.projectName)) {
     return BOOTSTRAP_MESSAGES.clarifyBoth[language];
@@ -858,12 +838,12 @@ async function handleTelegramBootstrapDmMessage(
         conversationId,
         rawIdea: content,
         stackHint: parsed.stackHint ?? undefined,
-        projectName: parsed.projectName ?? parsed.projectSlug ?? undefined,
+        projectName: parsed.projectName ?? inferProjectSlug(parsed.rawIdea) ?? undefined,
         status: "clarifying",
         pendingClarification: "scope",
         language,
       });
-      const clarifyMsg = BOOTSTRAP_MESSAGES.clarifyScope[language](content);
+      const clarifyMsg = buildClarificationMessage(parsed, "scope", language);
       await sendTelegramText(ctx, rawConversationId, clarifyMsg);
       return;
     }
@@ -1119,6 +1099,9 @@ async function persistOwnedBootstrapCheckpoint(
     bootstrapStep?: TelegramBootstrapStep | null;
     projectSlug?: string | null;
     issueId?: number | null;
+    issueUrl?: string | null;
+    triageReadyForDispatch?: boolean | null;
+    triageErrors?: string[] | null;
     messageThreadId?: number | null;
     projectChannelId?: string | null;
     language?: BootstrapLanguage;
@@ -1133,7 +1116,7 @@ async function persistOwnedBootstrapCheckpoint(
     topicKickoffSentAt?: string | null;
     projectTickedAt?: string | null;
     completionAckSentAt?: string | null;
-    pendingClarification?: "stack" | "stack_and_name" | "name" | null;
+    pendingClarification?: BootstrapClarificationKind | null;
     error?: string | null;
   },
 ): Promise<TelegramBootstrapSession | null> {
@@ -1158,6 +1141,9 @@ async function persistOwnedBootstrapCheckpoint(
     bootstrapStep: input.bootstrapStep,
     projectSlug: input.projectSlug ?? undefined,
     issueId: input.issueId,
+    issueUrl: input.issueUrl,
+    triageReadyForDispatch: input.triageReadyForDispatch,
+    triageErrors: input.triageErrors,
     messageThreadId: input.messageThreadId,
     projectChannelId: input.projectChannelId,
     language: input.language,
@@ -2238,21 +2224,26 @@ async function continueBootstrap(
   }
   const telegramConfig = readFabricaTelegramConfig(ctx.pluginConfig);
 
-  const stackHint = request.stackHint;
-  if (!stackHint) {
-    // stackHint missing after clarification — redirect to stack clarification.
-    const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
-    const lang: BootstrapLanguage = existingSession?.language ?? "pt";
+  const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
+  const lang: BootstrapLanguage = existingSession?.language ?? "pt";
+  const inferredProjectName = request.projectName ?? inferProjectSlug(request.rawIdea) ?? null;
+  const clarificationDecision = decideBootstrapClarification({
+    projectName: inferredProjectName,
+    stackHint: request.stackHint,
+  });
+
+  if (clarificationDecision.ask && (clarificationDecision.kind === "stack" || clarificationDecision.kind === "stack_and_name")) {
+    const clarificationKind: BootstrapClarificationKind = clarificationDecision.kind;
     const owner = buildBootstrapAttemptOwner(existingSession);
     if (owner) {
       await persistOwnedBootstrapCheckpoint(workspaceDir, owner, {
         rawIdea: request.rawIdea,
-        projectName: request.projectName ?? undefined,
+        projectName: inferredProjectName ?? undefined,
         stackHint: request.stackHint ?? undefined,
         sourceRoute,
         status: "clarifying",
         bootstrapStep: existingSession?.bootstrapStep ?? "awaiting_pipeline",
-        pendingClarification: "stack",
+        pendingClarification: clarificationKind,
         language: lang,
         ackSentAt: existingSession?.ackSentAt ?? null,
         lastError: null,
@@ -2262,69 +2253,65 @@ async function continueBootstrap(
       await upsertTelegramBootstrapSession(workspaceDir, {
         conversationId,
         rawIdea: request.rawIdea,
-        projectName: request.projectName ?? undefined,
+        projectName: inferredProjectName ?? undefined,
         status: "clarifying",
-        pendingClarification: "stack",
+        pendingClarification: clarificationKind,
         language: lang,
       });
     }
     await sendTelegramText(ctx, conversationId, buildClarificationMessage(
-      { rawIdea: request.rawIdea, projectName: request.projectName ?? undefined, stackHint: request.stackHint ?? undefined },
-      "stack",
+      { rawIdea: request.rawIdea, projectName: inferredProjectName ?? undefined, stackHint: request.stackHint ?? undefined },
+      clarificationKind,
       lang,
     ));
     return;
   }
 
-  // If stack known but name unknown, try fallbacks before asking
-  if (!request.projectName) {
-    // Fallback 1: try to derive slug from rawIdea silently
+  if (inferredProjectName && !request.projectName) {
+    request.projectName = inferredProjectName;
+  }
+
+  if (clarificationDecision.ask && clarificationDecision.kind === "name") {
     const inferredSlug = inferProjectSlug(request.rawIdea);
     if (inferredSlug) {
       request.projectName = inferredSlug;
+    } else if (existingSession?.pendingClarification === "name") {
+      request.projectName = `project-${Date.now()}`;
     } else {
-      // Fallback 2: if already asked for name before, don't loop — generate timestamp slug
-      const existingSession = await readTelegramBootstrapSession(workspaceDir, conversationId);
-      if (existingSession?.pendingClarification === "name") {
-        request.projectName = `project-${Date.now()}`;
+      const owner = existingSession ? buildBootstrapAttemptOwner(existingSession) : null;
+      if (existingSession && owner) {
+        await persistOwnedBootstrapCheckpoint(workspaceDir, owner, {
+          rawIdea: request.rawIdea,
+          stackHint: request.stackHint ?? undefined,
+          sourceRoute,
+          status: "clarifying",
+          bootstrapStep: existingSession.bootstrapStep ?? "awaiting_pipeline",
+          pendingClarification: "name",
+          language: lang,
+          ackSentAt: existingSession.ackSentAt ?? null,
+          lastError: null,
+          nextRetryAt: null,
+        });
       } else {
-        // First time asking: enter clarification
-        const lang: BootstrapLanguage = existingSession?.language ?? "pt";
-        const owner = existingSession ? buildBootstrapAttemptOwner(existingSession) : null;
-        if (existingSession && owner) {
-          await persistOwnedBootstrapCheckpoint(workspaceDir, owner, {
-            rawIdea: request.rawIdea,
-            stackHint: request.stackHint ?? undefined,
-            sourceRoute,
-            status: "clarifying",
-            bootstrapStep: existingSession.bootstrapStep ?? "awaiting_pipeline",
-            pendingClarification: "name",
-            language: lang,
-            ackSentAt: existingSession.ackSentAt ?? null,
-            lastError: null,
-            nextRetryAt: null,
-          });
-        } else {
-          await upsertTelegramBootstrapSession(workspaceDir, {
-            conversationId,
-            rawIdea: request.rawIdea,
-            stackHint: request.stackHint ?? undefined,
-            status: "clarifying",
-            pendingClarification: "name",
-            language: lang,
-          });
-        }
-        await sendTelegramText(
-          ctx,
+        await upsertTelegramBootstrapSession(workspaceDir, {
           conversationId,
-          buildClarificationMessage(
-            { rawIdea: request.rawIdea, projectName: undefined, stackHint: request.stackHint ?? undefined },
-            "name",
-            lang,
-          ),
-        );
-        return;
+          rawIdea: request.rawIdea,
+          stackHint: request.stackHint ?? undefined,
+          status: "clarifying",
+          pendingClarification: "name",
+          language: lang,
+        });
       }
+      await sendTelegramText(
+        ctx,
+        conversationId,
+        buildClarificationMessage(
+          { rawIdea: request.rawIdea, projectName: undefined, stackHint: request.stackHint ?? undefined },
+          "name",
+          lang,
+        ),
+      );
+      return;
     }
   }
 
@@ -2357,10 +2344,11 @@ async function continueBootstrap(
     pluginConfig: ctx.pluginConfig,
   };
 
+  const stackHint = request.stackHint ?? null;
   const payload: GenesisPayload = {
-    session_id: `telegram-bootstrap-${Date.now()}`,
+    session_id: randomUUID(),
     timestamp: new Date().toISOString(),
-    step: "init",
+    step: "telegram-bootstrap",
     raw_idea: request.rawIdea,
     answers: {},
     metadata: {

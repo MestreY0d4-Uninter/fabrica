@@ -131,6 +131,8 @@ function extractExplicitProjectName(text: string | null): string | null {
   if (!text) return null;
   const fieldMatch = text.match(/(?:^|[\n.,;!?]\s*)(?:project name|repo name|repository name|nome do projeto)\s*:\s*([a-z0-9][a-z0-9-]{1,63})\b/i);
   if (fieldMatch?.[1]) return fieldMatch[1].trim().toLowerCase();
+  const naturalLanguageMatch = text.match(/\b(?:please\s+)?(?:use|set|keep)\s+(?:the\s+)?(?:project name|repo name|repository name|nome do projeto)\s+(?:as\s+)?[`"'“”‘’]?([a-z0-9][a-z0-9-]{1,63})[`"'“”‘’]?(?=$|[\s.,!?;:])/i);
+  if (naturalLanguageMatch?.[1]) return naturalLanguageMatch[1].trim().toLowerCase();
   const inlineMatch = text.match(/\b(?:called|named|chamado)\s+[`"'“”‘’]?([a-z0-9][a-z0-9-]{1,63})[`"'“”‘’]?(?=$|[\s.,!?;:])/i);
   if (inlineMatch?.[1]) return inlineMatch[1].trim().toLowerCase();
   return null;

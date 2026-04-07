@@ -104,7 +104,8 @@ describe("buildTaskMessage", () => {
     });
 
     expect(message).toContain("Repo: /home/ubuntu/git/acme/demo | Base branch: main");
-    expect(message).toContain("Execution path: /home/ubuntu/git/acme/demo");
+    expect(message).toContain("Execution path: /home/ubuntu/git/acme/demo.worktrees/feature/9-demo");
+    expect(message).toContain("Main checkout: /home/ubuntu/git/acme/demo");
     expect(message).toContain("Required branch: feature/9-demo");
     expect(message).toContain("Required worktree: /home/ubuntu/git/acme/demo.worktrees/feature/9-demo");
     expect(message).toContain("Do not re-initialize or replace the scaffold in the main checkout");
@@ -131,9 +132,11 @@ describe("buildTaskMessage", () => {
       },
     });
 
+    expect(message).toContain("Execution path: /home/ubuntu/git/acme/demo-app.worktrees/bugfix/review-branch");
+    expect(message).toContain("Main checkout: /home/ubuntu/git/acme/demo-app");
     expect(message).toContain("Required branch: bugfix/review-branch");
     expect(message).toContain("Required worktree: /home/ubuntu/git/acme/demo-app.worktrees/bugfix/review-branch");
-    expect(message).toContain("Before editing any file, create or reuse the required worktree above and work only there.");
+    expect(message).toContain("Before editing any file, change into the execution path above and work only there.");
     expect(message).not.toContain("Required branch: feature/42-demo-app");
   });
 });

@@ -9,6 +9,11 @@ import {
   determineLevel,
   runTriageLogic,
   detectRawIdeaComplexity,
+  assessComplexity,
+  assessCoupling,
+  assessParallelizability,
+  assessQualityCriticality,
+  buildRiskProfile,
 } from "../../lib/intake/lib/triage-logic.js";
 import type { TriageMatrix, TriageInput } from "../../lib/intake/lib/triage-logic.js";
 import matrix from "../../lib/intake/configs/triage-matrix.json";
@@ -241,6 +246,43 @@ describe("determineLevel", () => {
 
   it("research medior → junior (downgrade)", () => {
     expect(determineLevel("medium", "To Research")).toBe("junior");
+  });
+});
+
+describe("expanded triage signals", () => {
+  const complexInput: TriageInput = {
+    type: "feature",
+    deliveryTarget: "api",
+    acCount: 8,
+    scopeCount: 5,
+    dodCount: 3,
+    filesChanged: 20,
+    totalRisks: 4,
+    objective: "Build a secure incident management platform with strong operational guarantees for assignment, notification, dashboards, auditability, and background processing across teams.",
+    rawIdea: "Build an incident management platform with auth, notifications, background workers, database migrations, integrations and admin dashboard.",
+    acText: "Users authenticate\nincidents can be assigned\nnotifications are delivered",
+    scopeText: "Implement auth, dashboard, worker queue, integrations and schema changes",
+    oosText: "",
+    authSignal: true,
+  };
+
+  it("derives complexity, coupling, parallelizability and quality criticality", () => {
+    expect(assessComplexity(complexInput)).toBe("high");
+    expect(assessCoupling(complexInput)).toBe("high");
+    expect(assessParallelizability(complexInput, "high")).toBe("low");
+    expect(assessQualityCriticality(complexInput)).toBe("high");
+    expect(buildRiskProfile(complexInput)).toEqual(
+      expect.arrayContaining(["auth", "data_model", "async_processing"]),
+    );
+  });
+
+  it("includes expanded signals in the triage decision", () => {
+    const decision = runTriageLogic(complexInput, MATRIX);
+    expect(decision.complexity).toBe("high");
+    expect(decision.coupling).toBe("high");
+    expect(decision.parallelizability).toBe("low");
+    expect(decision.qualityCriticality).toBe("high");
+    expect(decision.riskProfile).toEqual(expect.arrayContaining(["auth", "data_model"]));
   });
 });
 

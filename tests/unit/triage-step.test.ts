@@ -6,6 +6,8 @@ import type { GenesisPayload, StepContext } from "../../lib/intake/types.js";
 import { triageStep } from "../../lib/intake/steps/triage.js";
 import { TestProvider } from "../../lib/testing/test-provider.js";
 import { upsertTelegramBootstrapSession, readTelegramBootstrapSession } from "../../lib/dispatch/telegram-bootstrap-session.js";
+import { readProjects, writeProjects } from "../../lib/projects/index.js";
+import type { ProjectsData } from "../../lib/projects/types.js";
 
 describe("triageStep", () => {
   it("applies triage side-effects via provider when provider access is available", async () => {
@@ -80,6 +82,10 @@ describe("triageStep", () => {
 
     expect(result.triage?.ready_for_dispatch).toBe(true);
     expect(result.triage?.target_state).toBe("To Do");
+    expect(result.fidelity_brief?.requested_deliverable).toBe("cli");
+    expect(result.metadata.fidelity_brief?.requested_stack).toBeNull();
+    expect(result.fidelity_brief?.primary_objective).toContain("portable stack CLI");
+    expect(result.fidelity_brief?.confidence).toBe("medium");
     expect(result.triage?.labels_applied).toEqual(
       expect.arrayContaining(["priority:medium", "effort:small", "type:feature"]),
     );
@@ -153,8 +159,31 @@ describe("triageStep", () => {
       issues: [{ number: 42, url: "https://example.com/issues/42", created_at: new Date().toISOString() }],
     };
 
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-triage-large-"));
+    const projectsData: ProjectsData = {
+      projects: {
+        demo: {
+          slug: "demo",
+          name: "demo",
+          repo: "/tmp/demo",
+          repoRemote: "https://github.com/acme/demo",
+          groupName: "Project: demo",
+          deployUrl: "",
+          baseBranch: "main",
+          deployBranch: "main",
+          channels: [],
+          provider: "github",
+          workers: {},
+          issueRuntime: {},
+          stack: null,
+          environment: null,
+        },
+      },
+    };
+    await writeProjects(workspaceDir, projectsData);
+
     const ctx: StepContext = {
-      workspaceDir: "/tmp/workspace",
+      workspaceDir,
       homeDir: "/tmp/home",
       log: () => {},
       runCommand: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
@@ -165,15 +194,128 @@ describe("triageStep", () => {
 
     expect(result.triage?.decomposition_mode).toBe("parent_child");
     expect(result.triage?.ready_for_dispatch).toBe(false);
+    expect(result.triage?.quality_criticality).toBe("high");
+    expect(result.triage?.complexity).toBe("high");
+    expect(result.triage?.coupling).toBe("low");
+    expect(result.triage?.parallelizability).toBe("medium");
+    expect(result.triage?.risk_profile).toEqual(expect.arrayContaining(["auth", "async_processing"]));
     expect(result.triage?.child_issue_numbers?.length).toBeGreaterThanOrEqual(2);
 
     const createdIssues = provider.callsTo("createIssue");
     expect(createdIssues.length).toBeGreaterThanOrEqual(2);
-    expect(provider.callsTo("transitionLabel")).toHaveLength(0);
+    expect(createdIssues[0]?.args.title).toContain("Authentication");
+    expect(createdIssues[0]?.args.description).toContain("## Capability Area");
+    expect(createdIssues[0]?.args.description).toContain("## Execution Profile");
+    expect(createdIssues[0]?.args.description).toContain("Recommended level:");
+    expect(createdIssues[0]?.args.description).toContain("Parallelizable:");
+    const transitionCalls = provider.callsTo("transitionLabel");
+    expect(transitionCalls.some((call) => call.args.issueId === 42)).toBe(false);
+    expect(transitionCalls.filter((call) => call.args.issueId !== 42).length).toBeGreaterThanOrEqual(2);
+    expect(transitionCalls.filter((call) => call.args.issueId !== 42).every((call) => call.args.from === "Planning" && call.args.to === "To Do")).toBe(true);
     expect(provider.callsTo("addLabel").map((call) => call.args.label)).toEqual(
       expect.arrayContaining(["decomposition:parent", "decomposition:child", "effort:large"]),
     );
+    const childAddLabels = provider.callsTo("addLabel").filter((call) => call.args.issueId !== 42).map((call) => call.args.label);
+    expect(childAddLabels).toEqual(expect.arrayContaining(["developer:senior", "developer:medior"]));
     expect(provider.callsTo("addComment").some((call) => String(call.args.body).includes("## Decomposition Plan"))).toBe(true);
+
+    const persisted = await readProjects(workspaceDir);
+    const parentRuntime = persisted.projects.demo?.issueRuntime?.["42"];
+    expect(parentRuntime?.decompositionMode).toBe("parent_child");
+    expect(parentRuntime?.decompositionStatus).toBe("active");
+    expect(parentRuntime?.childIssueIds?.length).toBeGreaterThanOrEqual(2);
+    const childIds = parentRuntime?.childIssueIds ?? [];
+    for (const childId of childIds) {
+      expect(persisted.projects.demo?.issueRuntime?.[String(childId)]?.parentIssueId).toBe(42);
+    }
+    if (childIds.length >= 2) {
+      const secondChildRuntime = persisted.projects.demo?.issueRuntime?.[String(childIds[1])];
+      expect(secondChildRuntime?.dependencyIssueIds).toContain(childIds[0]);
+    }
+    expect(parentRuntime?.maxParallelChildren).toBeGreaterThanOrEqual(1);
+    expect(parentRuntime?.maxParallelChildren).toBeLessThanOrEqual(4);
+
+    await fs.rm(workspaceDir, { recursive: true, force: true });
+  });
+
+  it("keeps large but tightly coupled work as a single executable issue instead of forcing decomposition", async () => {
+    const provider = new TestProvider();
+    provider.seedIssue({
+      iid: 84,
+      title: "Billing workflow hardening",
+      labels: ["Planning"],
+    });
+
+    const payload: GenesisPayload = {
+      session_id: "sid-triage-coupled",
+      timestamp: new Date().toISOString(),
+      step: "create-task",
+      raw_idea: "Harden a billing workflow that touches auth, RBAC, API contracts, background reconciliation jobs, database migrations, and admin dashboards in one tightly coupled pass.",
+      answers: {},
+      metadata: {
+        source: "test",
+        factory_change: false,
+        repo_url: "https://github.com/acme/demo",
+        repo_path: "/tmp/demo",
+        project_slug: "demo",
+      },
+      spec: {
+        title: "Billing workflow hardening",
+        type: "feature",
+        objective: "Harden the billing workflow end to end across authentication, authorization, APIs, migrations, reconciliation jobs, and the operator dashboard without splitting ownership across unstable boundaries.",
+        scope_v1: [
+          "Update authentication, authorization, and RBAC checks for billing actions",
+          "Add database migration and persistence changes required for the new billing states",
+          "Update API routes and admin dashboard behavior for the same workflow",
+          "Update the reconciliation worker so it matches the new schema and auth rules",
+        ],
+        out_of_scope: [],
+        acceptance_criteria: [
+          "Allows billing actions only when the required auth and permission rules pass in the API and admin dashboard",
+          "Validates migrated data and keeps reconciliation jobs consistent with the new API behavior",
+          "Returns the same workflow states in the admin dashboard UI and API responses",
+        ],
+        definition_of_done: ["tests pass", "migration validated", "qa passes"],
+        constraints: "No partial rollout with competing PRs.",
+        risks: ["High coupling across data, auth, worker, and UI layers"],
+        delivery_target: "hybrid",
+      },
+      impact: {
+        is_greenfield: false,
+        affected_files: [],
+        affected_modules: [],
+        new_files_needed: [],
+        risk_areas: ["auth", "database", "worker", "frontend"],
+        estimated_files_changed: 18,
+      },
+      scaffold: {
+        created: true,
+        repo_url: "https://github.com/acme/demo",
+        repo_local: "/tmp/demo",
+        project_slug: "demo",
+      },
+      issues: [{ number: 84, url: "https://example.com/issues/84", created_at: new Date().toISOString() }],
+    };
+
+    const ctx: StepContext = {
+      workspaceDir: "/tmp/workspace",
+      homeDir: "/tmp/home",
+      log: () => {},
+      runCommand: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+      createIssueProvider: async () => ({ provider, type: "github" }),
+    };
+
+    const result = await triageStep.execute(payload, ctx);
+
+    expect(result.triage?.effort).toBe("large");
+    expect(result.triage?.coupling).toBe("high");
+    expect(result.triage?.parallelizability).toBe("low");
+    expect(result.triage?.decomposition_mode).toBe("none");
+    expect(result.triage?.ready_for_dispatch).toBe(true);
+    expect(provider.callsTo("createIssue")).toHaveLength(0);
+    expect(provider.callsTo("transitionLabel")).toContainEqual(expect.objectContaining({
+      args: { issueId: 84, from: "Planning", to: "To Do" },
+    }));
   });
 
   it("persists blocked triage status back into the telegram bootstrap session", async () => {

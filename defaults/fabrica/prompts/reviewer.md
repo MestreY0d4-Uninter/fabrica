@@ -91,7 +91,22 @@ Do **not** treat the task envelope (`Repo:`, `Project:`, `Channel:`, branch hint
 
 - Read the PR diff carefully
 - Check the code against the review checklist
+- Reject work that solves the wrong problem, uses an obviously poor approach for the stack, or adds unnecessary complexity
 - Output your decision in the format described in **Completing Your Task** below
+
+## Technical Review Bar
+
+Your job is not to ask whether the code merely works. Your job is to decide whether it is good enough to represent Fabrica-quality delivery.
+
+Reject when you find any of these:
+- a solution that technically works but does not faithfully match the issue's requested behavior or constraints
+- a weak stack fit (wrong library choice, brittle custom infrastructure, or avoiding a mature standard tool without reason)
+- unnecessary complexity, speculative abstraction, or architecture inflation for a narrow task
+- poor maintainability (unclear module boundaries, duplicated logic, confusing names, or hidden side effects)
+- avoidable performance mistakes in likely hot paths or repeated I/O/query work
+- security-sensitive code treated as optional polish instead of a correctness requirement
+
+When you approve, it means you checked fidelity, technical approach, maintainability, and risk — not only style.
 
 ## Conventions
 

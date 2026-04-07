@@ -8,6 +8,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunCommand } from "../../lib/context.js";
+import { DEFAULT_WORKFLOW } from "../../lib/workflow/index.js";
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks
@@ -21,6 +22,9 @@ const {
   mockRecordIssueLifecycle,
   mockFetchGatewaySessions,
   mockIsSessionAlive,
+  mockUpdateSlot,
+  mockGetRoleWorker,
+  mockGetIssueRuntime,
 } = vi.hoisted(() => ({
   mockAuditLog: vi.fn(async () => {}),
   mockLoadConfig: vi.fn(),
@@ -30,6 +34,9 @@ const {
   mockRecordIssueLifecycle: vi.fn(async () => true),
   mockFetchGatewaySessions: vi.fn(async () => null),
   mockIsSessionAlive: vi.fn(() => true),
+  mockUpdateSlot: vi.fn(async () => {}),
+  mockGetRoleWorker: vi.fn(() => ({ levels: {} })),
+  mockGetIssueRuntime: vi.fn(() => null),
 }));
 
 vi.mock("../../lib/audit.js", () => ({ log: mockAuditLog }));
@@ -40,10 +47,10 @@ vi.mock("../../lib/roles/model-fetcher.js", () => ({
 }));
 vi.mock("../../lib/projects/index.js", () => ({
   activateWorker: vi.fn(async () => {}),
-  updateSlot: vi.fn(async () => {}),
+  updateSlot: mockUpdateSlot,
   updateIssueRuntime: vi.fn(async () => {}),
-  getRoleWorker: vi.fn(() => ({ levels: {} })),
-  getIssueRuntime: vi.fn(() => null),
+  getRoleWorker: mockGetRoleWorker,
+  getIssueRuntime: mockGetIssueRuntime,
   requireCanonicalPrSelector: vi.fn(() => ({ prNumber: 1 })),
   emptySlot: vi.fn(() => ({ sessionKey: null, issueId: null })),
   recordIssueLifecycle: mockRecordIssueLifecycle,
@@ -79,6 +86,11 @@ vi.mock("../../lib/dispatch/message-builder.js", () => ({
   buildAnnouncement: vi.fn(() => "Dispatch announcement"),
   formatSessionLabel: vi.fn(() => "my-project-developer-junior-Alice"),
   formatSessionLabelFull: vi.fn(() => "My Project - developer - junior - Alice"),
+  resolveExecutionSetup: vi.fn(({ projectName, issueId, repo, prBranchName }) => ({
+    branchName: prBranchName ?? `feature/${issueId}-${projectName}`,
+    worktreePath: `${repo}.worktrees/feature/${issueId}-${projectName}`,
+    repoPath: repo,
+  })),
 }));
 vi.mock("../../lib/dispatch/acknowledge.js", () => ({
   acknowledgeComments: vi.fn(async () => {}),
@@ -205,6 +217,8 @@ describe("dispatchTask — happy path", () => {
     mockFetchGatewaySessions.mockResolvedValue(
       new Map([["agent:unknown:subagent:my-project-developer-junior-alice", { percentUsed: 10, totalTokens: 100, contextTokens: 10 }]]),
     );
+    mockGetRoleWorker.mockReturnValue({ levels: {} });
+    mockGetIssueRuntime.mockReturnValue(null);
   });
 
   it("transitions the label and records worker state on success", async () => {
@@ -271,6 +285,90 @@ describe("dispatchTask — happy path", () => {
     const transitionIndex = callOrder.indexOf("transitionLabel");
     expect(patchIndex).toBeGreaterThanOrEqual(0);
     expect(transitionIndex).toBeGreaterThan(patchIndex);
+  });
+
+  it("deletes a live orphaned gateway session before spawning when the local slot is untracked", async () => {
+    mockFetchGatewaySessions.mockResolvedValue(
+      new Map([["agent:unknown:subagent:my-project-developer-junior-alice", { percentUsed: 10, totalTokens: 100, contextTokens: 10 }]]),
+    );
+    mockIsSessionAlive.mockImplementation((key: string) => key === "agent:unknown:subagent:my-project-developer-junior-alice");
+
+    const provider = makeProvider();
+    const runCommand = makeRunCommand();
+
+    const result = await dispatchTask({
+      workspaceDir: "/tmp/workspace",
+      project: makeProject() as any,
+      issueId: 42,
+      issueTitle: "Test Issue",
+      issueDescription: "Description",
+      issueUrl: "https://github.com/org/my-project/issues/42",
+      role: "developer",
+      level: "junior",
+      fromLabel: "To Do",
+      toLabel: "Doing",
+      provider: provider as any,
+      runCommand,
+    });
+
+    expect(result.sessionAction).toBe("spawn");
+    const deleteCall = (runCommand as any).mock.calls.find((c: any[]) => c[0]?.[3] === "sessions.delete");
+    const patchCall = (runCommand as any).mock.calls.find((c: any[]) => c[0]?.[3] === "sessions.patch");
+    expect(deleteCall).toBeDefined();
+    expect(patchCall).toBeDefined();
+    expect((runCommand as any).mock.calls.indexOf(deleteCall)).toBeLessThan((runCommand as any).mock.calls.indexOf(patchCall));
+    expect(mockAuditLog).toHaveBeenCalledWith("/tmp/workspace", "session_orphan_reset", expect.objectContaining({
+      sessionKey: "agent:unknown:subagent:my-project-developer-junior-alice",
+      reason: "gateway_session_alive_without_local_slot_tracking",
+    }));
+  });
+
+  it("uses a fresh session key when redispatching a developer from feedback", async () => {
+    const provider = makeProvider();
+    const runCommand = makeRunCommand();
+    const config = makeDefaultConfig();
+    config.workflow = DEFAULT_WORKFLOW as any;
+    mockLoadConfig.mockResolvedValue(config);
+    mockGetRoleWorker.mockReturnValue({
+      levels: {
+        junior: [{
+          sessionKey: "agent:unknown:subagent:my-project-developer-junior-alice",
+          issueId: null,
+          lastIssueId: "42",
+          previousLabel: "To Improve",
+        }],
+      },
+    });
+
+    await dispatchTask({
+      workspaceDir: "/tmp/workspace",
+      project: makeProject() as any,
+      issueId: 42,
+      issueTitle: "Feedback Issue",
+      issueDescription: "Description",
+      issueUrl: "https://github.com/org/my-project/issues/42",
+      role: "developer",
+      level: "junior",
+      fromLabel: "To Improve",
+      toLabel: "Doing",
+      provider: provider as any,
+      runCommand,
+    });
+
+    expect(mockUpdateSlot).toHaveBeenCalledWith(
+      "/tmp/workspace",
+      "my-project",
+      "developer",
+      "junior",
+      0,
+      expect.objectContaining({ sessionKey: null }),
+    );
+
+    const patchCall = (runCommand as any).mock.calls.find((c: any[]) => c[0]?.[3] === "sessions.patch");
+    expect(patchCall).toBeDefined();
+    const patchParams = JSON.parse(patchCall[0][5]);
+    expect(patchParams.key).toMatch(/^agent:unknown:subagent:my-project-developer-junior-alice-retry-/);
+    expect(patchParams.key).not.toBe("agent:unknown:subagent:my-project-developer-junior-alice");
   });
 });
 

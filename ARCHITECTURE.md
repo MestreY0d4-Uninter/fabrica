@@ -30,6 +30,29 @@ Main areas:
 
 ## Runtime model
 
+Large/xlarge work can be represented as a parent coordination issue plus child
+execution issues.
+
+Canonical runtime fields live in `project.issueRuntime[issueId]`:
+
+- `parentIssueId`
+- `childIssueIds`
+- `dependencyIssueIds`
+- `decompositionMode`
+- `decompositionStatus`
+- `completedChildIssueIds`
+- `blockedChildIssueIds`
+- `maxParallelChildren`
+
+Operational rules:
+
+- parent issues are coordinator-only and do not enter normal developer execution
+- child issues can enter the normal queue with their own level labels and PR flow
+- dependency-linked children stay blocked until predecessor execution is complete
+- sibling execution is capped by `maxParallelChildren`
+- parent rollups are refreshed from child runtime and can auto-close when the
+  family is complete
+
 ## Environment gate
 
 `lib/test-env` provisions the shared toolchain and the project environment

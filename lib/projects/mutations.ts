@@ -30,6 +30,65 @@ export function getIssueRuntime(
   return project.issueRuntime?.[String(issueId)];
 }
 
+export function isParentIssue(
+  project: Project,
+  issueId: number | string,
+): boolean {
+  const runtime = getIssueRuntime(project, issueId);
+  return !!(runtime && ((runtime.childIssueIds?.length ?? 0) > 0 || runtime.decompositionMode === "parent_child"));
+}
+
+export function isChildIssue(
+  project: Project,
+  issueId: number | string,
+): boolean {
+  const runtime = getIssueRuntime(project, issueId);
+  return runtime?.parentIssueId != null;
+}
+
+export function getParentIssueRuntime(
+  project: Project,
+  issueId: number | string,
+): IssueRuntimeState | undefined {
+  const runtime = getIssueRuntime(project, issueId);
+  if (!runtime?.parentIssueId) return undefined;
+  return getIssueRuntime(project, runtime.parentIssueId);
+}
+
+export function getChildIssueRuntimes(
+  project: Project,
+  issueId: number | string,
+): Array<{ issueId: number; runtime: IssueRuntimeState | undefined }> {
+  const runtime = getIssueRuntime(project, issueId);
+  return (runtime?.childIssueIds ?? []).map((childIssueId) => ({
+    issueId: childIssueId,
+    runtime: getIssueRuntime(project, childIssueId),
+  }));
+}
+
+export function getDependencyIssueRuntimes(
+  project: Project,
+  issueId: number | string,
+): Array<{ issueId: number; runtime: IssueRuntimeState | undefined }> {
+  const runtime = getIssueRuntime(project, issueId);
+  return (runtime?.dependencyIssueIds ?? []).map((dependencyIssueId) => ({
+    issueId: dependencyIssueId,
+    runtime: getIssueRuntime(project, dependencyIssueId),
+  }));
+}
+
+export function isIssueExecutionComplete(
+  project: Project,
+  issueId: number | string,
+): boolean {
+  const runtime = getIssueRuntime(project, issueId);
+  return !!(
+    runtime?.decompositionStatus === "completed" ||
+    runtime?.artifactOfRecord?.mergedAt ||
+    runtime?.sessionCompletedAt
+  );
+}
+
 /**
  * Update a specific slot in a role's worker state.
  * Uses withProjectsMutation for transactional locking with optimistic seq check.
@@ -283,7 +342,27 @@ export async function clearIssueRuntime(
 
     const project = data.projects[slug]!;
     if (project.issueRuntime) {
-      delete project.issueRuntime[String(issueId)];
+      const key = String(issueId);
+      const existing = project.issueRuntime[key];
+      const preserved = existing ? {
+        parentIssueId: existing.parentIssueId ?? null,
+        childIssueIds: existing.childIssueIds,
+        dependencyIssueIds: existing.dependencyIssueIds,
+        decompositionMode: existing.decompositionMode ?? null,
+        decompositionStatus: existing.parentIssueId ? "completed" : (existing.decompositionStatus ?? null),
+        sessionCompletedAt: existing.sessionCompletedAt ?? new Date().toISOString(),
+        artifactOfRecord: existing.artifactOfRecord ?? null,
+      } : null;
+      if (preserved && (
+        preserved.parentIssueId != null ||
+        (preserved.childIssueIds?.length ?? 0) > 0 ||
+        (preserved.dependencyIssueIds?.length ?? 0) > 0 ||
+        preserved.decompositionMode != null
+      )) {
+        project.issueRuntime[key] = preserved;
+      } else {
+        delete project.issueRuntime[key];
+      }
     }
   });
   return data;

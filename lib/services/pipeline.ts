@@ -12,6 +12,7 @@ import { notify, getNotificationConfig } from "../dispatch/notify.js";
 import { log as auditLog } from "../audit.js";
 import { loadConfig } from "../config/index.js";
 import { detectStepRouting } from "./queue-scan.js";
+import { reconcileParentLifecycleForIssue } from "./parent-lifecycle.js";
 import {
   DEFAULT_WORKFLOW,
   Action,
@@ -427,7 +428,40 @@ export async function executeCompletion(opts: {
   }
 
   // Deactivate worker last (non-critical — session cleanup)
+  if (issueRuntime?.parentIssueId) {
+    const childDecompositionStatus = effectiveResult === "blocked" || effectiveResult === "refine" || effectiveResult === "fail_infra"
+      ? "blocked"
+      : effectiveResult === "fail" || effectiveResult === "reject"
+        ? "active"
+        : issueRuntime.decompositionStatus;
+    if (childDecompositionStatus !== issueRuntime.decompositionStatus) {
+      await updateIssueRuntime(workspaceDir, projectSlug, issueId, {
+        decompositionStatus: childDecompositionStatus,
+      }).catch(() => {});
+    }
+  }
+  // Deactivate worker last (non-critical — session cleanup)
+  if (issueRuntime?.parentIssueId) {
+    const childDecompositionStatus = effectiveResult === "blocked" || effectiveResult === "refine" || effectiveResult === "fail_infra"
+      ? "blocked"
+      : effectiveResult === "fail" || effectiveResult === "reject"
+        ? "active"
+        : issueRuntime.decompositionStatus;
+    if (childDecompositionStatus !== issueRuntime.decompositionStatus) {
+      await updateIssueRuntime(workspaceDir, projectSlug, issueId, {
+        decompositionStatus: childDecompositionStatus,
+      }).catch(() => {});
+    }
+  }
   await deactivateWorker(workspaceDir, projectSlug, role, { level: opts.level, slotIndex: opts.slotIndex, issueId: String(issueId) });
+
+  await reconcileParentLifecycleForIssue({
+    workspaceDir,
+    projectSlug,
+    issueId,
+    provider,
+    workflow,
+  }).catch(() => {});
 
   notify(
     {

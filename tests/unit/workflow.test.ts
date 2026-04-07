@@ -45,6 +45,7 @@ import {
   isOwnedByOrUnclaimed,
   getOwnerLabel,
   getRoleLabels,
+  OPERATIONAL_LABELS,
 } from "../../lib/workflow/labels.js";
 
 const W = DEFAULT_WORKFLOW;
@@ -349,17 +350,22 @@ describe("label helpers", () => {
       tester: { levels: ["junior", "medior", "senior"] },
     };
     const labels = getRoleLabels(roles);
-    const names = labels.map(l => l.name);
+    const names = labels.map((l) => l.name);
     expect(names).toContain("developer:junior");
     expect(names).toContain("developer:medior");
     expect(names).toContain("developer:senior");
     expect(names).toContain("reviewer:junior");
     expect(names).toContain("reviewer:senior");
-    // Should also include step routing labels
     expect(names).toContain("review:human");
     expect(names).toContain("review:agent");
     expect(names).toContain("review:skip");
     expect(names).toContain("test:skip");
+  });
+
+  it("includes decomposition labels in managed operational labels", () => {
+    const names = OPERATIONAL_LABELS.map((label) => label.name);
+    expect(names).toContain("decomposition:parent");
+    expect(names).toContain("decomposition:child");
   });
 });
 

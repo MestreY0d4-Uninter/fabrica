@@ -4,9 +4,11 @@ import path from "node:path";
 import os from "node:os";
 import { DATA_DIR } from "../../lib/setup/constants.js";
 import {
+  claimDispatch,
   computeDispatchId,
   isDuplicate,
   recordDispatch,
+  releaseDispatchClaim,
   cleanupExpired,
 } from "../../lib/dispatch/dispatch-dedup.js";
 
@@ -51,6 +53,19 @@ describe("isDuplicate + recordDispatch", () => {
   it("returns false for different dispatchId", async () => {
     await recordDispatch(tmpDir, "abc123");
     expect(await isDuplicate(tmpDir, "xyz789")).toBe(false);
+  });
+
+  it("claims a dispatch immediately to block concurrent in-process duplicates", async () => {
+    expect(await claimDispatch(tmpDir, "abc123")).toBe(true);
+    expect(await isDuplicate(tmpDir, "abc123")).toBe(true);
+    expect(await claimDispatch(tmpDir, "abc123")).toBe(false);
+  });
+
+  it("releases an in-process claim when dispatch setup fails", async () => {
+    expect(await claimDispatch(tmpDir, "release-abc123")).toBe(true);
+    releaseDispatchClaim("release-abc123");
+    expect(await isDuplicate(tmpDir, "release-abc123")).toBe(false);
+    expect(await claimDispatch(tmpDir, "release-abc123")).toBe(true);
   });
 });
 

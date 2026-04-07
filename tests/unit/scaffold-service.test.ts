@@ -150,6 +150,36 @@ describe("scaffold-service", () => {
     expect(plan.repo_local).toBe("/tmp/custom-root/demo-cli");
   });
 
+  it("prefers spec_data.project_slug over stack-derived naming when metadata.project_name is absent", async () => {
+    const plan = await buildScaffoldPlan(
+      makePayload({
+        raw_idea: "Build a Python CLI that validates CSV files against a required column contract and exits non-zero on failure. Please use the project name csv-contract-cli.",
+        metadata: {
+          source: "telegram-dm-bootstrap",
+          factory_change: false,
+          stack_hint: "python-cli",
+          project_name: null,
+        },
+        spec_data: {
+          project_slug: "csv-contract-cli",
+          title: "CSV Contract Validator",
+          objective: "Build a Python CLI that validates CSV files against a required column contract.",
+          scope_v1: ["Validate CSV headers", "Print missing and extra columns"],
+          out_of_scope: ["GUI"],
+          acceptance_criteria: ["CLI validates CSV contracts end to end"],
+          definition_of_done: ["Tests pass"],
+          constraints: "None specified",
+          risks: [],
+        },
+      }),
+      makeCtx(),
+    );
+
+    expect(plan.project_slug).toBe("csv-contract-cli");
+    expect(plan.repo_name).toBe("csv-contract-cli");
+    expect(plan.repo_url).toBe("https://github.com/MestreY0d4-Uninter/csv-contract-cli");
+  });
+
   it("parses scaffold output contracts with a stable schema", () => {
     const scaffold = parseScaffoldOutput(
       JSON.stringify({

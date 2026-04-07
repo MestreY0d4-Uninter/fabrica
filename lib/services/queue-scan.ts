@@ -6,7 +6,9 @@
  */
 import type { Issue, StateLabel } from "../providers/provider.js";
 import type { IssueProvider } from "../providers/provider.js";
+import type { Project } from "../projects/types.js";
 import { getLevelsForRole, getAllLevels } from "../roles/index.js";
+import { getFamilyDispatchBlockReason } from "./family-scheduler.js";
 import {
   getQueueLabels,
   getAllQueueLabels,
@@ -99,6 +101,7 @@ export async function findNextIssueForRole(
   role: Role,
   workflow: WorkflowConfig,
   instanceName?: string,
+  project?: Project,
 ): Promise<{ issue: Issue; label: StateLabel } | null> {
   const labels = getQueueLabels(workflow, role);
   for (const label of labels) {
@@ -107,7 +110,11 @@ export async function findNextIssueForRole(
       const eligible = instanceName
         ? issues.filter((i) => isOwnedByOrUnclaimed(i.labels, instanceName))
         : issues;
-      if (eligible.length > 0) return { issue: eligible[eligible.length - 1]!, label };
+      for (let index = eligible.length - 1; index >= 0; index -= 1) {
+        const issue = eligible[index]!;
+        const blockReason = project ? getFamilyDispatchBlockReason(project, issue.iid, role) : null;
+        if (!blockReason) return { issue, label };
+      }
     } catch { /* continue */ }
   }
   return null;

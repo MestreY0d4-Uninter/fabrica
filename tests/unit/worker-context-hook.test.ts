@@ -88,9 +88,9 @@ describe("worker-context-hook — before_agent_start", () => {
         expect(executionContract).toContain("Keep review verdict semantics pure");
         expect(executionContract).toContain("Review result: APPROVE");
         expect(executionContract).toContain("Review result: REJECT");
-        expect(executionContract).not.toContain("do not emit a `Review result` line");
-        expect(executionContract).not.toContain("blocked result line");
       } else {
+        expect(executionContract).toContain("canonical scripts/qa.sh contract");
+        expect(executionContract).toContain("lint, types, security, tests, and coverage");
         expect(executionContract).toContain("execute the task directly");
         expect(executionContract).toMatch(/canonical blocked result line/i);
       }

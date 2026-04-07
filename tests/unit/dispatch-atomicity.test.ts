@@ -119,13 +119,18 @@ vi.mock("../../lib/dispatch/message-builder.js", () => ({
   buildAnnouncement: () => "announcement",
   formatSessionLabel: () => "test-session-label",
   formatSessionLabelFull: () => "test-session-label-full",
+  resolveExecutionSetup: () => ({
+    branchName: "feature/42-test-project",
+    worktreePath: "/tmp/test-ws.worktrees/feature/42-test-project",
+  }),
 }));
 
 // --- Mock: ./session.js ---
 vi.mock("../../lib/dispatch/session.js", () => ({
   ensureSessionReady: vi.fn(async () => {}),
-  sendToAgent: vi.fn(() => {
+  sendToAgent: vi.fn(async () => {
     callOrder.push("sendToAgent");
+    return { runId: "dispatch-run-1" };
   }),
   shouldClearSession: async () => false,
   buildEffortPrompt: (_effort: unknown, roleInstructions: string | undefined) => roleInstructions ?? "",

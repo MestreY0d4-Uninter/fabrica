@@ -43,6 +43,7 @@ The heartbeat ticks every 60 seconds. On each tick, Fabrica alternates between a
 - **Pluggable AI workers** — each role (developer, reviewer, tester, architect) maps to a configurable model and level
 - **Polling-first GitHub integration** — uses `gh` CLI for all GitHub operations; no webhook infrastructure or GitHub App required
 - **Telegram bootstrap** (optional) — describe a new project via DM; Fabrica asks clarifying questions and provisions the repo automatically
+- **Parent/child large-work orchestration** — large initiatives can become one coordinator issue plus execution-ready child issues with dependency-aware scheduling and automatic parent rollups
 - **Stack-aware environment gate** — developer and tester dispatch only start after the project stack environment is provisioned and marked ready
 - **Lifecycle-driven worker completion** — reviewer, developer, tester, and architect completion resolve from agent lifecycle plus canonical result lines, not from fragile tool availability assumptions
 - **Detailed event timeline** — project topics receive explicit worker start, completion, review, rejection, and recovery events with cycle-aware dedupe

@@ -2,7 +2,16 @@
  * Triage decision logic — effort, priority, DoR validation.
  * Pure logic port from triage.sh.
  */
-import type { IdeaType, DeliveryTarget, TriagePriority, TriageEffort } from "../types.js";
+import type {
+  IdeaType,
+  DeliveryTarget,
+  TriagePriority,
+  TriageEffort,
+  TriageComplexity,
+  TriageCoupling,
+  TriageParallelizability,
+  TriageQualityCriticality,
+} from "../types.js";
 
 export type TriageMatrix = {
   version: string;
@@ -39,6 +48,11 @@ export type TriageDecision = {
   priorityLabel: string;
   effort: TriageEffort;
   effortLabel: string;
+  complexity: TriageComplexity;
+  coupling: TriageCoupling;
+  parallelizability: TriageParallelizability;
+  qualityCriticality: TriageQualityCriticality;
+  riskProfile: string[];
   typeLabel: string;
   targetState: string;
   dispatchLabel: string | null;
@@ -194,10 +208,72 @@ export function determineLevel(effort: TriageEffort, targetState: string): strin
   return level;
 }
 
+export function assessComplexity(input: TriageInput): TriageComplexity {
+  const broadSignals = detectRawIdeaComplexity(input.rawIdea).signals.length;
+  if (input.filesChanged >= 18 || input.acCount >= 8 || broadSignals >= 4 || input.totalRisks >= 4) return "high";
+  if (input.filesChanged >= 8 || input.acCount >= 4 || broadSignals >= 2 || input.totalRisks >= 2) return "medium";
+  return "low";
+}
+
+export function assessCoupling(input: TriageInput): TriageCoupling {
+  const text = `${input.rawIdea} ${input.scopeText}`.toLowerCase();
+  const crossCuttingSignals = [
+    /\bauth\b|\bpermission\b|\brbac\b/,
+    /\bmigration\b|\bschema\b|\bdatabase\b/,
+    /\bbackground\b|\bworker\b|\bqueue\b|\bcron\b/,
+    /\bfrontend\b|\bdashboard\b|\bui\b/,
+    /\bintegration\b|\bwebhook\b|\bexternal\b/,
+  ].filter((regex) => regex.test(text)).length;
+  if (crossCuttingSignals >= 4) return "high";
+  if (crossCuttingSignals >= 2) return "medium";
+  return "low";
+}
+
+export function assessParallelizability(input: TriageInput, coupling: TriageCoupling): TriageParallelizability {
+  const text = `${input.rawIdea} ${input.scopeText}`.toLowerCase();
+  const capabilitySignals = [
+    /\bauth\b/,
+    /\bapi\b|\bendpoint\b|\broute\b/,
+    /\bfrontend\b|\bdashboard\b|\bui\b/,
+    /\bworker\b|\bqueue\b|\bbackground\b/,
+    /\bnotification\b|\bemail\b|\bsms\b|\balert\b/,
+    /\bdatabase\b|\bmigration\b|\bschema\b/,
+  ].filter((regex) => regex.test(text)).length;
+  if (coupling === "high") return "low";
+  if (capabilitySignals >= 4) return "high";
+  if (capabilitySignals >= 2) return "medium";
+  return "low";
+}
+
+export function assessQualityCriticality(input: TriageInput): TriageQualityCriticality {
+  const text = `${input.rawIdea} ${input.objective} ${input.scopeText}`.toLowerCase();
+  if (/\bauth\b|\boauth\b|\bjwt\b|\brbac\b|\bpayment\b|\bbilling\b|\bpii\b|\bsecure\b|\bsecurity\b/.test(text)) return "high";
+  if (/\bperformance\b|\bscalable\b|\bbackground\b|\bworker\b|\bintegration\b|\bwebhook\b/.test(text)) return "medium";
+  return "low";
+}
+
+export function buildRiskProfile(input: TriageInput): string[] {
+  const text = `${input.rawIdea} ${input.objective} ${input.scopeText}`.toLowerCase();
+  const risks = [
+    /\bauth\b|\boauth\b|\bjwt\b|\brbac\b/.test(text) ? "auth" : null,
+    /\bpayment\b|\bbilling\b|\bsubscription\b/.test(text) ? "payments" : null,
+    /\bdatabase\b|\bmigration\b|\bschema\b/.test(text) ? "data_model" : null,
+    /\bworker\b|\bqueue\b|\bbackground\b|\bcron\b/.test(text) ? "async_processing" : null,
+    /\bintegration\b|\bwebhook\b|\bexternal\b/.test(text) ? "external_integration" : null,
+    /\bperformance\b|\blatency\b|\bthroughput\b/.test(text) ? "performance" : null,
+  ];
+  return Array.from(new Set(risks.filter((risk): risk is string => Boolean(risk))));
+}
+
 /** Run full triage logic. */
 export function runTriageLogic(input: TriageInput, matrix: TriageMatrix): TriageDecision {
   const effort = calculateEffort(input.filesChanged, input.acCount, input.rawIdea);
   const { priority, label: priorityLabel } = calculatePriority(input.type, effort, input.totalRisks, matrix);
+  const complexity = assessComplexity(input);
+  const coupling = assessCoupling(input);
+  const parallelizability = assessParallelizability(input, coupling);
+  const qualityCriticality = assessQualityCriticality(input);
+  const riskProfile = buildRiskProfile(input);
 
   const effortLabel = matrix.effort_rules[effort]?.label ?? `effort:${effort}`;
   const typeLabel = matrix.auto_labels[input.type] ?? "";
@@ -219,6 +295,7 @@ export function runTriageLogic(input: TriageInput, matrix: TriageMatrix): Triage
 
   return {
     priority, priorityLabel, effort, effortLabel,
+    complexity, coupling, parallelizability, qualityCriticality, riskProfile,
     typeLabel, targetState, dispatchLabel, level,
     // errors contains DoR errors only — used for readyForDispatch gate.
     // Spec quality errors are surfaced separately via specQualityBlock.

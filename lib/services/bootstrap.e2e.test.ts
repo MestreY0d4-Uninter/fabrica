@@ -50,6 +50,36 @@ describe("E2E bootstrap — extraSystemPrompt injection", () => {
     assert.ok(!prompts[0].includes("Generic instructions"));
   });
 
+  it("should prepare the canonical worktree before dispatching a developer", async () => {
+    h = await createTestHarness({ projectName: "my-app" });
+    h.provider.seedIssue({ iid: 11, title: "Use worktree", labels: ["To Do"] });
+
+    await dispatchTask({
+      workspaceDir: h.workspaceDir,
+      agentId: "main",
+      project: h.project,
+      issueId: 11,
+      issueTitle: "Use worktree",
+      issueDescription: "",
+      issueUrl: "https://example.com/issues/11",
+      role: "developer",
+      level: "medior",
+      fromLabel: "To Do",
+      toLabel: "Doing",
+      provider: h.provider,
+      runCommand: h.runCommand,
+    });
+
+    const gitCommands = h.commands.commandsFor("git");
+    assert.ok(
+      gitCommands.some((cmd) => cmd.argv.slice(0, 3).join(" ") === "git worktree add"),
+      `Expected a git worktree add command, got: ${gitCommands.map((cmd) => cmd.argv.join(" ")).join(" | ")}`,
+    );
+    const taskMsg = h.commands.taskMessages()[0] ?? "";
+    assert.ok(taskMsg.includes("Execution path: /tmp/" ) || taskMsg.includes("Execution path: "));
+    assert.ok(taskMsg.includes("Main checkout:"));
+  });
+
   it("should fall back to default instructions when no project override exists", async () => {
     h = await createTestHarness({ projectName: "other-app" });
     h.provider.seedIssue({ iid: 2, title: "Fix bug", labels: ["To Do"] });
