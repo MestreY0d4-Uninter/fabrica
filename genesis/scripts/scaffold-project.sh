@@ -1072,14 +1072,22 @@ else
   echo "[qa] WARNING: No QA toolchain found at $TOOLCHAIN" >&2
 fi
 
+ROOT="$(pwd)"
+sanitize_public_output() {
+  sed -E \
+    -e "s#${ROOT}#.#g" \
+    -e 's#file://[^[:space:]]+#file://.#g' \
+    -e 's#/home/[^[:space:]]+/git/[^[:space:]]+#.#g'
+}
+
 echo "=== QA Gate ==="
 FAIL=0
 
 echo "--- Ruff lint ---"
-ruff check app/ tests/ 2>&1 || { echo "RUFF FAILED"; FAIL=1; }
+ruff check app/ tests/ 2>&1 | sanitize_public_output || { echo "RUFF FAILED"; FAIL=1; }
 
 echo "--- Mypy ---"
-mypy app/ 2>&1 || { echo "MYPY FAILED"; FAIL=1; }
+mypy app/ 2>&1 | sanitize_public_output || { echo "MYPY FAILED"; FAIL=1; }
 
 echo "--- Tests ---"
 python -m pytest tests/ -v 2>&1 | sanitize_public_output || { echo "TESTS FAILED"; FAIL=1; }
@@ -1203,14 +1211,22 @@ else
   echo "[qa] WARNING: No QA toolchain found at $TOOLCHAIN" >&2
 fi
 
+ROOT="$(pwd)"
+sanitize_public_output() {
+  sed -E \
+    -e "s#${ROOT}#.#g" \
+    -e 's#file://[^[:space:]]+#file://.#g' \
+    -e 's#/home/[^[:space:]]+/git/[^[:space:]]+#.#g'
+}
+
 echo "=== QA Gate ==="
 FAIL=0
 
 echo "--- Ruff lint ---"
-ruff check app/ tests/ 2>&1 || { echo "RUFF FAILED"; FAIL=1; }
+ruff check app/ tests/ 2>&1 | sanitize_public_output || { echo "RUFF FAILED"; FAIL=1; }
 
 echo "--- Mypy ---"
-mypy app/ 2>&1 || { echo "MYPY FAILED"; FAIL=1; }
+mypy app/ 2>&1 | sanitize_public_output || { echo "MYPY FAILED"; FAIL=1; }
 
 echo "--- Tests ---"
 python -m pytest tests/ -v 2>&1 | sanitize_public_output || { echo "TESTS FAILED"; FAIL=1; }
@@ -1398,14 +1414,22 @@ else
   echo "[qa] WARNING: No QA toolchain found at $TOOLCHAIN" >&2
 fi
 
+ROOT="$(pwd)"
+sanitize_public_output() {
+  sed -E \
+    -e "s#${ROOT}#.#g" \
+    -e 's#file://[^[:space:]]+#file://.#g' \
+    -e 's#/home/[^[:space:]]+/git/[^[:space:]]+#.#g'
+}
+
 echo "=== QA Gate ==="
 FAIL=0
 
 echo "--- Ruff lint ---"
-ruff check app/ tests/ 2>&1 || { echo "RUFF FAILED"; FAIL=1; }
+ruff check app/ tests/ 2>&1 | sanitize_public_output || { echo "RUFF FAILED"; FAIL=1; }
 
 echo "--- Mypy ---"
-mypy app/ 2>&1 || { echo "MYPY FAILED"; FAIL=1; }
+mypy app/ 2>&1 | sanitize_public_output || { echo "MYPY FAILED"; FAIL=1; }
 
 echo "--- Tests ---"
 python -m pytest tests/ -v 2>&1 | sanitize_public_output || { echo "TESTS FAILED"; FAIL=1; }
@@ -1537,14 +1561,22 @@ else
   echo "[qa] WARNING: No QA toolchain found at $TOOLCHAIN" >&2
 fi
 
+ROOT="$(pwd)"
+sanitize_public_output() {
+  sed -E \
+    -e "s#${ROOT}#.#g" \
+    -e 's#file://[^[:space:]]+#file://.#g' \
+    -e 's#/home/[^[:space:]]+/git/[^[:space:]]+#.#g'
+}
+
 echo "=== QA Gate ==="
 FAIL=0
 
 echo "--- Ruff lint ---"
-ruff check src/ tests/ 2>&1 || { echo "RUFF FAILED"; FAIL=1; }
+ruff check src/ tests/ 2>&1 | sanitize_public_output || { echo "RUFF FAILED"; FAIL=1; }
 
 echo "--- Mypy ---"
-mypy src/ 2>&1 || { echo "MYPY FAILED"; FAIL=1; }
+mypy src/ 2>&1 | sanitize_public_output || { echo "MYPY FAILED"; FAIL=1; }
 
 echo "--- Tests ---"
 python -m pytest tests/ -v 2>&1 | sanitize_public_output || { echo "TESTS FAILED"; FAIL=1; }

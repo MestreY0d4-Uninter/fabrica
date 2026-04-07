@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.29 - 2026-04-07
+
+- Fixed generated Python-family `scripts/qa.sh` scaffolds so `sanitize_public_output()` is defined before the pytest/coverage pipes that use it.
+- This resolves a real validation failure where tester QA runs on greenfield Python CLI projects were marked failed only because the generated QA script referenced an undefined sanitizer function.
+
 ## 0.2.28 - 2026-04-07
 
 - Fixed final closeout evidence gating so tester-driven completion can use the canonical PR already stored in issue runtime/artifact metadata before deciding whether a CLI/project has meaningful evidence to close.

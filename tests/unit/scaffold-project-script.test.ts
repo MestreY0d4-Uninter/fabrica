@@ -175,5 +175,9 @@ exit 1
     }));
     await expect(fs.access(path.join(canonicalRepoLocal, "pyproject.toml"))).resolves.toBeUndefined();
     await expect(fs.access(legacyRepoLocal)).rejects.toThrow();
+
+    const qaScript = await fs.readFile(path.join(canonicalRepoLocal, "scripts", "qa.sh"), "utf-8");
+    expect(qaScript).toContain("sanitize_public_output()");
+    expect(qaScript).toContain("python -m pytest tests/ -v 2>&1 | sanitize_public_output");
   }, 120_000);
 });
