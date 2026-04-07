@@ -747,6 +747,78 @@ async function handleTelegramBootstrapDmMessage(
     return;
   }
 
+  if (
+    existingSession?.status === "completed"
+    && !sessionIsExpired
+    && existingSession.triageReadyForDispatch === false
+    && existingSession.issueId
+    && existingSession.projectSlug
+    && existingSession.triageErrors?.includes("dor_auth_requirements_missing")
+    && content.trim().length >= 12
+  ) {
+    const projects = await readProjects(workspaceDir).catch(() => null);
+    const project = existingSession.projectSlug ? projects?.projects?.[existingSession.projectSlug] : null;
+    if (project?.repo) {
+      const { provider } = await createProvider({
+        repo: project.repo,
+        provider: project.provider,
+        runCommand: ctx.runCommand,
+        pluginConfig: ctx.pluginConfig,
+        providerProfile: project.providerProfile,
+      });
+      const issue = await provider.getIssue(existingSession.issueId).catch(() => null);
+      const clarificationBlock = [
+        "## Human Clarification",
+        "",
+        content.trim(),
+      ].join("\n");
+      const currentBody = issue?.description ?? "";
+      const nextBody = currentBody.includes("## Human Clarification")
+        ? `${currentBody.trim()}\n\n${content.trim()}`
+        : `${currentBody.trim()}\n\n${clarificationBlock}`.trim();
+      await provider.editIssue(existingSession.issueId, { body: nextBody }).catch(() => {});
+      await provider.addComment(existingSession.issueId, [
+        "✅ Telegram clarification received; resuming automatic dispatch.",
+        "",
+        content.trim(),
+      ].join("\n")).catch(() => {});
+      await provider.removeLabels(existingSession.issueId, ["needs-human"]).catch(() => {});
+      await provider.transitionLabel(existingSession.issueId, "Planning", "To Do").catch(() => {});
+      await provider.addLabel(existingSession.issueId, "developer:medior").catch(() => {});
+
+      const resumedSession = await upsertTelegramBootstrapSession(workspaceDir, {
+        conversationId,
+        rawIdea: `${existingSession.rawIdea}\n\nClarification:\n${content.trim()}`,
+        projectName: existingSession.projectName ?? undefined,
+        stackHint: existingSession.stackHint ?? undefined,
+        repoUrl: existingSession.repoUrl ?? undefined,
+        repoPath: existingSession.repoPath ?? undefined,
+        sourceRoute: existingSession.sourceRoute,
+        projectRoute: existingSession.projectRoute,
+        projectSlug: existingSession.projectSlug,
+        issueId: existingSession.issueId,
+        issueUrl: existingSession.issueUrl,
+        triageReadyForDispatch: true,
+        triageErrors: [],
+        projectChannelId: existingSession.projectChannelId,
+        messageThreadId: existingSession.messageThreadId,
+        language: existingSession.language,
+        status: "dispatching",
+        bootstrapStep: existingSession.bootstrapStep ?? "project_registered",
+        projectRegisteredAt: existingSession.projectRegisteredAt,
+        topicKickoffSentAt: existingSession.topicKickoffSentAt,
+        projectTickedAt: existingSession.projectTickedAt,
+        completionAckSentAt: existingSession.completionAckSentAt,
+        ackSentAt: existingSession.ackSentAt,
+        error: null,
+      });
+      if (resumedSession) {
+        await completeRegisteredBootstrap(ctx, workspaceDir, resumedSession);
+      }
+      return;
+    }
+  }
+
   if (!isBootstrapCandidate(content)) {
     // Layer 3: LLM for ambiguous cases (fire-and-forget)
     if (isAmbiguousCandidate(content)) {

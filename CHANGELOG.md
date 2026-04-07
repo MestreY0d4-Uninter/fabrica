@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.30 - 2026-04-07
+
+- Added a Telegram bootstrap recovery path for projects that were registered successfully but paused with `needs-human` due to missing auth requirements. A follow-up DM clarification now updates the existing issue and resumes automatic dispatch instead of being silently ignored.
+
 ## 0.2.29 - 2026-04-07
 
 - Fixed generated Python-family `scripts/qa.sh` scaffolds so `sanitize_public_output()` is defined before the pytest/coverage pipes that use it.
