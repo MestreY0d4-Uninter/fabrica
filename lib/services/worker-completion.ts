@@ -37,7 +37,7 @@ type WorkerObservation = {
   result: WorkerResult | null;
   activityObserved: boolean;
   executionContractViolation?: {
-    reason: "nested_coding_agent" | "meta_skill";
+    reason: "nested_coding_agent" | "meta_skill" | "worktree_drift";
     evidence: string;
   };
 };
@@ -279,7 +279,7 @@ function hasObservableContent(content: unknown): boolean {
 }
 
 function detectExecutionContractViolation(messages: unknown[]): {
-  reason: "nested_coding_agent" | "meta_skill";
+  reason: "nested_coding_agent" | "meta_skill" | "worktree_drift";
   evidence: string;
 } | null {
   const evidenceEntries = collectWorkerTranscriptEvidence(messages);
@@ -294,6 +294,17 @@ function detectExecutionContractViolation(messages: unknown[]): {
     return {
       reason: "nested_coding_agent",
       evidence: nestedCommand,
+    };
+  }
+
+  const worktreeDrift = evidenceEntries
+    .map((entry) => matchWorktreeDriftEvidence(entry.text))
+    .find((match): match is string => Boolean(match));
+
+  if (worktreeDrift) {
+    return {
+      reason: "worktree_drift",
+      evidence: worktreeDrift,
     };
   }
 
@@ -323,6 +334,20 @@ function detectExecutionContractViolation(messages: unknown[]): {
     }
   }
 
+  return null;
+}
+
+function matchWorktreeDriftEvidence(text: string): string | null {
+  if (!text) return null;
+  const patterns = [
+    /ENOENT: .*\/home\/ubuntu\/\.openclaw\/workspace(?:\/[^\s'"`]+)?/,
+    /^\/home\/ubuntu\/\.openclaw\/workspace$/m,
+    /\/home\/ubuntu\/\.openclaw\/workspace(?:\/[^\s'"`]+)?/,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[0]) return match[0];
+  }
   return null;
 }
 
@@ -864,43 +889,44 @@ export async function handleWorkerAgentEnd(opts: {
     }).catch(() => {});
   }
 
-  if (!observation.result) {
-    if (observation.executionContractViolation) {
-      if (context) {
-        const violationPayload = {
-          sessionKey: opts.sessionKey,
-          projectSlug: context.projectSlug,
-          issueId: context.issueId,
-          role,
-          reason: "invalid_execution_path",
-          violationReason: observation.executionContractViolation.reason,
-          evidence: observation.executionContractViolation.evidence,
-        };
-        await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
-          inconclusiveCompletionAt: new Date().toISOString(),
-          inconclusiveCompletionReason: "invalid_execution_path",
-        }).catch(() => {});
-        await auditLog(opts.workspaceDir, "worker_execution_contract_violation", violationPayload).catch(() => {});
-        await auditLog(opts.workspaceDir, "worker_execution_recovery_started", violationPayload).catch(() => {});
-        await auditLog(opts.workspaceDir, "worker_completion_inconclusive", {
-          ...violationPayload,
-        }).catch(() => {});
-      } else {
-        const violationPayload = {
-          sessionKey: opts.sessionKey,
-          role,
-          reason: "invalid_execution_path",
-          violationReason: observation.executionContractViolation.reason,
-          evidence: observation.executionContractViolation.evidence,
-        };
-        await auditLog(opts.workspaceDir, "worker_execution_contract_violation", violationPayload).catch(() => {});
-        await auditLog(opts.workspaceDir, "worker_result_skipped", {
-          ...violationPayload,
-        }).catch(() => {});
-      }
-      return { applied: false, reason: "invalid_execution_path" };
+  if (observation.executionContractViolation) {
+    if (context) {
+      const violationPayload = {
+        sessionKey: opts.sessionKey,
+        projectSlug: context.projectSlug,
+        issueId: context.issueId,
+        role,
+        reason: "invalid_execution_path",
+        violationReason: observation.executionContractViolation.reason,
+        evidence: observation.executionContractViolation.evidence,
+      };
+      await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
+        inconclusiveCompletionAt: new Date().toISOString(),
+        inconclusiveCompletionReason: "invalid_execution_path",
+      }).catch(() => {});
+      await auditLog(opts.workspaceDir, "worker_execution_contract_violation", violationPayload).catch(() => {});
+      await auditLog(opts.workspaceDir, "worker_execution_recovery_started", violationPayload).catch(() => {});
+      await auditLog(opts.workspaceDir, "worker_completion_inconclusive", {
+        ...violationPayload,
+        hadResultLine: Boolean(observation.result),
+      }).catch(() => {});
+    } else {
+      const violationPayload = {
+        sessionKey: opts.sessionKey,
+        role,
+        reason: "invalid_execution_path",
+        violationReason: observation.executionContractViolation.reason,
+        evidence: observation.executionContractViolation.evidence,
+      };
+      await auditLog(opts.workspaceDir, "worker_execution_contract_violation", violationPayload).catch(() => {});
+      await auditLog(opts.workspaceDir, "worker_result_skipped", {
+        ...violationPayload,
+      }).catch(() => {});
     }
+    return { applied: false, reason: "invalid_execution_path" };
+  }
 
+  if (!observation.result) {
     if (context && observation.activityObserved) {
       await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
         inconclusiveCompletionAt: new Date().toISOString(),

@@ -298,6 +298,31 @@ describe("worker-completion", () => {
     );
   });
 
+  it("rejects worker completion when transcript shows worktree drift even with a result line", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [
+        { role: "toolResult", content: [{ type: "text", text: "/home/ubuntu/.openclaw/workspace" }] },
+        { role: "assistant", content: [{ type: "text", text: "Work result: DONE" }] },
+      ],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ applied: false, reason: "invalid_execution_path" });
+    expect(mockExecuteCompletion).not.toHaveBeenCalled();
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "worker_execution_contract_violation",
+      expect.objectContaining({
+        violationReason: "worktree_drift",
+        evidence: "/home/ubuntu/.openclaw/workspace",
+      }),
+    );
+  });
+
   it("ignores thinking-only confessions for execution-contract violations", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 

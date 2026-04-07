@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.32 - 2026-04-07
+
+- Added worker-completion recovery guards for explicit worktree drift evidence in subagent transcripts. When a worker produces a final result after falling back into `~/.openclaw/workspace`, Fabrica now marks the completion inconclusive instead of trusting the result line.
+- This hardens the pipeline beyond prompt-only guidance and prevents false DONE/PASS outcomes from sessions that visibly escaped their assigned worktree.
+
 ## 0.2.31 - 2026-04-07
 
 - Strengthened developer/tester default prompts to treat the shell exec tool as stateless: every repo-scoped command must explicitly re-enter the assigned worktree (`cd "$WORKTREE" && ...`) or use absolute repo paths.
