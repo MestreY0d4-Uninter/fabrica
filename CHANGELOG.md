@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.24 - 2026-04-07
+
+- Hardened Fabrica intake, triage, and acceptance flow so request fidelity, clarification policy, and runtime quality signals are carried from intake through final completion.
+- Added explicit dispatch semantics and trigger-source auditing, plus clearer worker lifecycle notifications for fresh dispatches, resumes, feedback redispatches, and bootstrap-triggered cycles.
+- Introduced stack policies, quality gates, done policies, and final acceptance summaries so completion decisions and human notifications carry more concrete evidence and archetype-aware reasoning.
+- Propagated triage criticality/risk into issue runtime and parent-family rollups, improving final acceptance, operational timelines, and parent decomposition visibility.
+
 ## 0.2.23 - 2026-04-07
 
 - Completed the parent/child runtime promotion for large work: decomposition metadata is now canonical in issue runtime, child issues carry dependency bindings, recommended level hints, and parent families persist a parallelism ceiling.
