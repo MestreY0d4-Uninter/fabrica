@@ -1,6 +1,6 @@
 {
   "name": "@mestreyoda/fabrica",
-  "version": "0.2.30",
+  "version": "0.2.31",
   "description": "Autonomous software engineering pipeline for OpenClaw. Turns ideas into deployed code via intake, dispatch, review, test, and merge.",
   "type": "module",
   "main": "./dist/index.js",

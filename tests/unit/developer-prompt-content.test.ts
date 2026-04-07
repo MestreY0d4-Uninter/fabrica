@@ -135,6 +135,8 @@ describe("developer prompt anti-pattern checklist", () => {
     expect(worktreeWorkflow).toContain("Work result: BLOCKED");
     expect(worktreeWorkflow).toContain("~/.openclaw/workspace/<slug>");
     expect(worktreeWorkflow).toContain("do not re-initialize the project with `npm init`");
+    expect(worktreeWorkflow).toContain("shell `exec` tool is stateless");
+    expect(worktreeWorkflow).toContain("cd \"$WORKTREE\" &&");
     expect(worktreeWorkflow).toMatch(/git -C "\$REPO_ROOT" worktree list --porcelain/);
     expect(worktreeWorkflow).toMatch(/git -C "\$REPO_ROOT" worktree add/);
     expect(worktreeWorkflow).toContain("Never improvise with `./.worktrees`");
@@ -149,6 +151,8 @@ describe("developer prompt anti-pattern checklist", () => {
     expect(branchWorkflow).toMatch(/git -C "\$REPO_ROOT" worktree add/);
     expect(branchWorkflow).toMatch(/git -C "\$REPO_ROOT" fetch origin/);
     expect(branchWorkflow).toContain("cd \"$WORKTREE\"");
+    expect(branchWorkflow).toContain("shell `exec` tool is stateless");
+    expect(branchWorkflow).toContain("cd \"$WORKTREE\" &&");
     expect(branchWorkflow).toMatch(/git -C "\$REPO_ROOT" checkout main/);
     expect(branchWorkflow).toMatch(/git -C "\$REPO_ROOT" pull origin main/);
     expect(branchWorkflow).toMatch(/do not use the main checkout/i);

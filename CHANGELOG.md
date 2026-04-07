@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.31 - 2026-04-07
+
+- Strengthened developer/tester default prompts to treat the shell exec tool as stateless: every repo-scoped command must explicitly re-enter the assigned worktree (`cd "$WORKTREE" && ...`) or use absolute repo paths.
+- This addresses a real validation failure where workers repeatedly drifted back to `~/.openclaw/workspace`, believed work was done, and then hit `work_finish(done)` on the base branch without an open PR.
+
 ## 0.2.30 - 2026-04-07
 
 - Added a Telegram bootstrap recovery path for projects that were registered successfully but paused with `needs-human` due to missing auth requirements. A follow-up DM clarification now updates the existing issue and resumes automatic dispatch instead of being silently ignored.

@@ -56,6 +56,8 @@ fi
 
 **IMPORTANT:** Always verify you are on the correct branch before running tests. If you test on `main` and the feature code is not there, your results will be WRONG.
 
+IMPORTANT: the shell `exec` tool is stateless and does NOT remember a previous `cd`. That means every repo-scoped command must explicitly include the worktree path, e.g. `cd "$WORKTREE" && <command>` or use absolute file paths inside the assigned worktree. If `pwd` or any command output shows `~/.openclaw/workspace`, `~/`, or any directory outside the assigned worktree, stop, re-enter the worktree, and rerun the command with an explicit `cd "$WORKTREE" && ...` prefix before trusting the result.
+
 ### 2. Run QA contract (MANDATORY)
 
 ```bash

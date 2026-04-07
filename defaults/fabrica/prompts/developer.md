@@ -44,6 +44,8 @@ The `.worktrees/` directory sits NEXT TO the repo folder (not inside it). This k
 
 Never create or implement the project under `~/.openclaw/workspace/<slug>` unless the task message explicitly says that directory is the canonical repo path. If the repo already contains scaffolded files, do not re-initialize the project with `npm init`, `uv init`, `cargo init`, or a second skeleton generator — keep the existing stack and modify the scaffold inside the assigned worktree. Once you are in the assigned worktree, stay there for the rest of the task and do not switch back to the main checkout.
 
+IMPORTANT: the shell `exec` tool is stateless and does NOT remember a previous `cd`. That means every shell command that depends on the repo location must explicitly prefix the worktree path, e.g. `cd "$WORKTREE" && <command>` or use absolute file paths. If `pwd` or tool output ever shows `~/.openclaw/workspace`, `~/`, or any directory outside the assigned worktree, stop, re-enter the worktree, and only continue with commands that include the explicit `cd "$WORKTREE" && ...` prefix.
+
 ### 2. Implement the changes
 
 - Read the issue description and comments thoroughly
