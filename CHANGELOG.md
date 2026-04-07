@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.25 - 2026-04-07
+
+- Improved Telegram bootstrap completion messaging so project topics and DM acknowledgements now include the GitHub issue and explicitly explain when automatic dispatch is paused by triage blockers.
+- This makes real Fabrica runs easier to understand when a project registers successfully but still needs human refinement before worker dispatch.
+
 ## 0.2.24 - 2026-04-07
 
 - Hardened Fabrica intake, triage, and acceptance flow so request fidelity, clarification policy, and runtime quality signals are carried from intake through final completion.

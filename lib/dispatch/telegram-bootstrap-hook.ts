@@ -589,6 +589,22 @@ function buildDmAck(projectName: string, topicLink: string, language: BootstrapL
   return BOOTSTRAP_MESSAGES.registered[language](projectName, topicLink);
 }
 
+function buildBootstrapRuntimeStatusNote(session: TelegramBootstrapSession, language: BootstrapLanguage = "pt"): string | null {
+  const issueUrl = session.issueUrl ?? null;
+  const triageErrors = session.triageErrors ?? [];
+  if (session.triageReadyForDispatch === false && issueUrl) {
+    return language === "en"
+      ? `⚠️ Automatic dispatch is currently paused. GitHub issue created: ${issueUrl}\nTriage blockers: ${triageErrors.length > 0 ? triageErrors.join(", ") : "unspecified"}`
+      : `⚠️ O dispatch automático está pausado no momento. Issue criada no GitHub: ${issueUrl}\nBloqueios do triage: ${triageErrors.length > 0 ? triageErrors.join(", ") : "não especificado"}`;
+  }
+  if (issueUrl) {
+    return language === "en"
+      ? `✅ GitHub issue created: ${issueUrl}`
+      : `✅ Issue criada no GitHub: ${issueUrl}`;
+  }
+  return null;
+}
+
 function buildTopicKickoff(projectName: string, idea: string, language: BootstrapLanguage = "pt"): string {
   const header = language === "en"
     ? `🧱 Project automatically registered by Fabrica.\nProject: ${projectName}\n\nOriginal request summary:`
@@ -1568,7 +1584,10 @@ async function completeRegisteredBootstrap(
   const sessionLang: BootstrapLanguage = session.language ?? "pt";
 
   if (!session.topicKickoffSentAt) {
-    await sendTelegramText(ctx, projectChannelId, buildTopicKickoff(resolvedProjectName, session.rawIdea, sessionLang), {
+    let kickoffMessage = buildTopicKickoff(resolvedProjectName, session.rawIdea, sessionLang);
+    const statusNote = buildBootstrapRuntimeStatusNote(session, sessionLang);
+    if (statusNote) kickoffMessage += `\n\n${statusNote}`;
+    await sendTelegramText(ctx, projectChannelId, kickoffMessage, {
       accountId: projectRoute.accountId ?? undefined,
       messageThreadId,
     });
@@ -1631,10 +1650,13 @@ async function completeRegisteredBootstrap(
   session = ownership.session;
 
   if (!session.completionAckSentAt) {
+    let dmAck = buildDmAck(resolvedProjectName, buildTopicDeepLink(String(projectChannelId), messageThreadId), sessionLang);
+    const statusNote = buildBootstrapRuntimeStatusNote(session, sessionLang);
+    if (statusNote) dmAck += `\n\n${statusNote}`;
     await sendTelegramText(
       ctx,
       session.conversationId,
-      buildDmAck(resolvedProjectName, buildTopicDeepLink(String(projectChannelId), messageThreadId), sessionLang),
+      dmAck,
     );
     session = await persistDispatchProgress(workspaceDir, session, {
       projectRoute,
