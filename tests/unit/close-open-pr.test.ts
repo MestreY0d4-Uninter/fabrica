@@ -5,6 +5,113 @@ import { writeProjects } from "../../lib/projects/index.js";
 import { DEFAULT_WORKFLOW, type WorkflowConfig } from "../../lib/workflow/index.js";
 
 describe("closeIssue invariant", () => {
+  it("refuses to close when there is no meaningful completion evidence", async () => {
+    const unsafeWorkflow = {
+      ...DEFAULT_WORKFLOW,
+      states: {
+        ...DEFAULT_WORKFLOW.states,
+        testing: {
+          ...DEFAULT_WORKFLOW.states.testing,
+          on: {
+            ...DEFAULT_WORKFLOW.states.testing.on,
+            PASS: {
+              target: "done",
+              actions: ["closeIssue"],
+            },
+          },
+        },
+      },
+    } satisfies WorkflowConfig;
+
+    const h = await createTestHarness({
+      workflow: unsafeWorkflow,
+      workers: {
+        tester: { active: true, issueId: "30", level: "medior" },
+      },
+    });
+
+    try {
+      h.provider.seedIssue({ iid: 30, title: "Evidence required", labels: ["Testing"] });
+
+      await expect(executeCompletion({
+        workspaceDir: h.workspaceDir,
+        projectSlug: h.project.slug,
+        channels: h.project.channels,
+        role: "tester",
+        result: "pass",
+        issueId: 30,
+        summary: "ok",
+        provider: h.provider,
+        repoPath: h.project.repo,
+        projectName: h.project.name,
+        workflow: unsafeWorkflow,
+        runCommand: h.runCommand,
+      })).rejects.toThrow(/meaningful completion evidence/);
+
+      const issue = await h.provider.getIssue(30);
+      expect(issue.state).toBe("opened");
+      expect(issue.labels).toContain("Testing");
+      expect(h.provider.callsTo("closeIssue")).toHaveLength(0);
+    } finally {
+      await h.cleanup();
+    }
+  });
+
+  it("refuses to close a CLI issue when the summary lacks CLI-specific evidence", async () => {
+    const unsafeWorkflow = {
+      ...DEFAULT_WORKFLOW,
+      states: {
+        ...DEFAULT_WORKFLOW.states,
+        testing: {
+          ...DEFAULT_WORKFLOW.states.testing,
+          on: {
+            ...DEFAULT_WORKFLOW.states.testing.on,
+            PASS: {
+              target: "done",
+              actions: ["closeIssue"],
+            },
+          },
+        },
+      },
+    } satisfies WorkflowConfig;
+
+    const h = await createTestHarness({
+      workflow: unsafeWorkflow,
+      workers: {
+        tester: { active: true, issueId: "30", level: "medior" },
+      },
+    });
+
+    try {
+      h.provider.seedIssue({ iid: 30, title: "CLI evidence required", labels: ["Testing"] });
+      const data = await h.readProjects();
+      data.projects[h.project.slug]!.stack = "python-cli";
+      await writeProjects(h.workspaceDir, data);
+
+      await expect(executeCompletion({
+        workspaceDir: h.workspaceDir,
+        projectSlug: h.project.slug,
+        channels: h.project.channels,
+        role: "tester",
+        result: "pass",
+        issueId: 30,
+        summary: "Everything looks correct and complete now.",
+        provider: h.provider,
+        repoPath: h.project.repo,
+        projectName: h.project.name,
+        workflow: unsafeWorkflow,
+        runCommand: h.runCommand,
+      })).rejects.toThrow(/specific evidence/i);
+
+      const issue = await h.provider.getIssue(30);
+      expect(issue.state).toBe("opened");
+      expect(issue.labels).toContain("Testing");
+      expect(h.provider.callsTo("closeIssue")).toHaveLength(0);
+    } finally {
+      await h.cleanup();
+    }
+  });
+
   it("refuses to close an implementation issue while the canonical PR is still open", async () => {
     const unsafeWorkflow = {
       ...DEFAULT_WORKFLOW,

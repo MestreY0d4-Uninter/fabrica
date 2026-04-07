@@ -267,10 +267,30 @@ describe("notify", () => {
       name: "Ada",
       sessionAction: "spawn",
       dispatchSemantic: "feedback_redispatch",
+      triggerSource: "followup_tick",
     } as any);
 
     expect(message).toContain("Re-dispatched after feedback");
     expect(message).toContain("DEVELOPER Ada (senior)");
+  });
+
+  it("formats workerStart with explicit session resume semantics", () => {
+    const message = buildMessage({
+      type: "workerStart",
+      project: "demo",
+      issueId: 45,
+      issueUrl: "https://example.com/issues/45",
+      issueTitle: "Resume work",
+      role: "reviewer",
+      level: "medior",
+      name: "Riley",
+      sessionAction: "send",
+      dispatchSemantic: "session_resume",
+      triggerSource: "followup_tick",
+    } as any);
+
+    expect(message).toContain("Resumed");
+    expect(message).toContain("REVIEWER Riley (medior)");
   });
 
   it("formats workerRecoveryExhausted as an explicit operational failure timeline event", () => {
@@ -403,6 +423,40 @@ describe("notify", () => {
     } finally {
       await fs.rm(workspaceDir, { recursive: true, force: true });
     }
+  });
+
+  it("formats workerComplete with a short human acceptance summary", () => {
+    const message = buildMessage({
+      type: "workerComplete",
+      project: "demo",
+      issueId: 8,
+      issueUrl: "https://example.com/issues/8",
+      role: "developer",
+      level: "medior",
+      name: "Brittne",
+      result: "done",
+      summary: "Developer completed the CLI behavior and verified the expected flow.",
+      acceptanceSummary: "deliverable=cli | evidence=pass | concerns=risk:auth",
+      nextState: "To Review",
+    } as any);
+
+    expect(message).toContain("🧾 deliverable=cli | evidence=pass | concerns=risk:auth");
+    expect(message).toContain("→ To Review");
+  });
+
+  it("formats issueComplete with a short human acceptance summary", () => {
+    const message = buildMessage({
+      type: "issueComplete",
+      project: "demo",
+      issueId: 99,
+      issueUrl: "https://example.com/issues/99",
+      issueTitle: "Ship CLI",
+      prUrl: "https://example.com/pull/99",
+      acceptanceSummary: "deliverable=cli | evidence=pass",
+    } as any);
+
+    expect(message).toContain("🧾 deliverable=cli | evidence=pass");
+    expect(message).toContain("Issue closed — work delivered");
   });
 
   it("formats a reviewRejected notification with a short rationale", () => {

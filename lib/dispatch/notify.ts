@@ -49,6 +49,7 @@ export type NotifyEvent =
       effectiveModel?: string;
       dispatchCycleId?: string | null;
       dispatchRunId?: string | null;
+      triggerSource?: string | null;
     }
   | {
       type: "workerProgress";
@@ -77,6 +78,7 @@ export type NotifyEvent =
       nextState?: string;
       prUrl?: string;
       createdTasks?: Array<{ id: number; title: string; url: string }>;
+      acceptanceSummary?: string;
       dispatchCycleId?: string | null;
       dispatchRunId?: string | null;
     }
@@ -166,6 +168,7 @@ export type NotifyEvent =
       issueUrl: string;
       issueTitle: string;
       prUrl?: string;
+      acceptanceSummary?: string;
     }
   | {
       type: "holdEscapeResolved";
@@ -302,6 +305,9 @@ export function buildMessage(event: NotifyEvent): string {
       if (event.summary) {
         msg += `\n${event.summary}`;
       }
+      if (event.acceptanceSummary) {
+        msg += `\n🧾 ${event.acceptanceSummary}`;
+      }
       // Links: PR and issue on separate lines
       if (event.prUrl) msg += `\n🔗 ${prLink(event.prUrl)}`;
       msg += `\n📋 [Issue #${event.issueId}](${event.issueUrl})`;
@@ -396,6 +402,7 @@ export function buildMessage(event: NotifyEvent): string {
     case "issueComplete": {
       let msg = `🏁 Issue completed: #${event.issueId} — ${event.issueTitle}`;
       msg += `\n📦 Project: ${event.project}`;
+      if (event.acceptanceSummary) msg += `\n🧾 ${event.acceptanceSummary}`;
       if (event.prUrl) msg += `\n🔗 ${prLink(event.prUrl)}`;
       msg += `\n📋 [Issue #${event.issueId}](${event.issueUrl})`;
       msg += `\n✅ Issue closed — work delivered.`;

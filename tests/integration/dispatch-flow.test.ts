@@ -320,6 +320,7 @@ describe("dispatchTask — happy path", () => {
     expect(mockAuditLog).toHaveBeenCalledWith("/tmp/workspace", "session_orphan_reset", expect.objectContaining({
       sessionKey: "agent:unknown:subagent:my-project-developer-junior-alice",
       reason: "gateway_session_alive_without_local_slot_tracking",
+      dispatchSemantic: "fresh_dispatch",
     }));
   });
 
@@ -369,6 +370,11 @@ describe("dispatchTask — happy path", () => {
     const patchParams = JSON.parse(patchCall[0][5]);
     expect(patchParams.key).toMatch(/^agent:unknown:subagent:my-project-developer-junior-alice-retry-/);
     expect(patchParams.key).not.toBe("agent:unknown:subagent:my-project-developer-junior-alice");
+    expect(mockAuditLog).toHaveBeenCalledWith("/tmp/workspace", "session_feedback_reset", expect.objectContaining({
+      triggerSource: "unknown",
+      dispatchSemantic: "feedback_redispatch",
+      reason: "developer_feedback_cycle_requires_fresh_context",
+    }));
   });
 });
 

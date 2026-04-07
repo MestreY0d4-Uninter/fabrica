@@ -223,10 +223,13 @@ describe("triageStep", () => {
     const parentRuntime = persisted.projects.demo?.issueRuntime?.["42"];
     expect(parentRuntime?.decompositionMode).toBe("parent_child");
     expect(parentRuntime?.decompositionStatus).toBe("active");
+    expect(parentRuntime?.qualityCriticality).toBe("high");
+    expect(parentRuntime?.riskProfile).toEqual(expect.arrayContaining(["auth", "async_processing"]));
     expect(parentRuntime?.childIssueIds?.length).toBeGreaterThanOrEqual(2);
     const childIds = parentRuntime?.childIssueIds ?? [];
     for (const childId of childIds) {
       expect(persisted.projects.demo?.issueRuntime?.[String(childId)]?.parentIssueId).toBe(42);
+      expect(persisted.projects.demo?.issueRuntime?.[String(childId)]?.qualityCriticality).toBe("high");
     }
     if (childIds.length >= 2) {
       const secondChildRuntime = persisted.projects.demo?.issueRuntime?.[String(childIds[1])];

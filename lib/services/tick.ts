@@ -42,6 +42,7 @@ export type TickAction = {
   role: Role;
   level: string;
   sessionAction: "spawn" | "send";
+  triggerSource?: "heartbeat_periodic" | "bootstrap_immediate_tick" | "followup_tick" | "manual_target_role" | "unknown";
   announcement: string;
 };
 
@@ -94,11 +95,14 @@ export async function projectTick(opts: {
   ensureEnvironmentReady?: typeof import("../test-env/runtime.js").ensureEnvironmentReady;
   /** Injected dispatch function for tests. */
   dispatchTask?: typeof import("../dispatch/index.js").dispatchTask;
+  /** Origin of the current tick for auditability. */
+  triggerSource?: "heartbeat_periodic" | "bootstrap_immediate_tick" | "followup_tick" | "manual_target_role" | "unknown";
 }): Promise<TickResult> {
   const {
     workspaceDir, projectSlug, agentId, sessionKey, pluginConfig, dryRun,
     maxPickups, targetRole, runtime, instanceName, runCommand,
   } = opts;
+  const triggerSource = opts.triggerSource ?? (targetRole ? "followup_tick" : "heartbeat_periodic");
   const ensureEnvironment = opts.ensureEnvironmentReady ?? defaultEnsureEnvironmentReady;
   const dispatch = opts.dispatchTask ?? dispatchTask;
 
@@ -399,10 +403,11 @@ export async function projectTick(opts: {
           slotIndex: freeSlot,
           instanceName,
           runCommand: runCommand!,
+          triggerSource,
         });
         pickups.push({
           project: project.name, projectSlug, issueId: issue.iid, issueTitle: issue.title, issueUrl: issue.web_url,
-          role, level: dr.level, sessionAction: dr.sessionAction, announcement: dr.announcement,
+          role, level: dr.level, sessionAction: dr.sessionAction, triggerSource, announcement: dr.announcement,
         });
         // F1-3: Record dispatch for dedup
         await recordDispatch(workspaceDir, dispatchId).catch(() => {}); // best-effort
