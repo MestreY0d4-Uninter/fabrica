@@ -352,6 +352,8 @@ export async function clearIssueRuntime(
         decompositionStatus: existing.parentIssueId ? "completed" : (existing.decompositionStatus ?? null),
         sessionCompletedAt: existing.sessionCompletedAt ?? new Date().toISOString(),
         artifactOfRecord: existing.artifactOfRecord ?? null,
+        qualityCriticality: existing.qualityCriticality ?? null,
+        riskProfile: existing.riskProfile ?? null,
       } : null;
       if (preserved && (
         preserved.parentIssueId != null ||

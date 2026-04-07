@@ -140,6 +140,8 @@ export const triageStep: PipelineStep = {
                 childReadyForDispatch: decision.targetState === "To Do",
                 parallelizable: child.draft.parallelizable,
                 recommendedLevel: child.draft.recommendedLevel,
+                qualityCriticality: decision.qualityCriticality,
+                riskProfile: decision.riskProfile,
                 decompositionMode: "none",
                 decompositionStatus: null,
               }).catch(() => {});
@@ -147,6 +149,8 @@ export const triageStep: PipelineStep = {
             await updateIssueRuntime(ctx.workspaceDir, projectSlug, issue.number, {
               childIssueIds: createdChildIssueNumbers,
               maxParallelChildren: computeMaxParallelChildren(decompositionDrafts),
+              qualityCriticality: decision.qualityCriticality,
+              riskProfile: decision.riskProfile,
               decompositionMode: "parent_child",
               decompositionStatus: "active",
             }).catch(() => {});
@@ -262,6 +266,14 @@ export const triageStep: PipelineStep = {
         messageThreadId: payload.metadata?.message_thread_id ?? null,
         triageReadyForDispatch: triage.ready_for_dispatch,
         triageErrors: triage.errors,
+      }).catch(() => {});
+    }
+
+    const resolvedProjectSlug = payload.metadata?.project_slug ?? payload.scaffold?.project_slug ?? null;
+    if (resolvedProjectSlug) {
+      await updateIssueRuntime(ctx.workspaceDir, resolvedProjectSlug, issue.number, {
+        qualityCriticality: decision.qualityCriticality,
+        riskProfile: decision.riskProfile,
       }).catch(() => {});
     }
 

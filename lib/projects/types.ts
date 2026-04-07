@@ -86,6 +86,8 @@ export type IssueRuntimeState = {
   lastDispatchedLevel?: string | null;
   lastFailureReason?: "stall" | "infra" | "complexity" | null;
   lastDiagnosticResult?: string | null;
+  qualityCriticality?: "low" | "medium" | "high" | null;
+  riskProfile?: string[] | null;
 };
 
 export type ProjectEnvironmentStatus = "pending" | "provisioning" | "ready" | "failed";
