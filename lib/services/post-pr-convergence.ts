@@ -3,6 +3,15 @@ import type { IssueRuntimeState } from "../projects/types.js";
 
 export type ConvergenceCause =
   | "invalid_qa_evidence"
+  | "qa_schema_missing"
+  | "qa_section_count_invalid"
+  | "qa_exit_code_missing"
+  | "qa_exit_code_nonzero"
+  | "qa_sanitization_failed"
+  | "qa_missing_required_gates"
+  | "qa_exit_codes_only"
+  | "qa_coverage_below_threshold"
+  | "qa_stale_or_unchanged"
   | "merge_conflict"
   | "stalled_with_artifact"
   | "stalled_without_artifact"
@@ -30,7 +39,16 @@ export type ConvergenceDecision = {
 export function classifyConvergenceCause(reason: string | null | undefined): ConvergenceCause {
   const text = String(reason ?? "").toLowerCase();
   if (!text) return "other";
-  if (text.includes("qa_gate_missing_") || text.includes("invalid qa evidence")) return "invalid_qa_evidence";
+  if (text.includes("qa_evidence_missing")) return "qa_schema_missing";
+  if (text.includes("exactly one `## qa evidence` section") || text.includes("qa_section_count_invalid")) return "qa_section_count_invalid";
+  if (text.includes("exit code: <number>") || text.includes("qa_exit_code_missing")) return "qa_exit_code_missing";
+  if (text.includes("exit code must be 0") || text.includes("qa_exit_code_nonzero")) return "qa_exit_code_nonzero";
+  if (text.includes("host-system paths") || text.includes("secrets or environment values") || text.includes("environment dump") || text.includes("qa_sanitization_failed")) return "qa_sanitization_failed";
+  if (text.includes("qa_evidence_only_exit_codes") || text.includes("qa_exit_codes_only")) return "qa_exit_codes_only";
+  if (text.includes("qa_coverage_below_threshold") || text.includes("coverage below threshold")) return "qa_coverage_below_threshold";
+  if (text.includes("qa_stale_or_unchanged")) return "qa_stale_or_unchanged";
+  if (text.includes("qa_gate_missing_") || text.includes("missing required gates")) return "qa_missing_required_gates";
+  if (text.includes("invalid qa evidence")) return "invalid_qa_evidence";
   if (text.includes("merge conflict") || text.includes("pr_still_conflicting")) return "merge_conflict";
   if (text.includes("stalled_with_artifact")) return "stalled_with_artifact";
   if (text.includes("stalled_without_artifact")) return "stalled_without_artifact";
@@ -56,6 +74,17 @@ export function getConvergenceRetryBudget(cause: ConvergenceCause): number {
   switch (cause) {
     case "invalid_qa_evidence":
       return 2;
+    case "qa_schema_missing":
+    case "qa_section_count_invalid":
+    case "qa_exit_code_missing":
+    case "qa_missing_required_gates":
+      return 2;
+    case "qa_exit_code_nonzero":
+    case "qa_exit_codes_only":
+    case "qa_coverage_below_threshold":
+    case "qa_stale_or_unchanged":
+    case "qa_sanitization_failed":
+      return 1;
     case "merge_conflict":
     case "stalled_with_artifact":
     case "stale_pr_target":

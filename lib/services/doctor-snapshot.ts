@@ -27,6 +27,7 @@ export async function captureIssueDoctorSnapshot(opts: {
       trigger: opts.trigger,
       summary: result.recommendation.summary,
       likelyNextAction: result.recommendation.likelyNextAction,
+      stack: result.stack,
       doctor: {
         artifact: result.hasArtifact,
         progressState: result.lifecycle.progressState,
@@ -36,6 +37,8 @@ export async function captureIssueDoctorSnapshot(opts: {
         prState: result.pr?.state ?? null,
         labels: result.issue?.labels ?? [],
         convergenceCause: result.convergence.cause,
+        qaSubcause: result.convergence.qaSubcause,
+        qaMissingGates: result.convergence.qaMissingGates,
         convergenceAction: result.convergence.action,
         convergenceRetryCount: result.convergence.retryCount,
         convergenceHeadSha: result.convergence.headSha,

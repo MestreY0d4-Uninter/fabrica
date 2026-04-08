@@ -6,6 +6,7 @@ import type { PrStatus } from "../providers/provider.js";
 export type IssueRunDoctorResult = {
   projectSlug: string;
   projectName: string;
+  stack: string | null;
   issueId: number;
   issueRuntime: Record<string, unknown> | null;
   hasArtifact: boolean;
@@ -19,6 +20,8 @@ export type IssueRunDoctorResult = {
   };
   convergence: {
     cause: string | null;
+    qaSubcause: string | null;
+    qaMissingGates: string[];
     action: string | null;
     retryCount: number;
     reason: string | null;
@@ -88,6 +91,8 @@ export async function runIssueDoctor(opts: {
   }
 
   const convergenceCause = issueRuntime?.lastConvergenceCause ?? null;
+  const convergenceQaSubcause = issueRuntime?.lastQaSubcause ?? null;
+  const convergenceQaMissingGates = issueRuntime?.lastQaMissingGates ?? [];
   const convergenceAction = issueRuntime?.lastConvergenceAction ?? null;
   const retryCount = issueRuntime?.lastConvergenceRetryCount ?? 0;
   const convergenceReason = issueRuntime?.lastConvergenceReason ?? issueRuntime?.inconclusiveCompletionReason ?? null;
@@ -114,7 +119,18 @@ export async function runIssueDoctor(opts: {
 
   const likelyNextAction = (() => {
     if (convergenceAction === "escalate_human") return "human_intervention";
-    if (convergenceCause === "invalid_qa_evidence") return "repair_qa_evidence";
+    if ([
+      "invalid_qa_evidence",
+      "qa_schema_missing",
+      "qa_section_count_invalid",
+      "qa_exit_code_missing",
+      "qa_exit_code_nonzero",
+      "qa_sanitization_failed",
+      "qa_missing_required_gates",
+      "qa_exit_codes_only",
+      "qa_coverage_below_threshold",
+      "qa_stale_or_unchanged",
+    ].includes(convergenceCause ?? "")) return "repair_qa_evidence";
     if (convergenceCause === "merge_conflict") return "repair_merge_conflict";
     if (convergenceCause === "stalled_with_artifact") return "force_convergence_review";
     if (hasArtifact) return "post_pr_convergence";
@@ -124,6 +140,7 @@ export async function runIssueDoctor(opts: {
   return {
     projectSlug: project.slug,
     projectName: project.name,
+    stack: project.stack ?? project.environment?.stack ?? null,
     issueId: opts.issueId,
     issueRuntime,
     hasArtifact,
@@ -137,6 +154,8 @@ export async function runIssueDoctor(opts: {
     },
     convergence: {
       cause: convergenceCause,
+      qaSubcause: convergenceQaSubcause,
+      qaMissingGates: convergenceQaMissingGates,
       action: convergenceAction,
       retryCount,
       reason: convergenceReason,
@@ -172,6 +191,7 @@ export async function runIssueDoctor(opts: {
 export function formatIssueDoctor(result: IssueRunDoctorResult): string {
   const lines = [
     `Issue run doctor — ${result.projectSlug}#${result.issueId}`,
+    `  Stack: ${result.stack ?? "unknown"}`,
     `  Artifact: ${result.hasArtifact ? "yes" : "no"}`,
     `  PR: ${result.pr?.url ?? "n/a"} (${result.pr?.state ?? "unknown"})`,
     `  Issue: ${result.issue?.url ?? "n/a"} (${result.issue?.state ?? "unknown"})`,
@@ -183,6 +203,8 @@ export function formatIssueDoctor(result: IssueRunDoctorResult): string {
     `  First worker activity: ${result.lifecycle.firstWorkerActivityAt ?? "n/a"}`,
     `  Session completed: ${result.lifecycle.sessionCompletedAt ?? "n/a"}`,
     `  Convergence cause: ${result.convergence.cause ?? "none"}`,
+    `  QA subcause: ${result.convergence.qaSubcause ?? "n/a"}`,
+    `  Missing QA gates: ${result.convergence.qaMissingGates.length ? result.convergence.qaMissingGates.join(", ") : "n/a"}`,
     `  Convergence action: ${result.convergence.action ?? "none"}`,
     `  Retry count: ${result.convergence.retryCount}`,
     `  Convergence head SHA: ${result.convergence.headSha ?? "n/a"}`,

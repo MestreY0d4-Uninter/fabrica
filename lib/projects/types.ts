@@ -94,6 +94,12 @@ export type IssueRuntimeState = {
   lastConvergenceReason?: string | null;
   lastConvergenceAt?: string | null;
   lastConvergenceHeadSha?: string | null;
+  lastQaEvidenceAt?: string | null;
+  lastQaExitCode?: number | null;
+  lastQaMissingGates?: string[] | null;
+  lastQaEvidenceHash?: string | null;
+  lastQaObservedHeadSha?: string | null;
+  lastQaSubcause?: string | null;
 };
 
 export type ProjectEnvironmentStatus = "pending" | "provisioning" | "ready" | "failed";

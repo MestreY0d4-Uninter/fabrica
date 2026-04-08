@@ -19,7 +19,8 @@ import { captureIssueDoctorSnapshot } from "./doctor-snapshot.js";
 import { decidePostPrConvergence } from "./post-pr-convergence.js";
 import { getQueueLabels, isFeedbackState } from "../workflow/index.js";
 import { extractWorkerResultFromMessages, type WorkerResult, type WorkerRole } from "./worker-result.js";
-import { validatePrExistsForDeveloper } from "../tools/worker/work-finish.js";
+import { getCanonicalQaEvidenceValidationForPr, validatePrExistsForDeveloper } from "../tools/worker/work-finish.js";
+import type { QaEvidenceValidation } from "../tools/tasks/qa-evidence.js";
 import { applyTesterInfraFailureCompletion, hasCurrentDispatchAlreadyCompleted, resolveWorkerSlot } from "./worker-completion-shared.js";
 
 type WorkerCompletionOutcome = { applied: boolean; reason?: string };
@@ -33,6 +34,7 @@ type DeveloperDoneValidationResult = {
   ok: boolean;
   reason?: string;
   prStatus?: PrStatus;
+  qaEvidence?: QaEvidenceValidation;
 };
 
 type WorkerObservation = {
@@ -574,10 +576,12 @@ async function defaultValidateDeveloperDone(opts: {
     return { ok: true, prStatus };
   } catch (error) {
     let prStatus: PrStatus | undefined;
+    let qaEvidence: QaEvidenceValidation | undefined;
     try {
       const fallbackPr = await opts.provider.getPrStatus(opts.issueId);
       if (fallbackPr.url && fallbackPr.state !== "merged" && fallbackPr.state !== "closed") {
         prStatus = fallbackPr;
+        qaEvidence = await getCanonicalQaEvidenceValidationForPr(opts.provider, opts.issueId).catch(() => undefined);
       }
     } catch {
       // Best-effort only — preserve the original validation error.
@@ -586,8 +590,41 @@ async function defaultValidateDeveloperDone(opts: {
       ok: false,
       reason: error instanceof Error ? error.message : "developer_validation_failed",
       prStatus,
+      qaEvidence,
     };
   }
+}
+
+function extractQaMissingGatesFromReason(reason: string | null | undefined): string[] {
+  return [...String(reason ?? "").matchAll(/qa_gate_missing_([a-z_]+)/gi)]
+    .map((match) => match[1] ?? "")
+    .filter(Boolean);
+}
+
+function inferQaSubcauseFromReason(reason: string | null | undefined): string | null {
+  const text = String(reason ?? "").toLowerCase();
+  if (!text) return null;
+  if (text.includes("qa_evidence_missing")) return "qa_schema_missing";
+  if (text.includes("exactly one `## qa evidence` section") || text.includes("qa_section_count_invalid")) return "qa_section_count_invalid";
+  if (text.includes("exit code: <number>") || text.includes("qa_exit_code_missing")) return "qa_exit_code_missing";
+  if (text.includes("exit code must be 0") || text.includes("qa_exit_code_nonzero")) return "qa_exit_code_nonzero";
+  if (text.includes("host-system paths") || text.includes("secrets or environment values") || text.includes("environment dump") || text.includes("qa_sanitization_failed")) return "qa_sanitization_failed";
+  if (text.includes("qa_evidence_only_exit_codes") || text.includes("qa_exit_codes_only")) return "qa_exit_codes_only";
+  if (text.includes("qa_coverage_below_threshold") || text.includes("coverage below threshold")) return "qa_coverage_below_threshold";
+  if (text.includes("qa_gate_missing_")) return "qa_missing_required_gates";
+  if (text.includes("invalid qa evidence")) return "invalid_qa_evidence";
+  return null;
+}
+
+function computeStringFingerprint(text: string | null | undefined): string | null {
+  const normalized = String(text ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!normalized) return null;
+  let hash = 2166136261;
+  for (let i = 0; i < normalized.length; i += 1) {
+    hash ^= normalized.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a:${(hash >>> 0).toString(16)}`;
 }
 
 async function persistDeveloperPrBinding(opts: {
@@ -715,12 +752,28 @@ export async function applyWorkerResult(opts: {
       const validationReason = validation.reason ?? "developer_validation_failed";
       const feedbackQueueLabel = getQueueLabels(workflow, "developer")
         .find((label) => isFeedbackState(workflow, label)) ?? "To Improve";
+      const qaMissingGates = validation.qaEvidence?.missingGates ?? extractQaMissingGatesFromReason(validationReason);
+      const qaSubcause = validation.qaEvidence?.primarySubcause ?? inferQaSubcauseFromReason(validationReason);
+      const qaObservedHeadSha = context.issueRuntime?.currentPrHeadSha ?? context.issueRuntime?.lastHeadSha ?? null;
+      const qaEvidenceFingerprint = validation.qaEvidence?.fingerprint ?? computeStringFingerprint([qaSubcause, ...qaMissingGates].join("|"));
+      const qaUnchanged = Boolean(
+        context.issueRuntime?.lastQaEvidenceHash &&
+        qaEvidenceFingerprint &&
+        context.issueRuntime.lastQaEvidenceHash === qaEvidenceFingerprint &&
+        context.issueRuntime.lastQaObservedHeadSha &&
+        qaObservedHeadSha &&
+        context.issueRuntime.lastQaObservedHeadSha === qaObservedHeadSha,
+      );
+      const convergenceReason = qaUnchanged
+        ? `qa_stale_or_unchanged\n\n${validationReason}`
+        : validationReason;
       const convergenceIssueRuntime = validation.prStatus
         ? {
             ...context.issueRuntime,
             currentPrNumber: validation.prStatus.number ?? context.issueRuntime?.currentPrNumber ?? null,
             currentPrUrl: validation.prStatus.url ?? context.issueRuntime?.currentPrUrl ?? null,
             currentPrState: validation.prStatus.state ?? context.issueRuntime?.currentPrState ?? null,
+            currentPrHeadSha: context.issueRuntime?.currentPrHeadSha ?? null,
           }
         : context.issueRuntime;
       if (validation.prStatus) {
@@ -734,7 +787,7 @@ export async function applyWorkerResult(opts: {
       const convergence = decidePostPrConvergence({
         workflow,
         issueRuntime: convergenceIssueRuntime,
-        reason: validationReason,
+        reason: convergenceReason,
         feedbackQueueLabel,
       });
       const blockedSummary = convergence.action === "escalate_human"
@@ -753,10 +806,16 @@ export async function applyWorkerResult(opts: {
         issueId: context.issueId,
         role: context.parsed.role,
         result: opts.result.value,
+        stack: context.project.stack ?? context.project.environment?.stack ?? null,
         reason: validationReason,
         convergenceCause: convergence.cause,
         convergenceAction: convergence.action,
         convergenceRetryCount: convergence.retryCount,
+        qaSubcause,
+        qaMissingGates,
+        qaObservedHeadSha,
+        qaEvidenceFingerprint,
+        qaUnchanged,
       }).catch(() => {});
       await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
         inconclusiveCompletionAt: new Date().toISOString(),
@@ -764,9 +823,15 @@ export async function applyWorkerResult(opts: {
         lastConvergenceCause: convergence.cause,
         lastConvergenceAction: convergence.action,
         lastConvergenceRetryCount: convergence.retryCount,
-        lastConvergenceReason: validationReason,
+        lastConvergenceReason: convergenceReason,
         lastConvergenceAt: new Date().toISOString(),
         lastConvergenceHeadSha: convergence.progressHeadSha,
+        lastQaEvidenceAt: new Date().toISOString(),
+        lastQaExitCode: validationReason.includes("Exit code must be 0") ? 1 : null,
+        lastQaMissingGates: qaMissingGates,
+        lastQaEvidenceHash: qaEvidenceFingerprint,
+        lastQaObservedHeadSha: qaObservedHeadSha,
+        lastQaSubcause: qaSubcause,
       }).catch(() => {});
       if (convergenceIssueRuntime?.currentPrUrl || convergence.action === "escalate_human") {
         await captureIssueDoctorSnapshot({
@@ -908,6 +973,12 @@ export async function applyWorkerResult(opts: {
       lastConvergenceReason: null,
       lastConvergenceAt: null,
       lastConvergenceHeadSha: null,
+      lastQaEvidenceAt: null,
+      lastQaExitCode: null,
+      lastQaMissingGates: null,
+      lastQaEvidenceHash: null,
+      lastQaObservedHeadSha: null,
+      lastQaSubcause: null,
     }).catch(() => {});
   } else {
     await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
@@ -919,6 +990,12 @@ export async function applyWorkerResult(opts: {
       lastConvergenceReason: null,
       lastConvergenceAt: null,
       lastConvergenceHeadSha: null,
+      lastQaEvidenceAt: null,
+      lastQaExitCode: null,
+      lastQaMissingGates: null,
+      lastQaEvidenceHash: null,
+      lastQaObservedHeadSha: null,
+      lastQaSubcause: null,
     }).catch(() => {});
   }
 

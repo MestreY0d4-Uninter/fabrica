@@ -32,12 +32,14 @@ coverage: 85.0%
 Exit code: 0
 `;
 
-    expect(validateQaEvidence(body)).toEqual({
+    expect(validateQaEvidence(body)).toMatchObject({
       valid: true,
       sectionCount: 1,
       exitCode: 0,
       problems: [],
       errors: [],
+      missingGates: [],
+      primarySubcause: null,
     });
   });
 
@@ -96,6 +98,7 @@ Exit code: 0
     const result = validateQaEvidence(body);
     expect(result.valid).toBe(false);
     expect(result.problems.join("\n")).toMatch(/exactly one/);
+    expect(result.primarySubcause).toBe("qa_section_count_invalid");
   });
 
   it("rejects host-path leakage in QA Evidence", () => {
@@ -172,7 +175,7 @@ Exit code: 127
       "Cannot approve review with invalid QA Evidence in the PR body.",
     );
     expect(formatQaEvidenceValidationFailure(validation, "reviewer")).toContain(
-      'Reject the PR and instruct the developer to replace the existing "## QA Evidence" section in the PR body',
+      'Reject the PR and ask the developer to rerun `scripts/qa.sh`.',
     );
     expect(formatQaEvidenceValidationFailure(validation, "reviewer")).toContain(
       "Do not accept ad-hoc scenario scripts or weakened QA gates",
@@ -182,7 +185,7 @@ Exit code: 127
   it("formats developer failures with explicit guidance to preserve canonical qa gates", () => {
     const validation = validateQaEvidence("## Summary\n\nNo QA section here.");
     expect(formatQaEvidenceValidationFailure(validation, "developer")).toContain(
-      "Do not rewrite or weaken scripts/qa.sh into ad-hoc scenario checks",
+      "Do not rewrite or weaken `scripts/qa.sh` into ad-hoc scenario checks.",
     );
     expect(formatQaEvidenceValidationFailure(validation, "developer")).toContain(
       "lint/types/security/tests/coverage",

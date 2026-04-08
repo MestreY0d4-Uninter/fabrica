@@ -1,5 +1,16 @@
 import { findPublicOutputViolations } from "./public-output-sanitizer.js";
 
+export type QaEvidenceSubcause =
+  | "qa_schema_missing"
+  | "qa_section_count_invalid"
+  | "qa_exit_code_missing"
+  | "qa_exit_code_nonzero"
+  | "qa_sanitization_failed"
+  | "qa_missing_required_gates"
+  | "qa_exit_codes_only"
+  | "qa_coverage_below_threshold"
+  | "qa_unknown";
+
 export type QaEvidenceValidation = {
   valid: boolean;
   sectionCount: number;
@@ -7,12 +18,50 @@ export type QaEvidenceValidation = {
   problems: string[];
   /** Structured error codes for programmatic checks (mirrors problems for enhanced checks) */
   errors: string[];
+  missingGates: string[];
+  primarySubcause: QaEvidenceSubcause | null;
+  fingerprint: string | null;
 };
 
 export type QaEvidenceActor = "developer" | "reviewer";
 
 export function stripQaEvidenceSections(body: string): string {
   return body.replace(/\n## QA Evidence\b[\s\S]*?(?=\n##\s|\s*$)/gi, "").trimEnd();
+}
+
+function normalizeQaEvidenceForFingerprint(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\r/g, "")
+    .replace(/exit code:\s*-?\d+/gi, "exit code")
+    .replace(/\d+(?:\.\d+)?%/g, "<percent>")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function computeQaFingerprint(text: string): string | null {
+  const normalized = normalizeQaEvidenceForFingerprint(text);
+  if (!normalized) return null;
+  let hash = 2166136261;
+  for (let i = 0; i < normalized.length; i += 1) {
+    hash ^= normalized.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a:${(hash >>> 0).toString(16)}`;
+}
+
+export function classifyQaEvidenceSubcause(validation: Pick<QaEvidenceValidation, "sectionCount" | "exitCode" | "problems" | "errors">): QaEvidenceSubcause | null {
+  if (validation.errors.includes("qa_evidence_missing")) return "qa_schema_missing";
+  if (validation.sectionCount > 1) return "qa_section_count_invalid";
+  if (validation.problems.some((problem) => problem.includes("host-system paths") || problem.includes("secrets") || problem.includes("environment dump"))) {
+    return "qa_sanitization_failed";
+  }
+  if (validation.problems.some((problem) => problem.includes("Exit code: <number>"))) return "qa_exit_code_missing";
+  if (validation.exitCode !== null && validation.exitCode !== 0) return "qa_exit_code_nonzero";
+  if (validation.errors.includes("qa_evidence_only_exit_codes")) return "qa_exit_codes_only";
+  if (validation.errors.some((error) => error.startsWith("qa_gate_missing_"))) return "qa_missing_required_gates";
+  if (validation.errors.some((error) => error.startsWith("qa_coverage_below_threshold_"))) return "qa_coverage_below_threshold";
+  return validation.errors.length || validation.problems.length ? "qa_unknown" : null;
 }
 
 export function validateQaEvidence(body?: string | null): QaEvidenceValidation {
@@ -73,9 +122,11 @@ export function validateQaEvidence(body?: string | null): QaEvidenceValidation {
     tests:    ["tests", "pytest", "jest", "vitest", "go test", "test session"],
     coverage: ["coverage"],
   };
+  const missingGates: string[] = [];
   for (const [gate, aliases] of Object.entries(GATE_ALIASES)) {
     const found = aliases.some((alias) => new RegExp(alias, "i").test(section));
     if (!found) {
+      missingGates.push(gate);
       errors.push(`qa_gate_missing_${gate}`);
     }
   }
@@ -102,17 +153,82 @@ export function validateQaEvidence(body?: string | null): QaEvidenceValidation {
     }
   }
 
+  const primarySubcause = classifyQaEvidenceSubcause({
+    sectionCount,
+    exitCode,
+    problems,
+    errors,
+  });
+
   return {
     valid: problems.length === 0 && errors.length === 0,
     sectionCount,
     exitCode,
     problems,
     errors,
+    missingGates,
+    primarySubcause,
+    fingerprint: computeQaFingerprint(section),
   };
 }
 
 export function validateCanonicalQaEvidence(body?: string | null): QaEvidenceValidation {
   return validateQaEvidence(body);
+}
+
+function buildQaRepairGuidance(validation: QaEvidenceValidation, actor: QaEvidenceActor): string[] {
+  const base = actor === "developer"
+    ? [
+        'Run `scripts/qa.sh` again and replace the existing "## QA Evidence" section with the fresh sanitized output.',
+        'Keep the canonical lint/types/security/tests/coverage gates intact.',
+        'Do not rewrite or weaken `scripts/qa.sh` into ad-hoc scenario checks.',
+      ]
+    : [
+        'Reject the PR and ask the developer to rerun `scripts/qa.sh`.',
+        'Require the PR body to contain one fresh sanitized "## QA Evidence" section.',
+        'Do not accept ad-hoc scenario scripts or weakened QA gates in place of the canonical contract.',
+      ];
+
+  switch (validation.primarySubcause) {
+    case "qa_schema_missing":
+    case "qa_section_count_invalid":
+      return [
+        ...base,
+        'Ensure the PR body contains exactly one `## QA Evidence` section.',
+      ];
+    case "qa_exit_code_missing":
+      return [
+        ...base,
+        'The QA Evidence must include an explicit `Exit code: 0` line.',
+      ];
+    case "qa_exit_code_nonzero":
+      return [
+        ...base,
+        'The QA command failed. Fix the underlying lint/type/security/test/coverage problem before calling work_finish again.',
+      ];
+    case "qa_sanitization_failed":
+      return [
+        ...base,
+        'Sanitize host paths, environment dumps, and secrets before updating the PR body.',
+      ];
+    case "qa_missing_required_gates":
+      return [
+        ...base,
+        `Missing gates: ${validation.missingGates.join(", ") || "unknown"}. Include all required gates in the canonical QA output.`,
+      ];
+    case "qa_exit_codes_only":
+      return [
+        ...base,
+        'Do not paste exit codes alone. Include the actual lint/types/security/tests/coverage output summary.',
+      ];
+    case "qa_coverage_below_threshold":
+      return [
+        ...base,
+        'Coverage is below the required threshold. Fix the underlying tests or implementation before retrying.',
+      ];
+    default:
+      return base;
+  }
 }
 
 export function formatQaEvidenceValidationFailure(
@@ -122,10 +238,7 @@ export function formatQaEvidenceValidationFailure(
   const intro = actor === "developer"
     ? "Cannot mark work_finish(done) with invalid QA Evidence in the PR body."
     : "Cannot approve review with invalid QA Evidence in the PR body.";
-  const guidance = actor === "developer"
-    ? 'Replace the existing "## QA Evidence" section with fresh sanitized output from scripts/qa.sh (exactly one section, Exit code: 0), then call work_finish again. Do not rewrite or weaken scripts/qa.sh into ad-hoc scenario checks — preserve the canonical lint/types/security/tests/coverage gates and fix the underlying code or project setup instead.'
-    : 'Reject the PR and instruct the developer to replace the existing "## QA Evidence" section in the PR body with fresh sanitized output from scripts/qa.sh (exactly one section, Exit code: 0). Do not accept ad-hoc scenario scripts or weakened QA gates in place of the canonical lint/types/security/tests/coverage contract.';
-
   const allIssues = [...validation.problems, ...validation.errors];
-  return `${intro}\n\n${allIssues.map((issue) => `- ${issue}`).join("\n")}\n\n${guidance}`;
+  const guidance = buildQaRepairGuidance(validation, actor);
+  return `${intro}\n\n${allIssues.map((issue) => `- ${issue}`).join("\n")}\n\n${guidance.map((line) => `- ${line}`).join("\n")}`;
 }

@@ -72,7 +72,10 @@ describe("runIssueDoctor", () => {
     });
 
     expect(result.hasArtifact).toBe(true);
+    expect(result.stack).toBeNull();
     expect(result.convergence.cause).toBe("invalid_qa_evidence");
+    expect(result.convergence.qaSubcause).toBeNull();
+    expect(result.convergence.qaMissingGates).toEqual([]);
     expect(result.pr?.url).toBe("https://example.com/pr/2");
     expect(result.lifecycle.progressState).toBe("no_dispatch");
     expect(result.convergence.headShaChangedSinceLastConvergence).toBe(null);

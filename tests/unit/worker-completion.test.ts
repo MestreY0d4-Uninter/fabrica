@@ -249,7 +249,7 @@ describe("worker-completion", () => {
               currentPrNumber: 2,
               currentPrUrl: "https://example.com/pr/2",
               currentPrState: "open",
-              lastConvergenceCause: "invalid_qa_evidence",
+              lastConvergenceCause: "qa_missing_required_gates",
               lastConvergenceRetryCount: 2,
             },
           },
@@ -277,9 +277,11 @@ describe("worker-completion", () => {
       "demo",
       7,
       expect.objectContaining({
-        lastConvergenceCause: "invalid_qa_evidence",
+        lastConvergenceCause: "qa_missing_required_gates",
         lastConvergenceAction: "escalate_human",
         lastConvergenceRetryCount: 3,
+        lastQaMissingGates: ["lint"],
+        lastQaSubcause: "qa_missing_required_gates",
       }),
     );
   });

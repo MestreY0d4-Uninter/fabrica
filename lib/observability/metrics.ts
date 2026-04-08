@@ -43,6 +43,7 @@ type AuditEntry = {
   stack?: string;
   convergenceCause?: string;
   convergenceAction?: string;
+  qaSubcause?: string;
   [key: string]: unknown;
 };
 
@@ -65,8 +66,21 @@ function keyFor(entry: AuditEntry): string | null {
 }
 
 function normalizeCause(entry: AuditEntry): string | null {
+  const explicitQaSubcause = entry.qaSubcause ?? null;
+  if (explicitQaSubcause) return String(explicitQaSubcause);
   const cause = entry.convergenceCause ?? entry.reason ?? null;
-  return cause ? String(cause) : null;
+  if (!cause) return null;
+  const text = String(cause).toLowerCase();
+  if (text.includes("qa_stale_or_unchanged")) return "qa_stale_or_unchanged";
+  if (text.includes("qa_gate_missing_")) return "qa_missing_required_gates";
+  if (text.includes("qa_evidence_missing")) return "qa_schema_missing";
+  if (text.includes("exactly one `## qa evidence` section") || text.includes("qa_section_count_invalid")) return "qa_section_count_invalid";
+  if (text.includes("exit code must be 0") || text.includes("qa_exit_code_nonzero")) return "qa_exit_code_nonzero";
+  if (text.includes("exit code: <number>") || text.includes("qa_exit_code_missing")) return "qa_exit_code_missing";
+  if (text.includes("qa_evidence_only_exit_codes") || text.includes("qa_exit_codes_only")) return "qa_exit_codes_only";
+  if (text.includes("qa_coverage_below_threshold") || text.includes("coverage below threshold")) return "qa_coverage_below_threshold";
+  if (text.includes("host-system paths") || text.includes("secrets or environment values") || text.includes("environment dump") || text.includes("qa_sanitization_failed")) return "qa_sanitization_failed";
+  return String(cause);
 }
 
 export async function computeMetrics(workspaceDir: string): Promise<FabricaMetrics> {

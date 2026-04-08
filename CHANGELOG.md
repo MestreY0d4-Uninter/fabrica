@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.41 - 2026-04-08
+
+- Added a focused QA-convergence refinement pass: QA Evidence failures now expose richer subcauses, persist minimal canonical QA runtime state (missing gates, subcause, observed head-SHA, evidence fingerprint), and detect stale/unchanged retries before counting them as real progress.
+- Improved `repair_qa_evidence` guidance, doctor output, and metrics normalization so post-PR invalid-QA loops are explained and measured in more actionable terms instead of collapsing into one generic `invalid_qa_evidence` bucket.
+
 ## 0.2.40 - 2026-04-08
 
 - Added automatic doctor snapshots in key post-PR recovery paths. When convergence loops are re-queued/escalated after blocked completion or `stalled_with_artifact`, Fabrica now emits a compact `doctor_snapshot` audit event with PR, progress state, convergence cause/action, retry count, and head-SHA change context.

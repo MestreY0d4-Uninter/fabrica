@@ -44,6 +44,7 @@ Exit code: 0`;
 
     const result = validateQaEvidence(body);
     expect(result.errors).toContain("qa_evidence_only_exit_codes");
+    expect(result.primarySubcause).toBe("qa_exit_codes_only");
   });
 
   it("rejects missing required gate sections", () => {
@@ -55,6 +56,8 @@ Exit code: 0`;
     const result = validateQaEvidence(body);
     expect(result.errors).toContain("qa_gate_missing_types");
     expect(result.errors).toContain("qa_gate_missing_tests");
+    expect(result.missingGates).toEqual(expect.arrayContaining(["types", "tests"]));
+    expect(result.primarySubcause).toBe("qa_missing_required_gates");
   });
 
   it("rejects coverage below threshold", () => {
@@ -68,10 +71,12 @@ OK
 ### tests
 OK
 ### coverage
-TOTAL                                         50      20    60%`;
+TOTAL                                         50      20    60%
+Exit code: 0`;
 
     const result = validateQaEvidence(body);
     expect(result.errors).toContain("qa_coverage_below_threshold_60");
+    expect(result.primarySubcause).toBe("qa_coverage_below_threshold");
   });
 
   it("does not confuse test progress indicators with coverage", () => {
