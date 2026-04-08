@@ -9,6 +9,7 @@ import type { PluginRuntime } from "openclaw/plugin-sdk";
 import type { PluginContext } from "../context.js";
 import { runSetup } from "./index.js";
 import { runDoctor } from "./doctor.js";
+import { runIssueDoctor, formatIssueDoctor } from "./doctor-run.js";
 import { computeMetrics, formatMetrics } from "../observability/metrics.js";
 import { runSecurityDoctor } from "./security-doctor.js";
 import { getAllDefaultModels, getAllRoleIds, getLevelsForRole } from "../roles/index.js";
@@ -188,6 +189,34 @@ export function registerCli(program: Command, ctx: PluginContext): void {
       }
       console.log(`\n  ${result.checks.length} checks: ${result.errors} errors, ${result.warnings} warnings`);
       process.exit(result.errors > 0 ? 1 : 0);
+    });
+
+  doctor
+    .command("issue")
+    .description("Inspect one Fabrica issue/run with convergence and PR context")
+    .requiredOption("-p, --project <slug>", "Project slug")
+    .requiredOption("-i, --issue <id>", "Issue number")
+    .option("-w, --workspace <path>", "Workspace directory")
+    .option("--json", "Emit machine-readable JSON")
+    .action(async (opts) => {
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const issueId = Number.parseInt(String(opts.issue), 10);
+      if (!Number.isFinite(issueId)) {
+        console.error(`Invalid issue id: ${opts.issue}`);
+        process.exit(1);
+      }
+      const result = await runIssueDoctor({
+        workspacePath: workspaceDir,
+        projectSlug: String(opts.project),
+        issueId,
+        runCommand: ctx.runCommand,
+        pluginConfig: ctx.pluginConfig as Record<string, unknown>,
+      });
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      console.log(formatIssueDoctor(result));
     });
 
   doctor

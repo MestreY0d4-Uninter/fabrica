@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.37 - 2026-04-08
+
+- Added `openclaw fabrica doctor issue --project <slug> --issue <id>` to inspect one live run with convergence metadata, PR context, issue labels, and a recommended next action. This gives an operator-level explanation of why a run is looping or what Fabrica is likely to do next.
+- Refined post-PR convergence again so validation-failure paths reuse best-effort PR evidence before deciding retry vs escalation, making the convergence metadata more faithful in real runs.
+
 ## 0.2.36 - 2026-04-08
 
 - Preserved canonical PR evidence even when developer completion fails. The post-PR convergence budget now reuses a best-effort PR status snapshot from validation, so artifact-backed loops like invalid QA evidence can actually trip escalation instead of silently falling back to endless feedback retries when runtime PR binding is stale.
