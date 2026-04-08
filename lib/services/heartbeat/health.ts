@@ -67,6 +67,7 @@ import { withCorrelationContext } from "../../observability/context.js";
 import { withTelemetrySpan } from "../../observability/telemetry.js";
 import { resilientLabelTransition } from "../../workflow/labels.js";
 import { notify, type NotificationConfig } from "../../dispatch/notify.js";
+import { captureIssueDoctorSnapshot } from "../doctor-snapshot.js";
 import { decidePostPrConvergence } from "../post-pr-convergence.js";
 import {
   applyWorkerResult,
@@ -753,6 +754,21 @@ export async function checkWorkerHealth(opts: {
               toLabel: convergence.targetLabel,
               deliveryState,
             });
+            if (runCommand) {
+              await captureIssueDoctorSnapshot({
+                workspaceDir,
+                projectSlug,
+                issueId: issueIdNum!,
+                runCommand,
+                event: "doctor_snapshot",
+                trigger: convergence.action === "escalate_human" ? "completion_recovery_escalated" : "completion_recovery_requeued",
+                extra: {
+                  convergenceCause: convergence.cause,
+                  convergenceAction: convergence.action,
+                  convergenceRetryCount: convergence.retryCount,
+                },
+              }).catch(() => {});
+            }
           }
         }
 
@@ -1183,6 +1199,22 @@ export async function checkWorkerHealth(opts: {
                 idleMinutes: Math.round(quietMinutes),
                 deliveryState,
               });
+              if (runCommand) {
+                await captureIssueDoctorSnapshot({
+                  workspaceDir,
+                  projectSlug,
+                  issueId: issueIdNum,
+                  runCommand,
+                  event: "doctor_snapshot",
+                  trigger: convergence.action === "escalate_human" ? "stalled_with_artifact_escalated" : "stalled_with_artifact_requeued",
+                  extra: {
+                    convergenceCause: convergence.cause,
+                    convergenceAction: convergence.action,
+                    convergenceRetryCount: convergence.retryCount,
+                    idleMinutes: Math.round(quietMinutes),
+                  },
+                }).catch(() => {});
+              }
             }
           }
           fixes.push(fix);

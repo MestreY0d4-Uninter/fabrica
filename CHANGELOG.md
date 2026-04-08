@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.40 - 2026-04-08
+
+- Added automatic doctor snapshots in key post-PR recovery paths. When convergence loops are re-queued/escalated after blocked completion or `stalled_with_artifact`, Fabrica now emits a compact `doctor_snapshot` audit event with PR, progress state, convergence cause/action, retry count, and head-SHA change context.
+- Extended `openclaw fabrica metrics` with aggregated convergence telemetry: cause counts, human escalations, average dispatch→first-PR timing, and per-stack breakdowns. This is the first calibration-focused observability layer for tuning post-PR policies from real evidence.
+
 ## 0.2.39 - 2026-04-08
 
 - Enriched the issue/run doctor output with lifecycle and progression context: dispatch cycle, dispatch run, progress state (`no_dispatch` / `accepted_idle` / `active` / `completed`), and head-SHA comparison against the last convergence attempt.

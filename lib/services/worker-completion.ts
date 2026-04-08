@@ -15,6 +15,7 @@ import {
 } from "../projects/index.js";
 import { parseFabricaSessionKey } from "../dispatch/bootstrap-hook.js";
 import { executeCompletion } from "./pipeline.js";
+import { captureIssueDoctorSnapshot } from "./doctor-snapshot.js";
 import { decidePostPrConvergence } from "./post-pr-convergence.js";
 import { getQueueLabels, isFeedbackState } from "../workflow/index.js";
 import { extractWorkerResultFromMessages, type WorkerResult, type WorkerRole } from "./worker-result.js";
@@ -767,6 +768,22 @@ export async function applyWorkerResult(opts: {
         lastConvergenceAt: new Date().toISOString(),
         lastConvergenceHeadSha: convergence.progressHeadSha,
       }).catch(() => {});
+      if (convergenceIssueRuntime?.currentPrUrl || convergence.action === "escalate_human") {
+        await captureIssueDoctorSnapshot({
+          workspaceDir: opts.workspaceDir,
+          projectSlug: context.projectSlug,
+          issueId: context.issueId,
+          runCommand: opts.runCommand,
+          pluginConfig: opts.pluginConfig as Record<string, unknown> | undefined,
+          event: "doctor_snapshot",
+          trigger: convergence.action === "escalate_human" ? "worker_completion_escalated" : "worker_completion_blocked_with_artifact",
+          extra: {
+            convergenceCause: convergence.cause,
+            convergenceAction: convergence.action,
+            convergenceRetryCount: convergence.retryCount,
+          },
+        }).catch(() => {});
+      }
       await executeCompletion({
         workspaceDir: opts.workspaceDir,
         projectSlug: context.projectSlug,
