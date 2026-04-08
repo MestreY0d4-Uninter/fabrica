@@ -572,9 +572,19 @@ async function defaultValidateDeveloperDone(opts: {
     );
     return { ok: true, prStatus };
   } catch (error) {
+    let prStatus: PrStatus | undefined;
+    try {
+      const fallbackPr = await opts.provider.getPrStatus(opts.issueId);
+      if (fallbackPr.url && fallbackPr.state !== "merged" && fallbackPr.state !== "closed") {
+        prStatus = fallbackPr;
+      }
+    } catch {
+      // Best-effort only — preserve the original validation error.
+    }
     return {
       ok: false,
       reason: error instanceof Error ? error.message : "developer_validation_failed",
+      prStatus,
     };
   }
 }
@@ -704,9 +714,25 @@ export async function applyWorkerResult(opts: {
       const validationReason = validation.reason ?? "developer_validation_failed";
       const feedbackQueueLabel = getQueueLabels(workflow, "developer")
         .find((label) => isFeedbackState(workflow, label)) ?? "To Improve";
+      const convergenceIssueRuntime = validation.prStatus
+        ? {
+            ...context.issueRuntime,
+            currentPrNumber: validation.prStatus.number ?? context.issueRuntime?.currentPrNumber ?? null,
+            currentPrUrl: validation.prStatus.url ?? context.issueRuntime?.currentPrUrl ?? null,
+            currentPrState: validation.prStatus.state ?? context.issueRuntime?.currentPrState ?? null,
+          }
+        : context.issueRuntime;
+      if (validation.prStatus) {
+        await persistDeveloperPrBinding({
+          workspaceDir: opts.workspaceDir,
+          projectSlug: context.projectSlug,
+          issueId: context.issueId,
+          prStatus: validation.prStatus,
+        }).catch(() => {});
+      }
       const convergence = decidePostPrConvergence({
         workflow,
-        issueRuntime: context.issueRuntime,
+        issueRuntime: convergenceIssueRuntime,
         reason: validationReason,
         feedbackQueueLabel,
       });

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.36 - 2026-04-08
+
+- Preserved canonical PR evidence even when developer completion fails. The post-PR convergence budget now reuses a best-effort PR status snapshot from validation, so artifact-backed loops like invalid QA evidence can actually trip escalation instead of silently falling back to endless feedback retries when runtime PR binding is stale.
+- This closes a gap discovered immediately after 0.2.35: the convergence controller logic was present, but some real runs still looked artifact-less because the open PR had not been re-bound into issue runtime before the validation failure path executed.
+
 ## 0.2.35 - 2026-04-08
 
 - Added a first post-PR convergence layer: repeated developer/blocker causes are now typed in issue runtime (`lastConvergenceCause`, `lastConvergenceAction`, retry count, reason, timestamp) instead of being treated as generic queue churn.
