@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.45 - 2026-04-08
+
+- Fixed clean-machine setup regressions found during fresh Ubuntu VPS validation: `openclaw fabrica setup --new-agent <name> --workspace <path>` now actually forwards the explicit workspace to agent creation, and setup no longer crashes when writing default models into a freshly scaffolded `workflow.yaml`.
+- Updated README host requirements from Node 20+ to Node 22+ to match the real `openclaw@2026.4.8` engine requirement discovered during validation.
+
 ## 0.2.44 - 2026-04-08
 
 - Documentation hardening for first-time users: clarified host prerequisites vs project provisioning, made GitHub permission expectations more explicit, added a minimal non-Telegram path, and documented the `FABRICA_PROJECTS_CHANNEL_ID` setup shortcut more clearly.

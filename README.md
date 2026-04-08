@@ -56,7 +56,7 @@ The heartbeat ticks every 60 seconds. On each tick, Fabrica alternates between a
 - [OpenClaw](https://openclaw.dev) runtime >= 2026.3.13
 - OpenClaw gateway operational on the local machine (default port 18789)
 - Git (for repository operations and local development)
-- Node.js 20+ with npm/npx available
+- Node.js 22+ with npm/npx available
 - `gh` CLI authenticated to GitHub (required for repo, issue, PR, and comment operations)
 - A GitHub organization or personal account where repositories will be created
 - For Python stacks, Fabrica provisions `uv` and project-local environments itself without `sudo`

@@ -16,6 +16,7 @@ export async function createAgent(
   name: string,
   runCommand: RunCommand,
   channelBinding?: "telegram" | "whatsapp" | null,
+  workspacePath?: string,
 ): Promise<{ agentId: string; workspacePath: string }> {
   const rc = runCommand;
   const agentId = name
@@ -25,6 +26,7 @@ export async function createAgent(
 
   const args = ["agents", "add", agentId, "--non-interactive"];
   if (channelBinding) args.push("--bind", channelBinding);
+  if (workspacePath) args.push("--workspace", workspacePath);
 
   try {
     await rc(["openclaw", ...args], { timeoutMs: 30_000 });
@@ -33,11 +35,11 @@ export async function createAgent(
   }
 
   const runtime = "runtime" in api ? api.runtime : api;
-  const workspacePath = resolveWorkspacePath(runtime, agentId);
-  await cleanupWorkspace(workspacePath);
+  const resolvedWorkspacePath = workspacePath ?? resolveWorkspacePath(runtime, agentId);
+  await cleanupWorkspace(resolvedWorkspacePath);
   await updateAgentDisplayName(runtime, agentId, name);
 
-  return { agentId, workspacePath };
+  return { agentId, workspacePath: resolvedWorkspacePath };
 }
 
 /**

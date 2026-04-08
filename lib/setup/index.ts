@@ -106,7 +106,13 @@ async function resolveOrCreateAgent(
 }> {
   if (opts.newAgentName) {
     if (!opts.runCommand) throw new Error("runCommand is required when creating a new agent");
-    const { agentId, workspacePath } = await createAgent(opts.runtime, opts.newAgentName, opts.runCommand, opts.channelBinding);
+    const { agentId, workspacePath } = await createAgent(
+      opts.runtime,
+      opts.newAgentName,
+      opts.runCommand,
+      opts.channelBinding,
+      opts.workspacePath,
+    );
     const bindingMigrated = await tryMigrateBinding(opts, agentId, warnings);
     return { agentId, workspacePath, agentCreated: true, bindingMigrated };
   }
@@ -158,6 +164,12 @@ function buildModelConfig(overrides?: SetupOpts["models"]): ModelConfig {
   return result;
 }
 
+function ensureYamlMapNode(doc: YAML.Document, value: unknown): YAML.YAMLMap {
+  if (value instanceof YAML.YAMLMap) return value;
+  const seeded = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return doc.createNode(seeded) as YAML.YAMLMap;
+}
+
 function getDefaultWorkspacePath(runtime: PluginRuntime): string | undefined {
   try {
     const config = runtime.config.loadConfig();
@@ -182,20 +194,19 @@ async function writeModelsToWorkflow(workspacePath: string, models: ModelConfig)
   // Parse as Document to preserve comments
   const doc = content ? YAML.parseDocument(content) : new YAML.Document({});
 
-  // Ensure roles section exists
+  // Ensure roles section exists and is a YAML map
   if (!doc.has("roles")) {
-    doc.set("roles", {});
+    doc.set("roles", doc.createNode({}));
   }
-  const roles = doc.getIn(["roles"], true) as unknown as YAML.YAMLMap;
+  const roles = ensureYamlMapNode(doc, doc.getIn(["roles"], true));
+  doc.set("roles", roles);
 
   // Merge models into roles section
   for (const [role, levels] of Object.entries(models)) {
-    if (!roles.has(role)) {
-      roles.set(role, doc.createNode({ models: levels }));
-    } else {
-      const roleNode = roles.get(role, true) as unknown as YAML.YAMLMap;
-      roleNode.set("models", doc.createNode(levels));
-    }
+    const existingRoleNode = roles.get(role, true);
+    const roleNode = ensureYamlMapNode(doc, existingRoleNode);
+    roleNode.set("models", doc.createNode(levels));
+    roles.set(role, roleNode);
   }
 
   await fs.writeFile(workflowPath, doc.toString({ lineWidth: 120 }), "utf-8");
