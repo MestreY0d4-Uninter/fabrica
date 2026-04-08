@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.42 - 2026-04-08
+
+- Documentation closeout release: updated the README with the new `doctor issue` and convergence-aware metrics workflow, added `FUTURE_IMPROVEMENTS.md` for deferred non-blocking ideas, and removed stale internal planning docs from `docs/plans/` so the GitHub repo stays cleaner for public release.
+- No runtime behavior changed in this version; it is a publication hygiene/documentation refresh on top of `0.2.41`.
+
 ## 0.2.41 - 2026-04-08
 
 - Added a focused QA-convergence refinement pass: QA Evidence failures now expose richer subcauses, persist minimal canonical QA runtime state (missing gates, subcause, observed head-SHA, evidence fingerprint), and detect stale/unchanged retries before counting them as real progress.

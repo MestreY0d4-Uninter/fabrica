@@ -203,6 +203,27 @@ tail -f ~/.openclaw/workspace/logs/genesis.log
 openclaw fabrica metrics
 ```
 
+This command now includes convergence-oriented telemetry such as:
+- cause counts (for example `qa_missing_required_gates`, `qa_sanitization_failed`)
+- human escalations
+- average dispatch → first PR timing
+- per-stack breakdowns
+
+**11. Inspect a live issue/run**:
+
+```bash
+openclaw fabrica doctor issue --project <slug> --issue <id>
+```
+
+Use this when a project is looping or stuck. It shows:
+- current PR / artifact state
+- progress state
+- convergence cause + QA subcause
+- missing QA gates, when applicable
+- recommended next action
+
+For deferred, non-blocking ideas after this milestone, see `FUTURE_IMPROVEMENTS.md`.
+
 ## Configuration
 
 ### Minimal (gh CLI only)
