@@ -15,6 +15,7 @@ import {
 } from "../projects/index.js";
 import { parseFabricaSessionKey } from "../dispatch/bootstrap-hook.js";
 import { executeCompletion } from "./pipeline.js";
+import { decidePostPrConvergence } from "./post-pr-convergence.js";
 import { getQueueLabels, isFeedbackState } from "../workflow/index.js";
 import { extractWorkerResultFromMessages, type WorkerResult, type WorkerRole } from "./worker-result.js";
 import { validatePrExistsForDeveloper } from "../tools/worker/work-finish.js";
@@ -703,6 +704,22 @@ export async function applyWorkerResult(opts: {
       const validationReason = validation.reason ?? "developer_validation_failed";
       const feedbackQueueLabel = getQueueLabels(workflow, "developer")
         .find((label) => isFeedbackState(workflow, label)) ?? "To Improve";
+      const convergence = decidePostPrConvergence({
+        workflow,
+        issueRuntime: context.issueRuntime,
+        reason: validationReason,
+        feedbackQueueLabel,
+      });
+      const blockedSummary = convergence.action === "escalate_human"
+        ? [
+            "Automatic recovery escalated for human decision.",
+            "",
+            `Dominant cause: ${convergence.cause}`,
+            `Retry budget exceeded: ${convergence.retryCount}/${convergence.maxRetries}`,
+            "",
+            validationReason,
+          ].join("\n")
+        : `Automatic recovery: developer reported DONE but completion validation failed.\n\n${validationReason}`;
       await auditLog(opts.workspaceDir, "worker_completion_skipped", {
         sessionKey: context.project.workers[context.parsed.role]?.levels?.[context.slotLevel]?.[context.slotIndex]?.sessionKey ?? null,
         projectSlug: context.projectSlug,
@@ -710,10 +727,18 @@ export async function applyWorkerResult(opts: {
         role: context.parsed.role,
         result: opts.result.value,
         reason: validationReason,
+        convergenceCause: convergence.cause,
+        convergenceAction: convergence.action,
+        convergenceRetryCount: convergence.retryCount,
       }).catch(() => {});
       await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
         inconclusiveCompletionAt: new Date().toISOString(),
         inconclusiveCompletionReason: validationReason,
+        lastConvergenceCause: convergence.cause,
+        lastConvergenceAction: convergence.action,
+        lastConvergenceRetryCount: convergence.retryCount,
+        lastConvergenceReason: validationReason,
+        lastConvergenceAt: new Date().toISOString(),
       }).catch(() => {});
       await executeCompletion({
         workspaceDir: opts.workspaceDir,
@@ -721,7 +746,7 @@ export async function applyWorkerResult(opts: {
         role: context.parsed.role,
         result: "blocked",
         issueId: context.issueId,
-        summary: `Automatic recovery: developer reported DONE but completion validation failed.\n\n${validationReason}`,
+        summary: blockedSummary,
         provider,
         repoPath,
         projectName: context.project.name,
@@ -730,7 +755,7 @@ export async function applyWorkerResult(opts: {
         workflow,
         level: context.slotLevel,
         slotIndex: context.slotIndex,
-        overrideToLabel: feedbackQueueLabel,
+        overrideToLabel: convergence.targetLabel,
         overrideReason: validationReason,
         runCommand: opts.runCommand,
       });
@@ -833,11 +858,21 @@ export async function applyWorkerResult(opts: {
       infraFailCount: 0,
       inconclusiveCompletionAt: null,
       inconclusiveCompletionReason: null,
+      lastConvergenceCause: null,
+      lastConvergenceAction: null,
+      lastConvergenceRetryCount: 0,
+      lastConvergenceReason: null,
+      lastConvergenceAt: null,
     }).catch(() => {});
   } else {
     await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
       inconclusiveCompletionAt: null,
       inconclusiveCompletionReason: null,
+      lastConvergenceCause: null,
+      lastConvergenceAction: null,
+      lastConvergenceRetryCount: 0,
+      lastConvergenceReason: null,
+      lastConvergenceAt: null,
     }).catch(() => {});
   }
 

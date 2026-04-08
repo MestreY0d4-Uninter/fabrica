@@ -213,6 +213,77 @@ describe("worker-completion", () => {
     );
   });
 
+  it("escalates repeated post-PR validation failures to Refining instead of looping forever", async () => {
+    const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
+
+    mockReadProjects.mockResolvedValueOnce({
+      projects: {
+        demo: {
+          name: "todo-summary",
+          slug: "demo",
+          repo: "org/repo",
+          provider: "github",
+          channels: [],
+          workers: {
+            developer: {
+              levels: {
+                medior: [{
+                  active: true,
+                  issueId: 7,
+                  lastIssueId: null,
+                  sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+                  startTime: "2026-03-31T12:00:00.000Z",
+                  previousLabel: "To Improve",
+                  name: "brittne",
+                  dispatchCycleId: "cycle-1",
+                  dispatchRunId: "run-1",
+                }],
+              },
+            },
+            tester: { levels: { junior: [] } },
+          },
+          issueRuntime: {
+            "7": {
+              lastDispatchCycleId: "cycle-1",
+              dispatchRunId: "run-1",
+              currentPrNumber: 2,
+              currentPrUrl: "https://example.com/pr/2",
+              currentPrState: "open",
+              lastConvergenceCause: "invalid_qa_evidence",
+              lastConvergenceRetryCount: 2,
+            },
+          },
+        },
+      },
+    });
+
+    const result = await handleWorkerAgentEnd({
+      sessionKey: "agent:main:subagent:todo-summary-developer-medior-brittne",
+      messages: [{ role: "assistant", content: [{ type: "text", text: "Work result: DONE" }] }],
+      workspaceDir: "/tmp/ws",
+      runCommand: vi.fn(),
+      validateDeveloperDone: vi.fn().mockResolvedValue({ ok: false, reason: "Cannot mark work_finish(done) with invalid QA Evidence in the PR body.\n\n- qa_gate_missing_lint" }),
+    });
+
+    expect(result).toMatchObject({ applied: true });
+    expect(mockExecuteCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: "blocked",
+        overrideToLabel: "Refining",
+      }),
+    );
+    expect(mockUpdateIssueRuntime).toHaveBeenCalledWith(
+      "/tmp/ws",
+      "demo",
+      7,
+      expect.objectContaining({
+        lastConvergenceCause: "invalid_qa_evidence",
+        lastConvergenceAction: "escalate_human",
+        lastConvergenceRetryCount: 3,
+      }),
+    );
+  });
+
   it("records inconclusive completion when observable worker activity lacks the final result line", async () => {
     const { handleWorkerAgentEnd } = await import("../../lib/services/worker-completion.js");
 

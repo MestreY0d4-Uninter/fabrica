@@ -88,6 +88,11 @@ export type IssueRuntimeState = {
   lastDiagnosticResult?: string | null;
   qualityCriticality?: "low" | "medium" | "high" | null;
   riskProfile?: string[] | null;
+  lastConvergenceCause?: string | null;
+  lastConvergenceAction?: "retry_feedback" | "escalate_human" | null;
+  lastConvergenceRetryCount?: number;
+  lastConvergenceReason?: string | null;
+  lastConvergenceAt?: string | null;
 };
 
 export type ProjectEnvironmentStatus = "pending" | "provisioning" | "ready" | "failed";

@@ -67,6 +67,7 @@ import { withCorrelationContext } from "../../observability/context.js";
 import { withTelemetrySpan } from "../../observability/telemetry.js";
 import { resilientLabelTransition } from "../../workflow/labels.js";
 import { notify, type NotificationConfig } from "../../dispatch/notify.js";
+import { decidePostPrConvergence } from "../post-pr-convergence.js";
 import {
   applyWorkerResult,
   readWorkerResultFromSessionFile,
@@ -655,6 +656,12 @@ export async function checkWorkerHealth(opts: {
           }).catch(() => {});
         }
 
+        const convergence = decidePostPrConvergence({
+          workflow,
+          issueRuntime,
+          reason: inconclusiveReason,
+          feedbackQueueLabel: slotQueueLabel,
+        });
         const fix: HealthFix = {
           issue: {
             type: executionContractRecovery
@@ -687,10 +694,12 @@ export async function checkWorkerHealth(opts: {
               issueUrl: issue.web_url,
               issueTitle: issue.title,
               role,
-              detail: executionContractRecovery
-                ? "Execution contract violation did not recover with a canonical completion result"
-                : "No canonical completion result was produced after observable activity",
-              nextState: slotQueueLabel,
+              detail: convergence.action === "escalate_human"
+                ? `Repeated post-PR recovery cause ${convergence.cause} exceeded retry budget (${convergence.retryCount}/${convergence.maxRetries}). Escalating for human decision.`
+                : (executionContractRecovery
+                  ? "Execution contract violation did not recover with a canonical completion result"
+                  : "No canonical completion result was produced after observable activity"),
+              nextState: convergence.targetLabel,
               dispatchCycleId: slot.dispatchCycleId ?? issueRuntime?.lastDispatchCycleId ?? null,
               dispatchRunId: slot.dispatchRunId ?? issueRuntime?.dispatchRunId ?? null,
             },
@@ -708,12 +717,17 @@ export async function checkWorkerHealth(opts: {
               runCommand,
             },
           ).catch(() => {});
-          await revertLabel(fix, expectedLabel, slotQueueLabel);
+          await revertLabel(fix, expectedLabel, convergence.targetLabel);
           if (!fix.labelRevertFailed) {
             await deactivateSlot();
             await updateIssueRuntime(workspaceDir, projectSlug, issueIdNum!, {
               inconclusiveCompletionAt: null,
               inconclusiveCompletionReason: null,
+              lastConvergenceCause: convergence.cause,
+              lastConvergenceAction: convergence.action,
+              lastConvergenceRetryCount: convergence.retryCount,
+              lastConvergenceReason: inconclusiveReason,
+              lastConvergenceAt: new Date().toISOString(),
             }).catch(() => {});
             fix.fixed = true;
             if (executionContractRecovery) {
@@ -727,15 +741,15 @@ export async function checkWorkerHealth(opts: {
                 slotIndex,
                 reason: inconclusiveReason,
                 fromLabel: expectedLabel,
-                toLabel: slotQueueLabel,
+                toLabel: convergence.targetLabel,
                 dispatchCycleId: slot.dispatchCycleId ?? issueRuntime?.lastDispatchCycleId ?? null,
                 dispatchRunId: slot.dispatchRunId ?? issueRuntime?.dispatchRunId ?? null,
               }).catch(() => {});
             }
             await auditHealthFixApplied(workspaceDir, fix, {
-              action: "requeue_issue",
+              action: convergence.action === "escalate_human" ? "escalate_human" : "requeue_issue",
               fromLabel: expectedLabel,
-              toLabel: slotQueueLabel,
+              toLabel: convergence.targetLabel,
               deliveryState,
             });
           }
@@ -1094,6 +1108,12 @@ export async function checkWorkerHealth(opts: {
           minutesActive >= stallTimeoutMinutes &&
           quietMinutes >= Math.max(8, Math.floor(stallTimeoutMinutes / 2))
         ) {
+          const convergence = decidePostPrConvergence({
+            workflow,
+            issueRuntime,
+            reason: "stalled_with_artifact",
+            feedbackQueueLabel: slotQueueLabel,
+          });
           const fix: HealthFix = {
             issue: {
               type: "stalled_with_artifact",
@@ -1119,8 +1139,10 @@ export async function checkWorkerHealth(opts: {
                 issueUrl: issue.web_url,
                 issueTitle: issue.title,
                 role,
-                detail: `Open PR ${reviewablePrStatus.url} has stalled for ${Math.round(quietMinutes)} minutes without a trustworthy completion. Re-queueing to ${slotQueueLabel}.`,
-                nextState: slotQueueLabel,
+                detail: convergence.action === "escalate_human"
+                  ? `Open PR ${reviewablePrStatus.url} exceeded the retry budget for ${convergence.cause} (${convergence.retryCount}/${convergence.maxRetries}). Escalating for human decision.`
+                  : `Open PR ${reviewablePrStatus.url} has stalled for ${Math.round(quietMinutes)} minutes without a trustworthy completion. Re-queueing to ${slotQueueLabel}.`,
+                nextState: convergence.targetLabel,
                 dispatchCycleId: slot.dispatchCycleId ?? issueRuntime?.lastDispatchCycleId ?? null,
                 dispatchRunId: slot.dispatchRunId ?? issueRuntime?.dispatchRunId ?? null,
               },
@@ -1138,19 +1160,24 @@ export async function checkWorkerHealth(opts: {
                 runCommand,
               },
             ).catch(() => {});
-            await revertLabel(fix, expectedLabel, slotQueueLabel);
+            await revertLabel(fix, expectedLabel, convergence.targetLabel);
             if (!fix.labelRevertFailed) {
               await deactivateSlot();
               await updateIssueRuntime(workspaceDir, projectSlug, issueIdNum, {
                 inconclusiveCompletionAt: new Date().toISOString(),
                 inconclusiveCompletionReason: "stalled_with_artifact",
                 progressNotifiedAt: null,
+                lastConvergenceCause: convergence.cause,
+                lastConvergenceAction: convergence.action,
+                lastConvergenceRetryCount: convergence.retryCount,
+                lastConvergenceReason: "stalled_with_artifact",
+                lastConvergenceAt: new Date().toISOString(),
               }).catch(() => {});
               fix.fixed = true;
               await auditHealthFixApplied(workspaceDir, fix, {
-                action: "requeue_issue",
+                action: convergence.action === "escalate_human" ? "escalate_human" : "requeue_issue",
                 fromLabel: expectedLabel,
-                toLabel: slotQueueLabel,
+                toLabel: convergence.targetLabel,
                 idleMinutes: Math.round(quietMinutes),
                 deliveryState,
               });

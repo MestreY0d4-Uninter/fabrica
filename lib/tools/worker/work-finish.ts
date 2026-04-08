@@ -612,12 +612,27 @@ export function createWorkFinishTool(ctx: PluginContext) {
       }
 
       // Reset diagnostic escalation counters after successful work_finish (v0.2.0)
-      if (issueRuntime && (issueRuntime.dispatchAttemptCount || issueRuntime.lastFailureReason || issueRuntime.lastDiagnosticResult || issueRuntime.lastDispatchedLevel)) {
+      if (issueRuntime && (
+        issueRuntime.dispatchAttemptCount ||
+        issueRuntime.lastFailureReason ||
+        issueRuntime.lastDiagnosticResult ||
+        issueRuntime.lastDispatchedLevel ||
+        issueRuntime.lastConvergenceCause ||
+        issueRuntime.lastConvergenceAction ||
+        issueRuntime.lastConvergenceRetryCount ||
+        issueRuntime.lastConvergenceReason ||
+        issueRuntime.lastConvergenceAt
+      )) {
         await updateIssueRuntime(workspaceDir, project.slug, issueId, {
           dispatchAttemptCount: 0,
           lastFailureReason: null,
           lastDiagnosticResult: null,
           lastDispatchedLevel: null,
+          lastConvergenceCause: null,
+          lastConvergenceAction: null,
+          lastConvergenceRetryCount: 0,
+          lastConvergenceReason: null,
+          lastConvergenceAt: null,
         });
       }
 

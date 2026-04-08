@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.35 - 2026-04-08
+
+- Added a first post-PR convergence layer: repeated developer/blocker causes are now typed in issue runtime (`lastConvergenceCause`, `lastConvergenceAction`, retry count, reason, timestamp) instead of being treated as generic queue churn.
+- Added budgeted escalation for artifact-backed loops. When the same post-PR cause repeats beyond its retry budget (for example invalid QA evidence on an already-open PR, or repeated `stalled_with_artifact`), Fabrica escalates the issue to a hold state like `Refining` instead of redispatching the same `To Improve` cycle indefinitely.
+- This is the first concrete step toward a PR-aware convergence controller rather than pure requeue-based recovery.
+
 ## 0.2.34 - 2026-04-08
 
 - Added heartbeat recovery for developer sessions that already have a reviewable PR but stop converging for too long. Fabrica now detects the stalled-with-artifact pattern, re-queues the issue, and records `stalled_with_artifact` instead of leaving the run stuck in `Doing` indefinitely.
