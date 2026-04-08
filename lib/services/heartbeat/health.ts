@@ -26,7 +26,7 @@
  *     considered session-dead (they may not appear in sessions yet).
  *   - abortedLastRun: indicates session hit context limit (#287, #290) — triggers immediate healing.
  */
-import type { StateLabel, IssueProvider, Issue } from "../../providers/provider.js";
+import type { StateLabel, IssueProvider, Issue, PrStatus } from "../../providers/provider.js";
 import type { RunCommand } from "../../context.js";
 import { PrState } from "../../providers/provider.js";
 import {
@@ -106,6 +106,7 @@ export type HealthIssue = {
     | "dispatch_unconfirmed" // Active worker never reached agent bootstrap/activity after dispatch
     | "completion_recovery_exhausted" // Worker showed activity but never produced a canonical result
     | "execution_contract_recovery_exhausted" // Worker violated execution contract and did not recover canonically
+    | "stalled_with_artifact" // Active worker has a reviewable PR but stopped converging toward completion
     | "terminal_completion_repair" // Terminal session transcript proved completion and heartbeat repaired it
     | "stateless_issue";     // Case 8: open managed issue with no state label (#473)
   severity: "critical" | "warning";
@@ -938,20 +939,24 @@ export async function checkWorkerHealth(opts: {
         const startedAtMs = new Date(slot.startTime).getTime();
         const minutesActive = (Date.now() - startedAtMs) / 60_000;
         const hours = minutesActive / 60;
+        let reviewablePrStatus: PrStatus | null = null;
         let hasReviewableArtifact = Boolean(
           issueRuntime?.currentPrNumber ||
           issueRuntime?.currentPrUrl ||
           issueRuntime?.artifactOfRecord?.prNumber,
         );
-        if (!hasReviewableArtifact && issueIdNum) {
+        if (issueIdNum) {
           try {
             const prStatus = await provider.getPrStatus(issueIdNum);
-            hasReviewableArtifact = Boolean(
+            if (
               prStatus.url &&
               prStatus.state !== PrState.MERGED &&
               prStatus.state !== PrState.CLOSED &&
-              prStatus.currentIssueMatch !== false,
-            );
+              prStatus.currentIssueMatch !== false
+            ) {
+              reviewablePrStatus = prStatus;
+              hasReviewableArtifact = true;
+            }
           } catch {
             // Best-effort only — fall back to cached runtime state if provider lookup fails.
           }
@@ -1064,6 +1069,90 @@ export async function checkWorkerHealth(opts: {
                 action: "requeue_issue",
                 fromLabel: expectedLabel,
                 toLabel: slotQueueLabel,
+              });
+            }
+          }
+          fixes.push(fix);
+          continue;
+        }
+
+        const quietMinutes = (() => {
+          const lastObservableAt = sessionKey
+            ? getLastObservableSessionActivityAt(sessionKey, sessions)
+            : null;
+          const referenceAt = lastObservableAt ?? agentAcceptedAt ?? dispatchRequestedAt ?? startedAtMs;
+          if (!referenceAt || Number.isNaN(referenceAt)) return minutesActive;
+          return (Date.now() - referenceAt) / 60_000;
+        })();
+
+        if (
+          role === "developer" &&
+          issue &&
+          issueIdNum &&
+          hasReviewableArtifact &&
+          reviewablePrStatus?.url &&
+          minutesActive >= stallTimeoutMinutes &&
+          quietMinutes >= Math.max(8, Math.floor(stallTimeoutMinutes / 2))
+        ) {
+          const fix: HealthFix = {
+            issue: {
+              type: "stalled_with_artifact",
+              severity: "critical",
+              project: project.name,
+              projectSlug,
+              role,
+              level,
+              sessionKey,
+              issueId: slot.issueId,
+              slotIndex,
+              message: `${role.toUpperCase()} ${level}[${slotIndex}] has an open PR but stayed idle for ${Math.round(quietMinutes)}m without converging`,
+            },
+            fixed: false,
+          };
+          if (autoFix) {
+            const channel = project.channels?.[0];
+            await notify(
+              {
+                type: "workerRecoveryExhausted",
+                project: project.name,
+                issueId: issueIdNum,
+                issueUrl: issue.web_url,
+                issueTitle: issue.title,
+                role,
+                detail: `Open PR ${reviewablePrStatus.url} has stalled for ${Math.round(quietMinutes)} minutes without a trustworthy completion. Re-queueing to ${slotQueueLabel}.`,
+                nextState: slotQueueLabel,
+                dispatchCycleId: slot.dispatchCycleId ?? issueRuntime?.lastDispatchCycleId ?? null,
+                dispatchRunId: slot.dispatchRunId ?? issueRuntime?.dispatchRunId ?? null,
+              },
+              {
+                workspaceDir,
+                config: notificationConfig,
+                target: channel
+                  ? {
+                      channelId: channel.channelId,
+                      channel: channel.channel,
+                      accountId: channel.accountId,
+                      messageThreadId: channel.messageThreadId,
+                    }
+                  : undefined,
+                runCommand,
+              },
+            ).catch(() => {});
+            await revertLabel(fix, expectedLabel, slotQueueLabel);
+            if (!fix.labelRevertFailed) {
+              await deactivateSlot();
+              await updateIssueRuntime(workspaceDir, projectSlug, issueIdNum, {
+                inconclusiveCompletionAt: new Date().toISOString(),
+                inconclusiveCompletionReason: "stalled_with_artifact",
+                progressNotifiedAt: null,
+              }).catch(() => {});
+              fix.fixed = true;
+              await auditHealthFixApplied(workspaceDir, fix, {
+                action: "requeue_issue",
+                fromLabel: expectedLabel,
+                toLabel: slotQueueLabel,
+                idleMinutes: Math.round(quietMinutes),
+                deliveryState,
               });
             }
           }

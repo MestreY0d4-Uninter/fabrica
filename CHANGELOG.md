@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.34 - 2026-04-08
+
+- Added heartbeat recovery for developer sessions that already have a reviewable PR but stop converging for too long. Fabrica now detects the stalled-with-artifact pattern, re-queues the issue, and records `stalled_with_artifact` instead of leaving the run stuck in `Doing` indefinitely.
+- This targets the real-world PR-open / no-progress loops observed in richer CLI/API validation runs.
+
 ## 0.2.33 - 2026-04-07
 
 - Refined the new worktree-drift guard so explicit `~/.openclaw/workspace` evidence only blocks completion when it is the actual execution-path violation, while canonical result precedence still holds for unrelated strong-evidence transcript matches.
