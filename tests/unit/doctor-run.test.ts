@@ -74,6 +74,8 @@ describe("runIssueDoctor", () => {
     expect(result.hasArtifact).toBe(true);
     expect(result.convergence.cause).toBe("invalid_qa_evidence");
     expect(result.pr?.url).toBe("https://example.com/pr/2");
+    expect(result.lifecycle.progressState).toBe("no_dispatch");
+    expect(result.convergence.headShaChangedSinceLastConvergence).toBe(null);
     expect(result.recommendation.likelyNextAction).toBe("repair_qa_evidence");
   });
 });

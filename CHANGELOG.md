@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.39 - 2026-04-08
+
+- Enriched the issue/run doctor output with lifecycle and progression context: dispatch cycle, dispatch run, progress state (`no_dispatch` / `accepted_idle` / `active` / `completed`), and head-SHA comparison against the last convergence attempt.
+- Added head-SHA memory to convergence tracking so future retries and doctor output can distinguish stale churn from real PR movement more reliably.
+
 ## 0.2.38 - 2026-04-08
 
 - Exposed the issue/run doctor as a first-class Fabrica tool (`doctor_issue`) in addition to the CLI command, so agents and operators can inspect a live converging/thrashing issue directly from the plugin tool surface.

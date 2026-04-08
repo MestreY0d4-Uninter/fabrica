@@ -9,12 +9,22 @@ export type IssueRunDoctorResult = {
   issueId: number;
   issueRuntime: Record<string, unknown> | null;
   hasArtifact: boolean;
+  lifecycle: {
+    dispatchCycleId: string | null;
+    dispatchRunId: string | null;
+    agentAcceptedAt: string | null;
+    firstWorkerActivityAt: string | null;
+    sessionCompletedAt: string | null;
+    progressState: "no_dispatch" | "accepted_idle" | "active" | "completed";
+  };
   convergence: {
     cause: string | null;
     action: string | null;
     retryCount: number;
     reason: string | null;
     at: string | null;
+    headSha: string | null;
+    headShaChangedSinceLastConvergence: boolean | null;
   };
   pr: {
     url: string | null;
@@ -81,6 +91,18 @@ export async function runIssueDoctor(opts: {
   const convergenceAction = issueRuntime?.lastConvergenceAction ?? null;
   const retryCount = issueRuntime?.lastConvergenceRetryCount ?? 0;
   const convergenceReason = issueRuntime?.lastConvergenceReason ?? issueRuntime?.inconclusiveCompletionReason ?? null;
+  const convergenceHeadSha = issueRuntime?.lastConvergenceHeadSha ?? null;
+  const currentHeadSha = issueRuntime?.currentPrHeadSha ?? issueRuntime?.lastHeadSha ?? prStatus?.sourceBranch ?? null;
+  const headShaChangedSinceLastConvergence = convergenceHeadSha && currentHeadSha
+    ? convergenceHeadSha !== currentHeadSha
+    : null;
+  const progressState = issueRuntime?.sessionCompletedAt
+    ? "completed"
+    : issueRuntime?.firstWorkerActivityAt
+      ? "active"
+      : issueRuntime?.agentAcceptedAt
+        ? "accepted_idle"
+        : "no_dispatch";
 
   const summaryParts = [
     hasArtifact ? "artifact_present" : "artifact_missing",
@@ -105,12 +127,22 @@ export async function runIssueDoctor(opts: {
     issueId: opts.issueId,
     issueRuntime,
     hasArtifact,
+    lifecycle: {
+      dispatchCycleId: issueRuntime?.lastDispatchCycleId ?? null,
+      dispatchRunId: issueRuntime?.dispatchRunId ?? null,
+      agentAcceptedAt: issueRuntime?.agentAcceptedAt ?? null,
+      firstWorkerActivityAt: issueRuntime?.firstWorkerActivityAt ?? null,
+      sessionCompletedAt: issueRuntime?.sessionCompletedAt ?? null,
+      progressState,
+    },
     convergence: {
       cause: convergenceCause,
       action: convergenceAction,
       retryCount,
       reason: convergenceReason,
       at: issueRuntime?.lastConvergenceAt ?? null,
+      headSha: convergenceHeadSha,
+      headShaChangedSinceLastConvergence,
     },
     pr: prStatus
       ? {
@@ -144,9 +176,17 @@ export function formatIssueDoctor(result: IssueRunDoctorResult): string {
     `  PR: ${result.pr?.url ?? "n/a"} (${result.pr?.state ?? "unknown"})`,
     `  Issue: ${result.issue?.url ?? "n/a"} (${result.issue?.state ?? "unknown"})`,
     `  Labels: ${result.issue?.labels?.join(", ") ?? "n/a"}`,
+    `  Dispatch cycle: ${result.lifecycle.dispatchCycleId ?? "n/a"}`,
+    `  Dispatch run: ${result.lifecycle.dispatchRunId ?? "n/a"}`,
+    `  Progress state: ${result.lifecycle.progressState}`,
+    `  Agent accepted: ${result.lifecycle.agentAcceptedAt ?? "n/a"}`,
+    `  First worker activity: ${result.lifecycle.firstWorkerActivityAt ?? "n/a"}`,
+    `  Session completed: ${result.lifecycle.sessionCompletedAt ?? "n/a"}`,
     `  Convergence cause: ${result.convergence.cause ?? "none"}`,
     `  Convergence action: ${result.convergence.action ?? "none"}`,
     `  Retry count: ${result.convergence.retryCount}`,
+    `  Convergence head SHA: ${result.convergence.headSha ?? "n/a"}`,
+    `  Head SHA changed since last convergence: ${result.convergence.headShaChangedSinceLastConvergence == null ? "unknown" : (result.convergence.headShaChangedSinceLastConvergence ? "yes" : "no")}`,
     `  Last reason: ${result.convergence.reason ?? "n/a"}`,
     `  Suggested next action: ${result.recommendation.likelyNextAction}`,
   ];
