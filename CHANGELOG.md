@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.44 - 2026-04-08
+
+- Documentation hardening for first-time users: clarified host prerequisites vs project provisioning, made GitHub permission expectations more explicit, added a minimal non-Telegram path, and documented the `FABRICA_PROJECTS_CHANNEL_ID` setup shortcut more clearly.
+- No runtime behavior changed in this version; it is a release focused on onboarding clarity before clean-machine validation.
+
 ## 0.2.43 - 2026-04-08
 
 - Hardened first-run Telegram setup for new users: `openclaw fabrica setup` now writes an explicit Fabrica `telegram` config block, defaults `bootstrapDmEnabled` to true in plugin config, and hydrates forum/account/chat IDs from environment variables like `FABRICA_PROJECTS_CHANNEL_ID` when available.

@@ -53,13 +53,30 @@ The heartbeat ticks every 60 seconds. On each tick, Fabrica alternates between a
 
 ## Requirements
 
-- [OpenClaw](https://openclaw.dev) runtime >= 2026.3.13 (gateway running on port 18789)
+- [OpenClaw](https://openclaw.dev) runtime >= 2026.3.13
+- OpenClaw gateway operational on the local machine (default port 18789)
 - Git (for repository operations and local development)
-- Node.js 20+ (for local development or programmatic genesis)
-- `gh` CLI authenticated to GitHub (required for issue and PR operations)
+- Node.js 20+ with npm/npx available
+- `gh` CLI authenticated to GitHub (required for repo, issue, PR, and comment operations)
 - A GitHub organization or personal account where repositories will be created
 - For Python stacks, Fabrica provisions `uv` and project-local environments itself without `sudo`
 - (Optional) Telegram bot token and group chat IDs for DM bootstrap and notifications
+
+### Host prerequisites vs project provisioning
+
+Fabrica provisions a lot inside each project runtime, but it is not a universal host bootstrapper.
+
+What should already exist on the machine:
+- OpenClaw installed and working
+- Node/npm usable
+- Git usable
+- `gh auth` completed with permissions to create repositories, issues, PRs, and comments
+
+What Fabrica provisions at project/runtime level:
+- Python `uv` bootstrapping when needed
+- project-local `.venv` for Python stacks
+- project scaffolding and QA contract files
+- stack-specific environment preparation before developer/tester pickup
 
 ## Installation
 
@@ -106,6 +123,7 @@ gh auth status || gh auth login
 ```
 
 Fabrica uses authenticated `gh` CLI for GitHub operations in the default setup.
+Make sure the authenticated identity can create repositories, issues, PRs, and comments in the target account or organization.
 
 **2. Install Fabrica**:
 
@@ -149,6 +167,13 @@ At minimum, when DM bootstrap is enabled, set:
 If `projectsForumChatId` is missing while DM bootstrap is enabled, Fabrica can accept the DM but will fail when it needs to create the project topic.
 
 Tip: if you export `FABRICA_PROJECTS_CHANNEL_ID` before running `openclaw fabrica setup`, Fabrica now copies that value into `plugins.entries.fabrica.config.telegram.projectsForumChatId` automatically during setup.
+
+Example:
+
+```bash
+export FABRICA_PROJECTS_CHANNEL_ID="<YOUR_PROJECTS_FORUM_CHAT_ID>"
+openclaw fabrica setup --workspace /path/to/workspace --new-agent fabrica
+```
 
 **6. Validate operational readiness**:
 
@@ -338,6 +363,17 @@ Project topics are event-driven timelines. Fabrica emits explicit messages for
 worker start, worker completion, review queueing, reviewer reject/approve, and
 operational recovery events, with cycle-aware dedupe so late deliveries from an
 older dispatch do not masquerade as current work.
+
+## Minimal path without Telegram
+
+Telegram is the recommended human-facing flow, but it is not required to use Fabrica.
+
+If you want a minimal path without Telegram:
+1. authenticate `gh`
+2. install the plugin
+3. run `openclaw fabrica doctor workspace --workspace /path/to/workspace`
+4. run `openclaw fabrica setup --workspace /path/to/workspace --new-agent fabrica`
+5. use the programmatic genesis path below to trigger the pipeline
 
 ## Programmatic genesis
 
