@@ -30,6 +30,7 @@ import { createTasksStatusTool } from "./lib/tools/tasks/tasks-status.js";
 
 // Project admin
 import { createProjectStatusTool } from "./lib/tools/admin/project-status.js";
+import { createDoctorIssueTool } from "./lib/tools/admin/doctor-issue.js";
 import { createProjectRegisterTool } from "./lib/tools/admin/project-register.js";
 import { createHealthTool } from "./lib/tools/admin/health.js";
 import { createSyncLabelsTool } from "./lib/tools/admin/sync-labels.js";
@@ -206,6 +207,7 @@ const plugin = {
 
     // Project admin
     api.registerTool(createProjectStatusTool(ctx), { names: ["project_status"] });
+    api.registerTool(createDoctorIssueTool(ctx), { names: ["doctor_issue"] });
     api.registerTool(createProjectRegisterTool(ctx), { names: ["project_register"] });
     api.registerTool(createHealthTool(ctx), { names: ["health"] });
     api.registerTool(createSyncLabelsTool(ctx), { names: ["sync_labels"] });

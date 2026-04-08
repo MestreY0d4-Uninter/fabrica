@@ -728,6 +728,7 @@ export async function checkWorkerHealth(opts: {
               lastConvergenceRetryCount: convergence.retryCount,
               lastConvergenceReason: inconclusiveReason,
               lastConvergenceAt: new Date().toISOString(),
+              lastConvergenceHeadSha: convergence.progressHeadSha,
             }).catch(() => {});
             fix.fixed = true;
             if (executionContractRecovery) {
@@ -1172,6 +1173,7 @@ export async function checkWorkerHealth(opts: {
                 lastConvergenceRetryCount: convergence.retryCount,
                 lastConvergenceReason: "stalled_with_artifact",
                 lastConvergenceAt: new Date().toISOString(),
+                lastConvergenceHeadSha: convergence.progressHeadSha,
               }).catch(() => {});
               fix.fixed = true;
               await auditHealthFixApplied(workspaceDir, fix, {

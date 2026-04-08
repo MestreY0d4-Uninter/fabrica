@@ -765,6 +765,7 @@ export async function applyWorkerResult(opts: {
         lastConvergenceRetryCount: convergence.retryCount,
         lastConvergenceReason: validationReason,
         lastConvergenceAt: new Date().toISOString(),
+        lastConvergenceHeadSha: convergence.progressHeadSha,
       }).catch(() => {});
       await executeCompletion({
         workspaceDir: opts.workspaceDir,
@@ -889,6 +890,7 @@ export async function applyWorkerResult(opts: {
       lastConvergenceRetryCount: 0,
       lastConvergenceReason: null,
       lastConvergenceAt: null,
+      lastConvergenceHeadSha: null,
     }).catch(() => {});
   } else {
     await updateIssueRuntime(opts.workspaceDir, context.projectSlug, context.issueId, {
@@ -899,6 +901,7 @@ export async function applyWorkerResult(opts: {
       lastConvergenceRetryCount: 0,
       lastConvergenceReason: null,
       lastConvergenceAt: null,
+      lastConvergenceHeadSha: null,
     }).catch(() => {});
   }
 

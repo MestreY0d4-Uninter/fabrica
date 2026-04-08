@@ -93,6 +93,7 @@ export type IssueRuntimeState = {
   lastConvergenceRetryCount?: number;
   lastConvergenceReason?: string | null;
   lastConvergenceAt?: string | null;
+  lastConvergenceHeadSha?: string | null;
 };
 
 export type ProjectEnvironmentStatus = "pending" | "provisioning" | "ready" | "failed";

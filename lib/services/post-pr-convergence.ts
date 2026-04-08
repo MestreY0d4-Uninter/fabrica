@@ -24,6 +24,7 @@ export type ConvergenceDecision = {
   retryCount: number;
   maxRetries: number;
   hasArtifact: boolean;
+  progressHeadSha: string | null;
 };
 
 export function classifyConvergenceCause(reason: string | null | undefined): ConvergenceCause {
@@ -87,9 +88,12 @@ export function decidePostPrConvergence(params: {
   const { workflow, issueRuntime, reason, feedbackQueueLabel } = params;
   const cause = classifyConvergenceCause(reason);
   const hasArtifact = hasReviewableArtifact(issueRuntime);
+  const progressHeadSha = issueRuntime?.currentPrHeadSha ?? issueRuntime?.lastHeadSha ?? issueRuntime?.artifactOfRecord?.headSha ?? null;
   const previousCause = issueRuntime?.lastConvergenceCause ?? null;
   const previousCount = issueRuntime?.lastConvergenceRetryCount ?? 0;
-  const retryCount = previousCause === cause ? previousCount + 1 : 1;
+  const previousHeadSha = issueRuntime?.lastConvergenceHeadSha ?? null;
+  const sameHeadSha = !progressHeadSha || !previousHeadSha ? true : progressHeadSha === previousHeadSha;
+  const retryCount = previousCause === cause && sameHeadSha ? previousCount + 1 : 1;
   const maxRetries = getConvergenceRetryBudget(cause);
   const holdLabel = getPreferredHoldLabel(workflow);
   const shouldEscalate = hasArtifact && retryCount > maxRetries && Boolean(holdLabel);
@@ -101,5 +105,6 @@ export function decidePostPrConvergence(params: {
     retryCount,
     maxRetries,
     hasArtifact,
+    progressHeadSha,
   };
 }

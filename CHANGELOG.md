@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.38 - 2026-04-08
+
+- Exposed the issue/run doctor as a first-class Fabrica tool (`doctor_issue`) in addition to the CLI command, so agents and operators can inspect a live converging/thrashing issue directly from the plugin tool surface.
+- Refined post-PR convergence again with head-SHA awareness: repeating the same blocker cause only increments the retry budget when the PR head SHA has not changed. If the PR actually moved forward, Fabrica resets the convergence retry counter instead of escalating stale history.
+
 ## 0.2.37 - 2026-04-08
 
 - Added `openclaw fabrica doctor issue --project <slug> --issue <id>` to inspect one live run with convergence metadata, PR context, issue labels, and a recommended next action. This gives an operator-level explanation of why a run is looping or what Fabrica is likely to do next.
