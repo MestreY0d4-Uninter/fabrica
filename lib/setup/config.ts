@@ -38,6 +38,7 @@ export async function writePluginConfig(
   ensurePluginAllowed(config);
   ensureInternalHooks(config);
   ensureHeartbeatDefaults(config);
+  ensureTelegramDefaults(config);
   configureSubagentCleanup(config);
   ensureTelegramLinkPreviewDisabled(config);
 
@@ -103,6 +104,24 @@ function ensureHeartbeatDefaults(config: Record<string, unknown>): void {
   const fabrica = (config as any).plugins.entries.fabrica.config;
   if (!fabrica.work_heartbeat) {
     fabrica.work_heartbeat = { ...HEARTBEAT_DEFAULTS };
+  }
+}
+
+function ensureTelegramDefaults(config: Record<string, unknown>): void {
+  const fabrica = (config as any).plugins.entries.fabrica.config;
+  if (!fabrica.telegram) fabrica.telegram = {};
+  const telegram = fabrica.telegram as Record<string, unknown>;
+  if (telegram.bootstrapDmEnabled === undefined) {
+    telegram.bootstrapDmEnabled = true;
+  }
+  if (telegram.projectsForumChatId === undefined && process.env.FABRICA_PROJECTS_CHANNEL_ID) {
+    telegram.projectsForumChatId = process.env.FABRICA_PROJECTS_CHANNEL_ID;
+  }
+  if (telegram.projectsForumAccountId === undefined && process.env.FABRICA_PROJECTS_CHANNEL_ACCOUNT_ID) {
+    telegram.projectsForumAccountId = process.env.FABRICA_PROJECTS_CHANNEL_ACCOUNT_ID;
+  }
+  if (telegram.opsChatId === undefined && process.env.TELEGRAM_CHAT_ID) {
+    telegram.opsChatId = process.env.TELEGRAM_CHAT_ID;
   }
 }
 

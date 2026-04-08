@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.43 - 2026-04-08
+
+- Hardened first-run Telegram setup for new users: `openclaw fabrica setup` now writes an explicit Fabrica `telegram` config block, defaults `bootstrapDmEnabled` to true in plugin config, and hydrates forum/account/chat IDs from environment variables like `FABRICA_PROJECTS_CHANNEL_ID` when available.
+- Improved onboarding guidance so users missing `projectsForumChatId` are told about the env-based prefill path instead of only getting a generic rerun instruction.
+
 ## 0.2.42 - 2026-04-08
 
 - Documentation closeout release: updated the README with the new `doctor issue` and convergence-aware metrics workflow, added `FUTURE_IMPROVEMENTS.md` for deferred non-blocking ideas, and removed stale internal planning docs from `docs/plans/` so the GitHub repo stays cleaner for public release.

@@ -180,12 +180,14 @@ describe("fabrica CLI operational wrappers", () => {
     };
     registerCli(program, ctx);
 
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await program.parseAsync(["node", "test", "fabrica", "setup", "--workspace", "/tmp/default-workspace"], { from: "node" });
 
     expect(mockRunSetup).toHaveBeenCalledWith(expect.objectContaining({
       ensureGenesis: false,
       forumGroupId: undefined,
     }));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("FABRICA_PROJECTS_CHANNEL_ID"));
   });
 
   it("routes `fabrica heartbeat once` through the one-shot heartbeat sweep", async () => {

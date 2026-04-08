@@ -142,7 +142,8 @@ export function registerCli(program: Command, ctx: PluginContext): void {
       } else {
         console.log("  1. Run `openclaw fabrica doctor workspace --workspace <path>` to confirm workspace readiness");
         console.log("  2. If you want the official Telegram DM → topic flow, set plugins.entries.fabrica.config.telegram.projectsForumChatId");
-        console.log("  3. Re-run `openclaw fabrica setup` after the Telegram forum config is in place");
+        console.log("  3. You can also export FABRICA_PROJECTS_CHANNEL_ID before running setup to prefill that value automatically");
+        console.log("  4. Re-run `openclaw fabrica setup` after the Telegram forum config is in place");
       }
     });
 

@@ -148,6 +148,8 @@ At minimum, when DM bootstrap is enabled, set:
 
 If `projectsForumChatId` is missing while DM bootstrap is enabled, Fabrica can accept the DM but will fail when it needs to create the project topic.
 
+Tip: if you export `FABRICA_PROJECTS_CHANNEL_ID` before running `openclaw fabrica setup`, Fabrica now copies that value into `plugins.entries.fabrica.config.telegram.projectsForumChatId` automatically during setup.
+
 **6. Validate operational readiness**:
 
 ```bash
