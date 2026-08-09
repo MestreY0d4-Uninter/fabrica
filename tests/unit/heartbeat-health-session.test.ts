@@ -56,7 +56,7 @@ describe("checkWorkerHealth", () => {
       },
     });
     h.provider.seedIssue({ iid: 42, title: "Stalled with artifact", labels: ["Doing"] });
-    h.provider.setPrStatus(42, { state: "open", url: "https://example.com/pr/42" });
+    h.provider.setPrStatus(42, { number: 42, state: "open", url: "https://example.com/pr/42" });
 
     const data = await h.readProjects();
     data.projects[h.project.slug]!.issueRuntime = {
@@ -122,7 +122,7 @@ describe("checkWorkerHealth", () => {
       },
     });
     h.provider.seedIssue({ iid: 42, title: "Stalled with artifact again", labels: ["Doing"] });
-    h.provider.setPrStatus(42, { state: "open", url: "https://example.com/pr/42" });
+    h.provider.setPrStatus(42, { number: 42, state: "open", url: "https://example.com/pr/42" });
 
     const data = await h.readProjects();
     data.projects[h.project.slug]!.issueRuntime = {
@@ -190,7 +190,7 @@ describe("checkWorkerHealth", () => {
       },
     });
     h.provider.seedIssue({ iid: 42, title: "Recent artifact activity", labels: ["Doing"] });
-    h.provider.setPrStatus(42, { state: "open", url: "https://example.com/pr/42" });
+    h.provider.setPrStatus(42, { number: 42, state: "open", url: "https://example.com/pr/42" });
 
     const data = await h.readProjects();
     data.projects[h.project.slug]!.issueRuntime = {
@@ -290,7 +290,7 @@ describe("checkWorkerHealth", () => {
       },
     });
     h.provider.seedIssue({ iid: 42, title: "Keep work in Doing", labels: ["Doing"] });
-    h.provider.setPrStatus(42, { state: "open", url: "https://example.com/pr/42" });
+    h.provider.setPrStatus(42, { number: 42, state: "open", url: "https://example.com/pr/42" });
 
     const sessions: SessionLookup = new Map([
       [
@@ -510,6 +510,59 @@ describe("checkWorkerHealth", () => {
 
     const pending = await getPendingIntents(h.workspaceDir);
     expect(pending.some((entry) => String(entry.data?.type) === "workerProgress")).toBe(true);
+  });
+
+  it("uses the canonical PR binding when checking a live worker for an artifact", async () => {
+    h = await createTestHarness({
+      workers: {
+        developer: {
+          active: true,
+          issueId: "42",
+          sessionKey: "agent:main:subagent:test-project-developer-medior-ada",
+          level: "medior",
+          startTime: new Date(Date.now() - 10 * 60_000).toISOString(),
+          previousLabel: "To Do",
+        },
+      },
+    });
+    h.provider.seedIssue({ iid: 42, title: "Canonical PR", labels: ["Doing"] });
+    const data = await h.readProjects();
+    data.projects[h.project.slug]!.issueRuntime = {
+      "42": {
+        currentPrNumber: 99,
+        currentPrUrl: "https://example.com/pr/99",
+        dispatchRequestedAt: new Date(Date.now() - 11 * 60_000).toISOString(),
+        agentAcceptedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+        firstWorkerActivityAt: new Date(Date.now() - 9 * 60_000).toISOString(),
+        lastSessionKey: "agent:main:subagent:test-project-developer-medior-ada",
+      },
+    };
+    await writeProjects(h.workspaceDir, data);
+
+    const getPrStatus = vi.spyOn(h.provider, "getPrStatus");
+    getPrStatus.mockResolvedValue({
+      number: 99,
+      url: "https://example.com/pr/99",
+      state: "open",
+      currentIssueMatch: true,
+    });
+
+    const sessions: SessionLookup = new Map([[
+      "agent:main:subagent:test-project-developer-medior-ada",
+      { key: "agent:main:subagent:test-project-developer-medior-ada", updatedAt: Date.now() - 30_000, percentUsed: 0.2 },
+    ]]);
+    await checkWorkerHealth({
+      workspaceDir: h.workspaceDir,
+      projectSlug: h.project.slug,
+      project: (await h.readProjects()).projects[h.project.slug]!,
+      role: "developer",
+      autoFix: true,
+      provider: h.provider,
+      sessions,
+      staleWorkerHours: 999,
+    });
+
+    expect(getPrStatus).toHaveBeenCalledWith(42, { prNumber: 99 });
   });
 
   it("requeues a developer stuck too long without a PR or terminal result", async () => {

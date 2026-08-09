@@ -1025,7 +1025,7 @@ export async function checkWorkerHealth(opts: {
         );
         if (issueIdNum) {
           try {
-            const prStatus = await provider.getPrStatus(issueIdNum);
+            const prStatus = await provider.getPrStatus(issueIdNum, getCanonicalPrSelector(project, issueIdNum));
             if (
               prStatus.url &&
               prStatus.state !== PrState.MERGED &&

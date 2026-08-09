@@ -1,4 +1,4 @@
-import { readProjects, getIssueRuntime } from "../projects/index.js";
+import { readProjects, getIssueRuntime, getCanonicalPrSelector } from "../projects/index.js";
 import { createProvider } from "../providers/index.js";
 import type { RunCommand } from "../context.js";
 import type { PrStatus } from "../providers/provider.js";
@@ -61,6 +61,7 @@ export async function runIssueDoctor(opts: {
   if (!project) throw new Error(`Project not found: ${opts.projectSlug}`);
 
   const issueRuntime = getIssueRuntime(project, opts.issueId) ?? null;
+  const prSelector = getCanonicalPrSelector(project, opts.issueId);
   const hasArtifact = Boolean(
     issueRuntime?.currentPrUrl ||
     issueRuntime?.currentPrNumber ||
@@ -77,7 +78,7 @@ export async function runIssueDoctor(opts: {
 
   let prStatus: PrStatus | null = null;
   try {
-    const pr = await provider.getPrStatus(opts.issueId);
+    const pr = await provider.getPrStatus(opts.issueId, prSelector);
     if (pr.url || pr.number) prStatus = pr;
   } catch {
     prStatus = null;
@@ -97,7 +98,7 @@ export async function runIssueDoctor(opts: {
   const retryCount = issueRuntime?.lastConvergenceRetryCount ?? 0;
   const convergenceReason = issueRuntime?.lastConvergenceReason ?? issueRuntime?.inconclusiveCompletionReason ?? null;
   const convergenceHeadSha = issueRuntime?.lastConvergenceHeadSha ?? null;
-  const currentHeadSha = issueRuntime?.currentPrHeadSha ?? issueRuntime?.lastHeadSha ?? prStatus?.sourceBranch ?? null;
+  const currentHeadSha = issueRuntime?.currentPrHeadSha ?? issueRuntime?.lastHeadSha ?? null;
   const headShaChangedSinceLastConvergence = convergenceHeadSha && currentHeadSha
     ? convergenceHeadSha !== currentHeadSha
     : null;
