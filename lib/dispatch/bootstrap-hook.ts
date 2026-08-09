@@ -149,12 +149,6 @@ export function registerBootstrapHook(api: OpenClawPluginApi, ctx: PluginContext
         }>;
       };
 
-      const bootstrapFiles = context.bootstrapFiles;
-      if (!Array.isArray(bootstrapFiles)) return;
-
-      const agentsEntry = bootstrapFiles.find((f) => f.name === "AGENTS.md");
-      if (!agentsEntry) return;
-
       // Load role instructions from workspace (project-specific → default fallback)
       const workspaceDir = context.workspaceDir;
       if (!workspaceDir) {
@@ -179,6 +173,12 @@ export function registerBootstrapHook(api: OpenClawPluginApi, ctx: PluginContext
         if (coordinatorRun) coordinatorLedger.recordBootstrapReady(coordinatorRun.runId, coordinatorRun.generation, sessionKey);
         coordinatorLedger.close();
       }
+
+      const bootstrapFiles = context.bootstrapFiles;
+      if (!Array.isArray(bootstrapFiles)) return;
+
+      const agentsEntry = bootstrapFiles.find((f) => f.name === "AGENTS.md");
+      if (!agentsEntry) return;
 
       const { content, source } = await loadRoleInstructions(
         workspaceDir,
