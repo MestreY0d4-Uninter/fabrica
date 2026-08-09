@@ -335,6 +335,21 @@ EOF
 
 scaffold_readme() {
   local name="$1" stack="$2" objective="$3"
+  local setup_command run_command
+  case "$stack" in
+    nextjs|express|node-cli) setup_command="npm install" ;;
+    fastapi|flask|django) setup_command="python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt" ;;
+    python-cli) setup_command="python -m venv .venv && source .venv/bin/activate && pip install -e '.[dev]'" ;;
+  esac
+  case "$stack" in
+    nextjs) run_command="npm run dev" ;;
+    express) run_command="npm run dev" ;;
+    node-cli) run_command='npm run dev -- "Hello World CLI"' ;;
+    fastapi) run_command="uvicorn app.main:app --reload" ;;
+    flask) run_command="flask run --debug" ;;
+    django) run_command="python manage.py runserver" ;;
+    python-cli) run_command="$name --help" ;;
+  esac
   cat > README.md <<EOF
 # $name
 
@@ -347,25 +362,13 @@ $objective
 ## Setup
 
 \`\`\`bash
-$(case "$stack" in
-  nextjs|express|node-cli) echo "npm install" ;;
-  fastapi|flask|django) echo "python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt" ;;
-  python-cli) echo "python -m venv .venv && source .venv/bin/activate && pip install -e '.[dev]'" ;;
-esac)
+$setup_command
 \`\`\`
 
 ## Run
 
 \`\`\`bash
-$(case "$stack" in
-  nextjs) echo "npm run dev" ;;
-  express) echo "npm run dev" ;;
-  node-cli) echo "npm run dev -- \"Hello World CLI\"" ;;
-  fastapi) echo "uvicorn app.main:app --reload" ;;
-  flask) echo "flask run --debug" ;;
-  django) echo "python manage.py runserver" ;;
-  python-cli) echo "$name --help" ;;
-esac)
+$run_command
 \`\`\`
 
 ## QA
