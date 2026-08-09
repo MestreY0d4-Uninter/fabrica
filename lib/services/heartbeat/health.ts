@@ -439,6 +439,22 @@ export async function checkWorkerHealth(opts: {
         });
       }
 
+      // Clear dispatch evidence after a failed recovery. Otherwise doctor sees
+      // the old accepted timestamp with no activity and reports accepted_idle,
+      // while the slot has already been released for a fresh dispatch.
+      async function clearFailedDispatchLifecycle() {
+        if (!issueIdNum) return;
+        await updateIssueRuntime(workspaceDir, projectSlug, issueIdNum, {
+          dispatchRequestedAt: null,
+          sessionPatchedAt: null,
+          agentAcceptedAt: null,
+          firstWorkerActivityAt: null,
+          sessionCompletedAt: null,
+          lastSessionKey: null,
+          dispatchRunId: null,
+        }).catch(() => {});
+      }
+
       if (slot.active && hasDispatchCycleMismatch(slot, issueRuntime)) {
         await auditLog(workspaceDir, "health_fix_rejected", {
           type: "dispatch_cycle_mismatch",
@@ -797,6 +813,7 @@ export async function checkWorkerHealth(opts: {
           await revertLabel(fix, expectedLabel, slotQueueLabel);
           if (!fix.labelRevertFailed) {
             await deactivateSlot();
+            await clearFailedDispatchLifecycle();
             fix.fixed = true;
             await auditHealthFixApplied(workspaceDir, fix, {
               action: "requeue_issue",
@@ -831,6 +848,7 @@ export async function checkWorkerHealth(opts: {
           }
           if (!fix.labelRevertFailed) {
             await deactivateSlot();
+            await clearFailedDispatchLifecycle();
             fix.fixed = true;
             await auditHealthFixApplied(workspaceDir, fix, {
               action: "requeue_issue",
@@ -870,6 +888,7 @@ export async function checkWorkerHealth(opts: {
             }
             if (!fix.labelRevertFailed) {
               await deactivateSlot();
+              await clearFailedDispatchLifecycle();
               fix.fixed = true;
               await auditHealthFixApplied(workspaceDir, fix, {
                 action: "requeue_issue",
@@ -951,6 +970,7 @@ export async function checkWorkerHealth(opts: {
           await revertLabel(fix, expectedLabel, slotQueueLabel);
           if (!fix.labelRevertFailed) {
             await deactivateSlot();
+            await clearFailedDispatchLifecycle();
             fix.fixed = true;
             await auditHealthFixApplied(workspaceDir, fix, {
               action: "requeue_issue",

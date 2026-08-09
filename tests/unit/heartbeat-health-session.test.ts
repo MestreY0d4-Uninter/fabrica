@@ -441,6 +441,17 @@ describe("checkWorkerHealth", () => {
       from: "Doing",
       to: "To Improve",
     });
+
+    const recovered = await h.readProjects();
+    expect(recovered.projects[h.project.slug]!.issueRuntime?.["42"]).toMatchObject({
+      dispatchRequestedAt: null,
+      sessionPatchedAt: null,
+      agentAcceptedAt: null,
+      firstWorkerActivityAt: null,
+      sessionCompletedAt: null,
+      lastSessionKey: null,
+      dispatchRunId: null,
+    });
   });
 
   it("emits a workerProgress notification for long-running developer work without a PR", async () => {
