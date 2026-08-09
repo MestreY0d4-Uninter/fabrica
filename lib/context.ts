@@ -33,7 +33,20 @@ export type PluginContext = {
 };
 
 export function isCliMetadataRuntime(api: OpenClawPluginApi): boolean {
-  return !api.runtime.system;
+  return (api as OpenClawPluginApi & { registrationMode?: string }).registrationMode === "cli-metadata";
+}
+
+function getRuntimeRunCommand(api: OpenClawPluginApi): RunCommand {
+  if (isCliMetadataRuntime(api)) {
+    return (async () => {
+      throw new Error("Fabrica runtime-dependent CLI operation is unavailable during metadata registration");
+    }) as RunCommand;
+  }
+
+  if (!api.runtime?.system) {
+    throw new Error("Fabrica requires a complete OpenClaw runtime outside CLI metadata registration");
+  }
+  return api.runtime.system.runCommandWithTimeout;
 }
 
 /**
@@ -53,11 +66,7 @@ export function createPluginContext(api: OpenClawPluginApi): PluginContext {
   }
 
   const runtime = api.runtime;
-  const runCommand: RunCommand = isCliMetadataRuntime(api)
-    ? (async () => {
-      throw new Error("Fabrica runtime-dependent CLI operation is unavailable during metadata registration");
-    }) as RunCommand
-    : runtime.system.runCommandWithTimeout;
+  const runCommand = getRuntimeRunCommand(api);
 
   return {
     runCommand,

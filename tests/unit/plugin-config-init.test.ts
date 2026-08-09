@@ -67,6 +67,7 @@ describe("createPluginContext — pluginConfig validation", () => {
   it("supports OpenClaw metadata registration without initializing runtime services", async () => {
     const api = makeApi({});
     api.runtime = {};
+    api.registrationMode = "cli-metadata";
 
     const ctx = createPluginContext(api);
 

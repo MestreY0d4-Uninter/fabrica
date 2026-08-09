@@ -164,4 +164,30 @@ describe("plugin registration logging calibration", () => {
       expect.stringContaining("GitHub webhook route registered"),
     );
   });
+
+  it("uses registrationMode to register only CLI metadata", async () => {
+    const plugin = (await import("../../index.js")).default;
+    const api = makeApi({ registrationMode: "cli-metadata", runtime: {} });
+
+    plugin.register(api);
+
+    expect(api.registerCli).toHaveBeenCalledTimes(1);
+    expect(api.registerTool).not.toHaveBeenCalled();
+    expect(api.registerService).not.toHaveBeenCalled();
+    expect(api.registerHook).not.toHaveBeenCalled();
+    expect(api.registerHttpRoute).not.toHaveBeenCalled();
+  });
+
+  it("keeps full runtime registration behavior outside metadata mode", async () => {
+    const plugin = (await import("../../index.js")).default;
+    const api = makeApi();
+
+    plugin.register(api);
+
+    expect(api.registerCli).toHaveBeenCalledTimes(1);
+    expect(api.registerTool).toHaveBeenCalled();
+    expect(api.registerService).toHaveBeenCalled();
+    expect(api.registerHook).toHaveBeenCalled();
+  });
+
 });
