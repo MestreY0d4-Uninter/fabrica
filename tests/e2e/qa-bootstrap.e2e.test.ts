@@ -284,7 +284,8 @@ where = ["src"]
     await writeFile(path.join(repoPath, "src", "fabrica_e2e_python", "main.py"), `def greet(name: str) -> str:
     return f"hello {name}"
 `);
-    await writeFile(path.join(repoPath, "tests", "test_main.py"), `from src.fabrica_e2e_python.main import greet
+    await writeFile(path.join(repoPath, "tests", "test_main.py"), `from fabrica_e2e_python.main import greet
+
 
 def test_greet() -> None:
     assert greet("mateus") == "hello mateus"

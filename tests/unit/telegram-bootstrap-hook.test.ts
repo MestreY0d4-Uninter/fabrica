@@ -3172,7 +3172,17 @@ describe("Layer 2 language heuristic", () => {
 
   afterEach(async () => {
     resetActiveBootstrapResumes();
-    await fs.rm(workspaceDir, { recursive: true, force: true });
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        await fs.rm(workspaceDir, { recursive: true, force: true });
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== "ENOTEMPTY" || attempt === 4) {
+          throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
   });
 
   it("sends Portuguese ack for PT createCue (crie)", async () => {

@@ -149,11 +149,18 @@ export function registerBootstrapHook(api: OpenClawPluginApi, ctx: PluginContext
         }>;
       };
 
+      const bootstrapFiles = context.bootstrapFiles;
+      const agentsEntry = Array.isArray(bootstrapFiles)
+        ? bootstrapFiles.find((f) => f.name === "AGENTS.md")
+        : undefined;
+
       // Load role instructions from workspace (project-specific → default fallback)
       const workspaceDir = context.workspaceDir;
       if (!workspaceDir) {
-        agentsEntry.content = "";
-        agentsEntry.missing = true;
+        if (agentsEntry) {
+          agentsEntry.content = "";
+          agentsEntry.missing = true;
+        }
         ctx.logger.info(
           `agent:bootstrap: stripped AGENTS.md for ${parsed.role} worker in "${parsed.projectName}" (no workspaceDir)`,
         );
@@ -174,10 +181,6 @@ export function registerBootstrapHook(api: OpenClawPluginApi, ctx: PluginContext
         coordinatorLedger.close();
       }
 
-      const bootstrapFiles = context.bootstrapFiles;
-      if (!Array.isArray(bootstrapFiles)) return;
-
-      const agentsEntry = bootstrapFiles.find((f) => f.name === "AGENTS.md");
       if (!agentsEntry) return;
 
       const { content, source } = await loadRoleInstructions(
