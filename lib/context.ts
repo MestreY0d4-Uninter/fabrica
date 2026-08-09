@@ -17,36 +17,24 @@ import type { FabricaPluginConfig } from "./config/types.js";
  */
 export type RunCommand = OpenClawPluginApi["runtime"]["system"]["runCommandWithTimeout"];
 
-/**
- * PluginContext — shared services for all Fabrica modules.
- *
- * No framework, no decorators — just a plain object created once and
- * passed through factory functions and service registrations.
- */
+/** PluginContext — shared services for all Fabrica modules. */
 export type PluginContext = {
-  /** Run an external command via the plugin SDK (replaces global singleton). */
   runCommand: RunCommand;
-  /** Plugin runtime for direct API access (channel messaging, gateway calls). */
   runtime: PluginRuntime;
-  /** Plugin-level config from openclaw.json (notifications, heartbeat, etc.). */
   pluginConfig: FabricaPluginConfig | undefined;
-  /** Full OpenClaw config (agents list, defaults, etc.) — read-only. */
   config: OpenClawPluginApi["config"];
-  /** Structured logger from the plugin SDK. */
   sdkLogger: OpenClawPluginApi["logger"];
-  /** Fabrica runtime logger (Pino + correlation context). */
   logger: FabricaLogger;
-  /** Correlation + tracing facade for critical flows. */
   observability: {
     logger(bindings?: Record<string, unknown>): FabricaLogger;
     withContext<T>(bindings: Partial<CorrelationContext>, fn: () => T): T;
-    withSpan<T>(
-      name: string,
-      bindings: Partial<CorrelationContext> & Record<string, unknown>,
-      fn: () => Promise<T>,
-    ): Promise<T>;
+    withSpan<T>(name: string, bindings: Partial<CorrelationContext> & Record<string, unknown>, fn: () => Promise<T>): Promise<T>;
   };
 };
+
+export function isCliMetadataRuntime(api: OpenClawPluginApi): boolean {
+  return !api.runtime.system;
+}
 
 /**
  * Build a PluginContext from the raw plugin API. Called once in register().
@@ -64,9 +52,16 @@ export function createPluginContext(api: OpenClawPluginApi): PluginContext {
     }
   }
 
+  const runtime = api.runtime;
+  const runCommand: RunCommand = isCliMetadataRuntime(api)
+    ? (async () => {
+      throw new Error("Fabrica runtime-dependent CLI operation is unavailable during metadata registration");
+    }) as RunCommand
+    : runtime.system.runCommandWithTimeout;
+
   return {
-    runCommand: api.runtime.system.runCommandWithTimeout,
-    runtime: api.runtime,
+    runCommand,
+    runtime,
     pluginConfig: api.pluginConfig as FabricaPluginConfig | undefined,
     config: api.config,
     sdkLogger: api.logger,
