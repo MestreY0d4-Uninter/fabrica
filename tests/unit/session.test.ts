@@ -142,11 +142,10 @@ describe("ensureSessionReady", () => {
     vi.clearAllMocks();
   });
 
-  it("logs a warning (does not throw) when the gateway never confirms the session after patching", async () => {
+  it("fails closed when the gateway never confirms the session after patching", async () => {
     const runCommand = vi.fn(async () => "");
     fetchGatewaySessionsMock.mockResolvedValue(new Map());
 
-    // P0-3: ensureSessionReady no longer throws — it logs a warning and continues
     await expect(ensureSessionReady(
       "session-key",
       "openai/gpt-5",
@@ -155,7 +154,7 @@ describe("ensureSessionReady", () => {
       30_000,
       "Short Label",
       { slug: "demo", issueId: 7 },
-    )).resolves.toBeUndefined();
+    )).rejects.toThrow(/gateway_session_not_confirmed/);
 
     expect(recordIssueLifecycleMock).toHaveBeenCalledWith({
       workspaceDir: "/tmp/workspace",
@@ -168,11 +167,11 @@ describe("ensureSessionReady", () => {
       step: "confirmSession",
       sessionKey: "session-key",
       error: "gateway_session_not_confirmed",
-      note: "dispatch_continues_without_confirmation",
+      note: "dispatch_aborted_before_active_state",
     }));
   });
 
-  it("returns after sessions.patch when the gateway session registry is unavailable", async () => {
+  it("fails closed when the gateway session registry is unavailable", async () => {
     const runCommand = vi.fn(async () => "");
     fetchGatewaySessionsMock.mockResolvedValue(null);
 
@@ -184,7 +183,7 @@ describe("ensureSessionReady", () => {
       30_000,
       "Short Label",
       { slug: "demo", issueId: 7 },
-    )).resolves.toBeUndefined();
+    )).rejects.toThrow(/gateway_session_not_confirmed/);
 
     expect(runCommand).toHaveBeenCalledTimes(1);
   });
@@ -209,7 +208,7 @@ describe("ensureSessionReady", () => {
       30_000,
       "Short Label",
       { slug: "demo", issueId: 7 },
-    )).resolves.toBeUndefined();
+    )).rejects.toThrow(/gateway_session_not_confirmed/);
 
     expect(auditLogMock).toHaveBeenCalledWith("/tmp/workspace", "dispatch_warning", expect.objectContaining({
       step: "confirmSession",

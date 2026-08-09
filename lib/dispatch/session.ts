@@ -11,6 +11,7 @@ import { bindDispatchRunIdBySessionKey, recordIssueLifecycle } from "../projects
 const GATEWAY_SESSION_LABEL_MAX = 64;
 const SESSION_CONFIRM_ATTEMPTS = 5;
 const SESSION_CONFIRM_DELAY_MS = 250;
+export const SESSION_CONFIRMATION_FAILED = "gateway_session_not_confirmed";
 
 // ---------------------------------------------------------------------------
 // Context budget management
@@ -176,7 +177,9 @@ export async function ensureSessionReady(
   const confirmDelayMs = timeouts?.sessionConfirmDelayMs ?? SESSION_CONFIRM_DELAY_MS;
   for (let attempt = 0; attempt < confirmAttempts; attempt++) {
     const sessions = await fetchGatewaySessions(undefined, runCommand).catch(() => null);
-    if (sessions === null) return;
+    if (sessions === null) {
+      throw new Error(`${SESSION_CONFIRMATION_FAILED}: gateway session lookup unavailable`);
+    }
     if (isSessionAlive(sessionKey, sessions)) return;
     if (attempt < confirmAttempts - 1) {
       await sleep(confirmDelayMs);
@@ -188,10 +191,10 @@ export async function ensureSessionReady(
     sessionKey,
     ...(normalizedLabel.label ? { sessionLabel: normalizedLabel.label } : {}),
     ...(normalizedLabel.fullLabel ? { sessionLabelFull: normalizedLabel.fullLabel } : {}),
-    error: "gateway_session_not_confirmed",
-    note: "dispatch_continues_without_confirmation",
+    error: SESSION_CONFIRMATION_FAILED,
+    note: "dispatch_aborted_before_active_state",
   }).catch(() => {});
-  // Warning only — dispatch continues. Health check will detect dispatch_unconfirmed state.
+  throw new Error(`${SESSION_CONFIRMATION_FAILED}: ${sessionKey}`);
 }
 
 export const EFFORT_PROMPTS: Record<EffortLevel, string> = {
