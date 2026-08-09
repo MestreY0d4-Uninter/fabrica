@@ -63,6 +63,7 @@ import {
   type SessionLookup,
 } from "../gateway-sessions.js";
 import { recordIssueLifecycle } from "../../projects/lifecycle.js";
+import { openWorkspaceCoordinatorLedger } from "../coordinator/index.js";
 import { withCorrelationContext } from "../../observability/context.js";
 import { withTelemetrySpan } from "../../observability/telemetry.js";
 import { resilientLabelTransition } from "../../workflow/labels.js";
@@ -345,6 +346,12 @@ export async function checkWorkerHealth(opts: {
 
   const fixes: HealthFix[] = [];
 
+  const coordinatorLedger = await openWorkspaceCoordinatorLedger(workspaceDir).catch(() => null);
+  if (coordinatorLedger) {
+    coordinatorLedger.recoverExpiredLeases();
+    coordinatorLedger.close();
+  }
+
   // Skip roles without workflow states (e.g. architect — tool-triggered only)
   if (!hasWorkflowStates(workflow, role)) return fixes;
 
@@ -410,6 +417,26 @@ export async function checkWorkerHealth(opts: {
       );
       const deliveryState = dispatchActivityObserved ? "activity_seen" : "unknown";
       const dispatchConfirmed = dispatchActivityObserved;
+      if (slot.active && issueIdNum && sessionKey) {
+        const coordinatorLedger = await openWorkspaceCoordinatorLedger(workspaceDir).catch(() => null);
+        if (coordinatorLedger) {
+          const coordinatorRun = coordinatorLedger.findRunBySession(sessionKey);
+          if (coordinatorRun) {
+            const coordinatorState = coordinatorLedger.getRun(coordinatorRun.runId);
+            if (coordinatorState?.status === "requeue" || coordinatorState?.status === "quarantined") {
+              await auditLog(workspaceDir, "health_fix_rejected", {
+                type: "coordinator_fenced_session",
+                projectSlug,
+                issueId: issueIdNum,
+                sessionKey,
+                generation: coordinatorRun.generation,
+                status: coordinatorState.status,
+              }).catch(() => {});
+            }
+          }
+          coordinatorLedger.close();
+        }
+      }
       const acceptedWithoutActivityTooLong =
         agentAcceptedAt !== null &&
         !dispatchConfirmed &&

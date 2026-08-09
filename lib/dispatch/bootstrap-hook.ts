@@ -17,6 +17,7 @@ import { getSessionKeyRolePattern } from "../roles/index.js";
 import { recordIssueLifecycleBySessionKey } from "../projects/index.js";
 import { DATA_DIR } from "../setup/constants.js";
 import { DEFAULT_ROLE_INSTRUCTIONS } from "../setup/templates.js";
+import { openWorkspaceCoordinatorLedger } from "../services/coordinator/index.js";
 
 /**
  * Parse a Fabrica/legacy subagent session key to extract project name and role.
@@ -171,6 +172,13 @@ export function registerBootstrapHook(api: OpenClawPluginApi, ctx: PluginContext
         stage: "agent_accepted",
         details: { role: parsed.role, projectName: parsed.projectName },
       }).catch(() => {});
+
+      const coordinatorLedger = await openWorkspaceCoordinatorLedger(workspaceDir).catch(() => null);
+      if (coordinatorLedger) {
+        const coordinatorRun = coordinatorLedger.findRunBySession(sessionKey);
+        if (coordinatorRun) coordinatorLedger.recordBootstrapReady(coordinatorRun.runId, coordinatorRun.generation, sessionKey);
+        coordinatorLedger.close();
+      }
 
       const { content, source } = await loadRoleInstructions(
         workspaceDir,

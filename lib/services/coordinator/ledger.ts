@@ -225,11 +225,35 @@ export class CoordinatorLedger {
 
   recordBootstrapReady(runId: string, generation: number, sessionKey: string): boolean {
     const run = this.getRun(runId);
-    if (!run || run.generation !== generation) return false;
+    if (!run || run.generation !== generation || ["requeue", "quarantined", "done"].includes(run.status)) return false;
     this.db.prepare(`INSERT INTO coordinator_sessions(run_id, generation, session_key, state, updated_at) VALUES (?, ?, ?, 'BOOTSTRAP_READY', ?)
       ON CONFLICT(run_id, generation, session_key) DO UPDATE SET state='BOOTSTRAP_READY', updated_at=excluded.updated_at`)
       .run(runId, generation, sessionKey, now());
     return true;
+  }
+
+  registerSession(runId: string, generation: number, sessionKey: string): boolean {
+    const run = this.getRun(runId);
+    if (!run || run.generation !== generation || ["requeue", "quarantined", "done"].includes(run.status)) return false;
+    const result = this.db.prepare(`INSERT OR IGNORE INTO coordinator_sessions(run_id, generation, session_key, state, updated_at)
+      VALUES (?, ?, ?, 'MISSING', ?)`).run(runId, generation, sessionKey, now());
+    return (result.changes ?? 0) === 1;
+  }
+
+  findRunBySession(sessionKey: string): { runId: string; generation: number } | null {
+    const row = this.db.prepare(`SELECT run_id, generation FROM coordinator_sessions
+      WHERE session_key=? ORDER BY generation DESC LIMIT 1`).get(sessionKey);
+    return row ? { runId: asString(row.run_id), generation: asNumber(row.generation) } : null;
+  }
+
+  acceptRuntimeForSession(sessionKey: string): boolean {
+    const found = this.db.prepare(`SELECT s.run_id, s.generation, r.lease_epoch FROM coordinator_sessions s
+      JOIN coordinator_runs r ON r.run_id=s.run_id AND r.generation=s.generation
+      JOIN coordinator_leases l ON l.run_id=r.run_id AND l.generation=r.generation AND l.lease_epoch=r.lease_epoch
+      WHERE s.session_key=? AND s.state='BOOTSTRAP_READY' AND l.expires_at > ?
+      ORDER BY s.generation DESC LIMIT 1`).get(sessionKey, now());
+    if (!found) return false;
+    return this.acceptRuntime(asString(found.run_id), asNumber(found.generation), asNumber(found.lease_epoch), sessionKey);
   }
 
   acceptRuntime(runId: string, generation: number, leaseEpoch: number, sessionKey: string): boolean {
