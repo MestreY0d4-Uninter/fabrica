@@ -3123,6 +3123,7 @@ describe("Layer 3: LLM classification via message_received", () => {
 
 describe("Layer 2 language heuristic", () => {
   let handler: ((event: any, eventCtx: any) => Promise<void>) | undefined;
+  let workspaceDir: string;
   const sendMessageTelegram = vi.fn(async () => undefined);
 
   const ctx = {
@@ -3135,7 +3136,7 @@ describe("Layer 2 language heuristic", () => {
     config: {
       agents: {
         defaults: {
-          workspace: "/tmp/workspace",
+          workspace: "",
         },
       },
     },
@@ -3156,19 +3157,22 @@ describe("Layer 2 language heuristic", () => {
   beforeEach(async () => {
     resetActiveBootstrapResumes();
     handler = undefined;
+    workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "fabrica-telegram-layer2-"));
+    ctx.config.agents.defaults.workspace = workspaceDir;
     sendMessageTelegram.mockClear();
     mockRunPipeline.mockReset();
     mockReadProjects.mockReset();
     mockProjectTick.mockReset();
     mockDiscoverAgents.mockReset();
     mockReadProjects.mockResolvedValue({ projects: {} });
-    mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: "/tmp/workspace" }]);
+    mockDiscoverAgents.mockReturnValue([{ agentId: "main", workspace: workspaceDir }]);
     mockProjectTick.mockResolvedValue({ pickups: [], skipped: [] });
-    await fs.rm("/tmp/workspace/fabrica/bootstrap-sessions", { recursive: true, force: true });
+    await fs.rm(path.join(workspaceDir, "fabrica", "bootstrap-sessions"), { recursive: true, force: true });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     resetActiveBootstrapResumes();
+    await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
   it("sends Portuguese ack for PT createCue (crie)", async () => {
