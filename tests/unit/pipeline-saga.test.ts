@@ -20,10 +20,10 @@ describe("cleanupArtifacts — real compensations", () => {
 
   it("returns needs_manual_cleanup for unhandled artifact types", async () => {
     const artifacts: PipelineArtifact[] = [
-      { type: "github_repo", id: "org/repo" },
+      { type: "forum_topic", id: "topic-123" },
     ];
     const results = await cleanupArtifacts(artifacts, opts);
-    // github_repo cleanup requires provider — falls back to needs_manual_cleanup
+    // forum_topic has no automatic compensation handler.
     expect(results[0].action).toBe("needs_manual_cleanup");
   });
 
