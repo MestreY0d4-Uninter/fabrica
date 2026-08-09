@@ -53,6 +53,9 @@ describe("CoordinatorLedger fault containment", () => {
       expect(ledger.renewLease(lease, 10_000)).toBe(false);
       expect(ledger.recoverExpiredLeases()).toEqual([expect.objectContaining({ runId: run.runId, action: "requeue", reason: "lease_expired" })]);
       expect(ledger.getRun(run.runId)?.status).toBe("requeue");
+      // Recovery fences the expired owner even before a new generation is
+      // created; a late retry carrying the old lease epoch must be rejected.
+      expect(ledger.acquireLease(run.runId, "worker-a", 10_000, run.generation, lease.leaseEpoch)).toBeNull();
     } finally { ledger.close(); }
   });
 

@@ -295,7 +295,11 @@ export class CoordinatorLedger {
     for (const row of rows) {
       const runId = asString(row.run_id); const issueId = asString(row.issue_id); const generation = asNumber(row.generation);
       this.db.prepare("DELETE FROM coordinator_leases WHERE run_id=? AND generation=?").run(runId, generation);
-      this.db.prepare("UPDATE coordinator_runs SET status='requeue', updated_at=? WHERE run_id=? AND generation=?").run(now(), runId, generation);
+      // Advance the epoch when recovering an expired lease.  Deleting the lease
+      // alone is not enough: an in-flight owner may retry with the old epoch
+      // after recovery and otherwise reacquire the run before the queue tick
+      // creates a new generation.
+      this.db.prepare("UPDATE coordinator_runs SET lease_epoch=lease_epoch+1, status='requeue', updated_at=? WHERE run_id=? AND generation=?").run(now(), runId, generation);
       recoveries.push({ runId, issueId, generation, action: "requeue", reason: "lease_expired" });
     }
     return recoveries;
