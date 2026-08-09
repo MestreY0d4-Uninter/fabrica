@@ -191,7 +191,7 @@ const plugin = {
     // to discover CLI commands. Do not initialize runtime-dependent factories,
     // services, or hooks in that pass; the full registration follows later.
     if (isCliMetadataRuntime(api)) {
-      api.registerCli(({ program }: { program: any }) => registerCli(program, ctx), {
+      api.registerCli(({ program, config, workspaceDir }: { program: any; config?: Record<string, unknown>; workspaceDir?: string }) => registerCli(program, { ...ctx, config: config ?? ctx.config, cliWorkspaceDir: workspaceDir }), {
         commands: ["fabrica"],
       });
       return;
@@ -236,7 +236,7 @@ const plugin = {
     api.registerTool(createGenesisTool(ctx), { names: ["genesis"] });
 
     // CLI (fabrica), services & hooks
-    api.registerCli(({ program }: { program: any }) => registerCli(program, ctx), {
+    api.registerCli(({ program, config, workspaceDir }: { program: any; config?: Record<string, unknown>; workspaceDir?: string }) => registerCli(program, { ...ctx, config: config ?? ctx.config, cliWorkspaceDir: workspaceDir }), {
       commands: ["fabrica"],
     });
     registerHeartbeatService(api, ctx);

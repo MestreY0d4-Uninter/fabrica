@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Command } from "commander";
 
 function makeLogger() {
   const logger = {
@@ -176,6 +177,25 @@ describe("plugin registration logging calibration", () => {
     expect(api.registerService).not.toHaveBeenCalled();
     expect(api.registerHook).not.toHaveBeenCalled();
     expect(api.registerHttpRoute).not.toHaveBeenCalled();
+  });
+
+  it("passes the standalone CLI workspace instead of resolving through partial runtime", async () => {
+    const plugin = (await import("../../index.js")).default;
+    const api = makeApi({ registrationMode: "cli-metadata", runtime: {} });
+
+    plugin.register(api);
+    const registrar = api.registerCli.mock.calls[0]?.[0];
+    expect(registrar).toBeTypeOf("function");
+
+    const program = new Command();
+    // The registrar must be able to construct the command tree with the CLI
+    // supplied workspace even though metadata registration has no runtime.
+    expect(() => registrar({
+      program,
+      config: { agents: { defaults: { workspace: "/tmp/cli-workspace" } } },
+      workspaceDir: "/tmp/cli-workspace",
+      logger: makeLogger(),
+    })).not.toThrow();
   });
 
   it("keeps full runtime registration behavior outside metadata mode", async () => {

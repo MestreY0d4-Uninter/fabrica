@@ -76,4 +76,15 @@ describe("createPluginContext — pluginConfig validation", () => {
       /unavailable during metadata registration/i,
     );
   });
+
+  it("recognizes an unmarked partial runtime as metadata-only", async () => {
+    const api = makeApi({});
+    api.runtime = {};
+
+    const ctx = createPluginContext(api);
+
+    await expect(ctx.runCommand(["echo", "metadata"], 1000)).rejects.toThrow(
+      /unavailable during metadata registration/i,
+    );
+  });
 });

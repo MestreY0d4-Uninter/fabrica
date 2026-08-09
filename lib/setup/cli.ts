@@ -30,7 +30,10 @@ import { cleanupWorkspace } from "./agent.js";
 /**
  * Get the default workspace directory from the OpenClaw config.
  */
-function getDefaultWorkspaceDir(runtime: PluginRuntime): string | undefined {
+function getDefaultWorkspaceDir(runtime: PluginRuntime, config?: Record<string, unknown>, workspaceDir?: string): string | undefined {
+  if (workspaceDir) return workspaceDir;
+  const configuredWorkspace = (config as any)?.agents?.defaults?.workspace;
+  if (typeof configuredWorkspace === "string" && configuredWorkspace) return configuredWorkspace;
   try {
     const config = runtime.config.loadConfig();
     return (config as any).agents?.defaults?.workspace ?? undefined;
@@ -39,8 +42,8 @@ function getDefaultWorkspaceDir(runtime: PluginRuntime): string | undefined {
   }
 }
 
-function requireWorkspaceDir(runtime: PluginRuntime, workspaceDir?: string): string {
-  const resolved = workspaceDir ?? getDefaultWorkspaceDir(runtime);
+function requireWorkspaceDir(runtime: PluginRuntime, workspaceDir?: string, config?: Record<string, unknown>, cliWorkspaceDir?: string): string {
+  const resolved = workspaceDir ?? getDefaultWorkspaceDir(runtime, config, cliWorkspaceDir);
   if (!resolved) {
     console.error("Error: workspace directory not found. Use --workspace or configure agent defaults.workspace");
     process.exit(1);
@@ -158,7 +161,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .option("-w, --workspace <path>", "Workspace directory")
     .option("--fix", "Apply fixes for detected issues")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
 
       const result = await runDoctor({ workspacePath: workspaceDir, fix: opts.fix ?? false, pluginConfig: ctx.pluginConfig as Record<string, unknown> });
       printDoctorResult(result, true);
@@ -200,7 +203,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .option("-w, --workspace <path>", "Workspace directory")
     .option("--json", "Emit machine-readable JSON")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
       const issueId = Number.parseInt(String(opts.issue), 10);
       if (!Number.isFinite(issueId)) {
         console.error(`Invalid issue id: ${opts.issue}`);
@@ -224,7 +227,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .option("-w, --workspace <path>", "Workspace directory")
     .option("--fix", "Apply fixes for detected issues")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
 
       const result = await runDoctor({ workspacePath: workspaceDir, fix: opts.fix ?? false, pluginConfig: ctx.pluginConfig as Record<string, unknown> });
       printDoctorResult(result, true);
@@ -242,7 +245,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .description("Validate workspace integrity (read-only, no fixes)")
     .option("-w, --workspace <path>", "Workspace directory")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
 
       const result = await runDoctor({ workspacePath: workspaceDir, fix: false, pluginConfig: ctx.pluginConfig as Record<string, unknown> });
       printDoctorResult(result, false);
@@ -256,7 +259,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .option("-w, --workspace <path>", "Workspace directory")
     .option("--json", "Emit machine-readable JSON")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
 
       try {
         const metrics = await computeMetrics(workspaceDir);
@@ -369,7 +372,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .option("-w, --workspace <path>", "Workspace directory")
     .option("--json", "Emit machine-readable JSON")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
       await cleanupWorkspace(workspaceDir);
 
       if (opts.json) {
@@ -391,7 +394,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .option("--limit <n>", "Maximum records to print", "20")
     .option("--json", "Emit machine-readable JSON")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
       const { eventStore } = await createGitHubStores(workspaceDir, { logger: ctx.logger });
       const store = eventStore;
       const records = await store.listEvents({
@@ -438,7 +441,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .option("--backend <backend>", "Preferred store backend (sqlite|file)")
     .option("--json", "Emit machine-readable JSON")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
       const result = await processPendingGitHubEventsForWorkspace({
         workspaceDir,
         pluginConfig: ctx.pluginConfig,
@@ -469,7 +472,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .option("--backend <backend>", "Preferred store backend (sqlite|file)")
     .option("--json", "Emit machine-readable JSON")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
       const result = await replayGitHubDeliveryForWorkspace({
         workspaceDir,
         deliveryId: opts.delivery,
@@ -502,7 +505,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .option("--backend <backend>", "Preferred store backend (sqlite|file)")
     .option("--json", "Emit machine-readable JSON")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
       const result = await reconcileGitHubPullRequestForWorkspace({
         workspaceDir,
         prNumber: Number(opts.pr),
@@ -534,7 +537,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .option("--limit <n>", "Maximum records to print", "20")
     .option("--json", "Emit machine-readable JSON")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
       const { eventStore, backend } = await createGitHubStores(workspaceDir, { logger: ctx.logger });
       const records = await eventStore.listEvents({
         deadLetter: true,
@@ -653,7 +656,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .option("-w, --workspace <path>", "Workspace directory")
     .option("--json", "Emit machine-readable JSON")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
       const result = await runDoctor({ workspacePath: workspaceDir, fix: false });
 
       if (opts.json) {
@@ -671,7 +674,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .description("Show operational overview: projects, workers, queues")
     .option("-w, --workspace <path>", "Workspace directory")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
 
       try {
         const data = await readProjects(workspaceDir);
@@ -726,7 +729,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .option("-n, --name <name>", "Display name for this channel")
     .option("-w, --workspace <path>", "Workspace directory (defaults to agent defaults.workspace)")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
 
       try {
         const data = await readProjects(workspaceDir);
@@ -801,7 +804,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .option("-y, --yes", "Skip confirmation prompt")
     .option("-w, --workspace <path>", "Workspace directory (defaults to agent defaults.workspace)")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
 
       try {
         const data = await readProjects(workspaceDir);
@@ -885,7 +888,7 @@ export function registerCli(program: Command, ctx: PluginContext): void {
     .option("-p, --project <name>", "Project name or slug (omit to list all)")
     .option("-w, --workspace <path>", "Workspace directory (defaults to agent defaults.workspace)")
     .action(async (opts) => {
-      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace);
+      const workspaceDir = requireWorkspaceDir(ctx.runtime, opts.workspace, ctx.config as Record<string, unknown>, ctx.cliWorkspaceDir);
 
       try {
         const data = await readProjects(workspaceDir);

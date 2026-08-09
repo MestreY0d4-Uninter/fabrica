@@ -23,6 +23,8 @@ export type PluginContext = {
   runtime: PluginRuntime;
   pluginConfig: FabricaPluginConfig | undefined;
   config: OpenClawPluginApi["config"];
+  /** Workspace supplied by OpenClaw's standalone CLI registrar context. */
+  cliWorkspaceDir?: string;
   sdkLogger: OpenClawPluginApi["logger"];
   logger: FabricaLogger;
   observability: {
@@ -33,7 +35,13 @@ export type PluginContext = {
 };
 
 export function isCliMetadataRuntime(api: OpenClawPluginApi): boolean {
-  return (api as OpenClawPluginApi & { registrationMode?: string }).registrationMode === "cli-metadata";
+  const registrationMode = (api as OpenClawPluginApi & { registrationMode?: string }).registrationMode;
+  // OpenClaw versions that build CLI metadata do not consistently expose the
+  // registrationMode marker.  They do, however, provide a deliberately
+  // incomplete runtime without the config API.  Treat that shape as metadata
+  // registration too; otherwise registerCli callbacks execute with a partial
+  // runtime and fail while resolving the workspace.
+  return registrationMode === "cli-metadata" || typeof api.runtime?.config?.loadConfig !== "function";
 }
 
 function getRuntimeRunCommand(api: OpenClawPluginApi): RunCommand {
