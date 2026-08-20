@@ -22,8 +22,14 @@ describe("runtime-mode", () => {
 
   it("treats the service marker as authoritative for gateway runtime", () => {
     vi.stubEnv("OPENCLAW_SERVICE_KIND", "gateway");
-    process.argv = ["node", "openclaw", "plugins", "doctor"];
+    process.argv = ["node", "openclaw"];
     expect(isGatewayServerProcess()).toBe(true);
+  });
+
+  it("does not let the service marker classify explicit non-gateway commands as gateway runtime", () => {
+    vi.stubEnv("OPENCLAW_SERVICE_KIND", "gateway");
+    process.argv = ["node", "openclaw", "plugins", "doctor"];
+    expect(isGatewayServerProcess()).toBe(false);
   });
 
   it("only enables CLI telemetry when explicitly requested", () => {

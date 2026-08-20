@@ -63,4 +63,28 @@ describe("createPluginContext — pluginConfig validation", () => {
     createPluginContext(api);
     expect(warnSpy).not.toHaveBeenCalled();
   });
+
+  it("supports OpenClaw metadata registration without initializing runtime services", async () => {
+    const api = makeApi({});
+    api.runtime = {};
+    api.registrationMode = "cli-metadata";
+
+    const ctx = createPluginContext(api);
+
+    expect(ctx.runtime).toBe(api.runtime);
+    await expect(ctx.runCommand(["echo", "metadata"], 1000)).rejects.toThrow(
+      /unavailable during metadata registration/i,
+    );
+  });
+
+  it("recognizes an unmarked partial runtime as metadata-only", async () => {
+    const api = makeApi({});
+    api.runtime = {};
+
+    const ctx = createPluginContext(api);
+
+    await expect(ctx.runCommand(["echo", "metadata"], 1000)).rejects.toThrow(
+      /unavailable during metadata registration/i,
+    );
+  });
 });

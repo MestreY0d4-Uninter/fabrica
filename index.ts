@@ -8,7 +8,7 @@
  */
 import "./lib/observability/bootstrap.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { createPluginContext } from "./lib/context.js";
+import { createPluginContext, isCliMetadataRuntime } from "./lib/context.js";
 
 // Worker lifecycle
 import { createTaskStartTool } from "./lib/tools/tasks/task-start.js";
@@ -187,6 +187,16 @@ const plugin = {
   register(api: OpenClawPluginApi) {
     const ctx = createPluginContext(api);
 
+    // OpenClaw's standalone CLI constructs a metadata-only API with runtime={}
+    // to discover CLI commands. Do not initialize runtime-dependent factories,
+    // services, or hooks in that pass; the full registration follows later.
+    if (isCliMetadataRuntime(api)) {
+      api.registerCli(({ program, config, workspaceDir }: { program: any; config?: Record<string, unknown>; workspaceDir?: string }) => registerCli(program, { ...ctx, config: config ?? ctx.config, cliWorkspaceDir: workspaceDir }), {
+        commands: ["fabrica"],
+      });
+      return;
+    }
+
     // Worker lifecycle — same tool names as Fabrica for zero-friction cutover
     api.registerTool(createTaskStartTool(ctx), { names: ["task_start"] });
     api.registerTool(createWorkFinishTool(ctx), { names: ["work_finish"] });
@@ -226,7 +236,7 @@ const plugin = {
     api.registerTool(createGenesisTool(ctx), { names: ["genesis"] });
 
     // CLI (fabrica), services & hooks
-    api.registerCli(({ program }: { program: any }) => registerCli(program, ctx), {
+    api.registerCli(({ program, config, workspaceDir }: { program: any; config?: Record<string, unknown>; workspaceDir?: string }) => registerCli(program, { ...ctx, config: config ?? ctx.config, cliWorkspaceDir: workspaceDir }), {
       commands: ["fabrica"],
     });
     registerHeartbeatService(api, ctx);

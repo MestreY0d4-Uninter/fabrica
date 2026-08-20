@@ -40,6 +40,7 @@ import { buildTaskMessage, buildConflictFixMessage, buildAnnouncement, formatSes
 import { buildEffortPrompt, ensureSessionReady, sendToAgent, shouldClearSession } from "./session.js";
 import { fetchGatewaySessions, isSessionAlive } from "../services/gateway-sessions.js";
 import { acknowledgeComments, EYES_EMOJI } from "./acknowledge.js";
+import { beginDispatchCoordinator, registerDispatchSession, acceptDispatchRuntime } from "../services/coordinator/dispatch.js";
 
 export type DispatchOpts = {
   workspaceDir: string;
@@ -367,6 +368,11 @@ export async function dispatchTask(
     { slug: project.slug, issueId },
   );
 
+  const coordinator = opts.runtime
+    ? await beginDispatchCoordinator(workspaceDir, `${project.slug}-${issueId}-${dispatchCycleId}`, issueId, `${project.slug}:${role}:${level}:${slotIndex}`)
+    : null;
+  if (coordinator) registerDispatchSession(coordinator, sessionKey);
+
   // ── Step 4a: Record worker state FIRST (invisible to health check) ──
   // Writing the slot before the label transition prevents the C2 race where
   // scanOrphanedLabels() sees an active label with no tracking slot.
@@ -504,6 +510,22 @@ export async function dispatchTask(
       await deactivateWorker(workspaceDir, project.slug, role, { level, slotIndex, issueId: String(issueId) });
     } catch { /* best effort rollback */ }
     throw new Error(`Dispatch send failed for issue #${issueId}: ${(err as Error).message ?? String(err)}`);
+  }
+
+  if (coordinator) {
+    const accepted = await acceptDispatchRuntime(coordinator, sessionKey, timeouts.sessionConfirmAttempts, timeouts.sessionConfirmDelayMs);
+    if (!accepted) {
+      coordinator.ledger.recoverExpiredLeases(new Date().toISOString());
+      coordinator.ledger.close();
+      try {
+        await resilientLabelTransition(provider, issueId, toLabel, fromLabel,
+          (msg) => auditLog(workspaceDir, "dispatch_warning", { step: "coordinator_rollback_label", issue: issueId, msg }).catch(() => {}),
+        );
+        await deactivateWorker(workspaceDir, project.slug, role, { level, slotIndex, issueId: String(issueId) });
+      } catch { /* best effort rollback */ }
+      throw new Error(`Coordinator runtime acceptance failed for issue #${issueId}`);
+    }
+    coordinator.ledger.close();
   }
 
   // Record lifecycle event only after the agent runtime accepted the dispatch setup.

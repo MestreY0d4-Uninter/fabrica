@@ -325,6 +325,8 @@ describe("dispatchTask — happy path", () => {
   });
 
   it("uses a fresh session key when redispatching a developer from feedback", async () => {
+    mockFetchGatewaySessions.mockResolvedValue(new Map());
+    mockIsSessionAlive.mockReturnValue(true);
     const provider = makeProvider();
     const runCommand = makeRunCommand();
     const config = makeDefaultConfig();

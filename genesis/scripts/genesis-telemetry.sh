@@ -43,8 +43,8 @@ genesis_metric_end() {
   local end_ms duration_ms
 
   end_ms="$(_genesis_epoch_ms)"
-  if [[ -n "${_GENESIS_METRIC_START_MS:-}" ]]; then
-    duration_ms=$(( end_ms - _GENESIS_METRIC_START_MS ))
+  if [[ "$(_genesis_epoch_ms)" =~ ^[0-9]+$ && "${_GENESIS_METRIC_START_MS:-}" =~ ^[0-9]+$ ]]; then
+    duration_ms=$(( 10#$( _genesis_epoch_ms ) - 10#${_GENESIS_METRIC_START_MS} ))
   else
     duration_ms=0
   fi

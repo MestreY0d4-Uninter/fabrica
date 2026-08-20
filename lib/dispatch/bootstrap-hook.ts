@@ -17,6 +17,7 @@ import { getSessionKeyRolePattern } from "../roles/index.js";
 import { recordIssueLifecycleBySessionKey } from "../projects/index.js";
 import { DATA_DIR } from "../setup/constants.js";
 import { DEFAULT_ROLE_INSTRUCTIONS } from "../setup/templates.js";
+import { openWorkspaceCoordinatorLedger } from "../services/coordinator/index.js";
 
 /**
  * Parse a Fabrica/legacy subagent session key to extract project name and role.
@@ -149,16 +150,17 @@ export function registerBootstrapHook(api: OpenClawPluginApi, ctx: PluginContext
       };
 
       const bootstrapFiles = context.bootstrapFiles;
-      if (!Array.isArray(bootstrapFiles)) return;
-
-      const agentsEntry = bootstrapFiles.find((f) => f.name === "AGENTS.md");
-      if (!agentsEntry) return;
+      const agentsEntry = Array.isArray(bootstrapFiles)
+        ? bootstrapFiles.find((f) => f.name === "AGENTS.md")
+        : undefined;
 
       // Load role instructions from workspace (project-specific → default fallback)
       const workspaceDir = context.workspaceDir;
       if (!workspaceDir) {
-        agentsEntry.content = "";
-        agentsEntry.missing = true;
+        if (agentsEntry) {
+          agentsEntry.content = "";
+          agentsEntry.missing = true;
+        }
         ctx.logger.info(
           `agent:bootstrap: stripped AGENTS.md for ${parsed.role} worker in "${parsed.projectName}" (no workspaceDir)`,
         );
@@ -171,6 +173,15 @@ export function registerBootstrapHook(api: OpenClawPluginApi, ctx: PluginContext
         stage: "agent_accepted",
         details: { role: parsed.role, projectName: parsed.projectName },
       }).catch(() => {});
+
+      const coordinatorLedger = await openWorkspaceCoordinatorLedger(workspaceDir).catch(() => null);
+      if (coordinatorLedger) {
+        const coordinatorRun = coordinatorLedger.findRunBySession(sessionKey);
+        if (coordinatorRun) coordinatorLedger.recordBootstrapReady(coordinatorRun.runId, coordinatorRun.generation, sessionKey);
+        coordinatorLedger.close();
+      }
+
+      if (!agentsEntry) return;
 
       const { content, source } = await loadRoleInstructions(
         workspaceDir,

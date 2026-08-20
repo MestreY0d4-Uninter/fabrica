@@ -8,6 +8,9 @@ const { mockReadProjects, mockCreateProvider } = vi.hoisted(() => ({
 vi.mock("../../lib/projects/index.js", () => ({
   readProjects: mockReadProjects,
   getIssueRuntime: (project: any, issueId: number) => project.issueRuntime?.[String(issueId)],
+  getCanonicalPrSelector: (project: any, issueId: number) => project.issueRuntime?.[String(issueId)]?.currentPrNumber
+    ? { prNumber: project.issueRuntime[String(issueId)].currentPrNumber }
+    : undefined,
 }));
 
 vi.mock("../../lib/providers/index.js", () => ({
@@ -80,5 +83,31 @@ describe("runIssueDoctor", () => {
     expect(result.lifecycle.progressState).toBe("no_dispatch");
     expect(result.convergence.headShaChangedSinceLastConvergence).toBe(null);
     expect(result.recommendation.likelyNextAction).toBe("repair_qa_evidence");
+  });
+
+  it("queries the canonical bound PR instead of projecting a stale issue PR", async () => {
+    const { runIssueDoctor } = await import("../../lib/setup/doctor-run.js");
+    const getPrStatus = vi.fn().mockResolvedValue({
+      url: "https://example.com/pr/2",
+      state: "open",
+      number: 2,
+      currentIssueMatch: true,
+    });
+    mockCreateProvider.mockResolvedValueOnce({
+      provider: {
+        getPrStatus,
+        getIssue: vi.fn().mockResolvedValue(null),
+      },
+    });
+
+    await runIssueDoctor({
+      workspacePath: "/tmp/ws",
+      projectSlug: "demo",
+      issueId: 7,
+      runCommand: vi.fn(),
+      pluginConfig: {},
+    });
+
+    expect(getPrStatus).toHaveBeenCalledWith(7, { prNumber: 2 });
   });
 });

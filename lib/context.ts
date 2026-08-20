@@ -17,36 +17,45 @@ import type { FabricaPluginConfig } from "./config/types.js";
  */
 export type RunCommand = OpenClawPluginApi["runtime"]["system"]["runCommandWithTimeout"];
 
-/**
- * PluginContext — shared services for all Fabrica modules.
- *
- * No framework, no decorators — just a plain object created once and
- * passed through factory functions and service registrations.
- */
+/** PluginContext — shared services for all Fabrica modules. */
 export type PluginContext = {
-  /** Run an external command via the plugin SDK (replaces global singleton). */
   runCommand: RunCommand;
-  /** Plugin runtime for direct API access (channel messaging, gateway calls). */
   runtime: PluginRuntime;
-  /** Plugin-level config from openclaw.json (notifications, heartbeat, etc.). */
   pluginConfig: FabricaPluginConfig | undefined;
-  /** Full OpenClaw config (agents list, defaults, etc.) — read-only. */
   config: OpenClawPluginApi["config"];
-  /** Structured logger from the plugin SDK. */
+  /** Workspace supplied by OpenClaw's standalone CLI registrar context. */
+  cliWorkspaceDir?: string;
   sdkLogger: OpenClawPluginApi["logger"];
-  /** Fabrica runtime logger (Pino + correlation context). */
   logger: FabricaLogger;
-  /** Correlation + tracing facade for critical flows. */
   observability: {
     logger(bindings?: Record<string, unknown>): FabricaLogger;
     withContext<T>(bindings: Partial<CorrelationContext>, fn: () => T): T;
-    withSpan<T>(
-      name: string,
-      bindings: Partial<CorrelationContext> & Record<string, unknown>,
-      fn: () => Promise<T>,
-    ): Promise<T>;
+    withSpan<T>(name: string, bindings: Partial<CorrelationContext> & Record<string, unknown>, fn: () => Promise<T>): Promise<T>;
   };
 };
+
+export function isCliMetadataRuntime(api: OpenClawPluginApi): boolean {
+  const registrationMode = (api as OpenClawPluginApi & { registrationMode?: string }).registrationMode;
+  // OpenClaw versions that build CLI metadata do not consistently expose the
+  // registrationMode marker.  They do, however, provide a deliberately
+  // incomplete runtime without the config API.  Treat that shape as metadata
+  // registration too; otherwise registerCli callbacks execute with a partial
+  // runtime and fail while resolving the workspace.
+  return registrationMode === "cli-metadata" || typeof api.runtime?.config?.loadConfig !== "function";
+}
+
+function getRuntimeRunCommand(api: OpenClawPluginApi): RunCommand {
+  if (isCliMetadataRuntime(api)) {
+    return (async () => {
+      throw new Error("Fabrica runtime-dependent CLI operation is unavailable during metadata registration");
+    }) as RunCommand;
+  }
+
+  if (!api.runtime?.system) {
+    throw new Error("Fabrica requires a complete OpenClaw runtime outside CLI metadata registration");
+  }
+  return api.runtime.system.runCommandWithTimeout;
+}
 
 /**
  * Build a PluginContext from the raw plugin API. Called once in register().
@@ -64,9 +73,12 @@ export function createPluginContext(api: OpenClawPluginApi): PluginContext {
     }
   }
 
+  const runtime = api.runtime;
+  const runCommand = getRuntimeRunCommand(api);
+
   return {
-    runCommand: api.runtime.system.runCommandWithTimeout,
-    runtime: api.runtime,
+    runCommand,
+    runtime,
     pluginConfig: api.pluginConfig as FabricaPluginConfig | undefined,
     config: api.config,
     sdkLogger: api.logger,
